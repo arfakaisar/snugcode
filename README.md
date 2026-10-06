@@ -42,6 +42,31 @@ Cara cepat tanpa install global (tanpa autostart): `npx github:arfakaisar/pocket
 
 
 
+## Terminal: `pocketcode` (seperti `claude`)
+
+```bash
+cd proyek-kamu
+pocketcode                     # atau singkatnya: pocket
+pocketcode "jelaskan repo ini" # langsung kirim prompt
+pocketcode --pick              # pilih sesi lain (termasuk sesi dari HP)
+```
+
+- Folder repo git tempat kamu menjalankan `pocketcode` menjadi sesinya. Agen bekerja langsung di folder itu, tanpa clone, dan sesi terakhir di folder itu otomatis dilanjutkan.
+- **Sesi di terminal dan di HP adalah sesi yang sama**: mulai di PC, lanjutkan di HP, atau sebaliknya. Sesi dari terminal ditandai "terminal" di aplikasi HP.
+- Daemon dinyalakan otomatis kalau belum berjalan.
+
+| Tombol | Fungsi |
+|---|---|
+| `enter` | kirim; saat agen bekerja, pesan masuk antrean |
+| `\` + `enter` / `alt+enter` | baris baru |
+| `!` | mode shell (perintah langsung di folder sesi) |
+| `/` | perintah: `/model` `/sessions` `/new` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/help` … |
+| `esc` | hentikan agen |
+| `ctrl+o` | output lengkap tool terakhir |
+| `ctrl+c` ×2 | keluar (sesi tetap berjalan di PC) |
+
+Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort. Model diuji dulu sebelum dipakai.
+
 ## B. Di HP
 
 1. Buka **https://pocketcode-relay.arfak.workers.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
@@ -64,6 +89,7 @@ Cara pakai:
 
 | Perintah | Fungsi |
 |---|---|
+| `pocketcode` | UI terminal (alias: `pocket`) |
 | `pocketcode setup` | Setup / ubah konfigurasi |
 | `pocketcode start` | Jalankan daemon di terminal ini |
 | `pocketcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |

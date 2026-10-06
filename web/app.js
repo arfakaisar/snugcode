@@ -718,6 +718,7 @@ function sessionCard(s, i) {
       h('div', { class: 'sub' }, s.repo),
       h('div', { class: 'tags' },
         s.status === 'running' ? h('span', { class: 'tag run' }, 'berjalan') : null,
+        s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null,
         h('span', { class: 'tag' }, ic('branch'), s.branch),
         s.model ? h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)) : null,
         s.auto ? h('span', { class: 'tag warn' }, ic('bolt'), 'auto') : null,

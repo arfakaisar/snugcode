@@ -1,8 +1,10 @@
 // Daemon: tersambung ke relay (koneksi keluar saja), menangani pairing PIN,
-// kanal terenkripsi per HP, dan RPC dari aplikasi.
-import { randomBytes } from 'node:crypto';
+// kanal terenkripsi per HP, kanal lokal untuk terminal (TUI), dan RPC.
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import fs from 'node:fs';
+import net from 'node:net';
 import * as C from '../shared/crypto.js';
-import { loadSecrets, saveSecrets, saveConfig } from './config.js';
+import { loadSecrets, saveSecrets, saveConfig, IPC_PATH } from './config.js';
 import { SessionManager } from './sessions.js';
 import { listModels, probeModel } from './router.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh } from './github.js';
@@ -19,6 +21,7 @@ export class Daemon {
     this.backoff = 1000;
     this.stopped = false;
     this.lastPairAttempt = 0;
+    this.locals = new Set();
   }
 
   saveSecrets() {
@@ -27,12 +30,32 @@ export class Daemon {
 
   start() {
     this.connect();
+    this.listenLocal();
   }
 
   stop() {
     this.stopped = true;
     clearInterval(this.ping);
     this.ws?.close();
+    this.ipc?.close();
+  }
+
+  // Kanal lokal untuk `pocketcode` di terminal. Hanya bisa diakses user yang sama
+  // (izin file/pipe) dan tetap wajib token lokal dari secrets.json.
+  listenLocal() {
+    if (!this.secrets.localToken) {
+      this.secrets.localToken = randomBytes(24).toString('hex');
+      this.saveSecrets();
+    }
+    if (process.platform !== 'win32') fs.rmSync(IPC_PATH, { force: true });
+    this.ipc = net.createServer((sock) => {
+      const c = new LocalConn(this, sock);
+      this.locals.add(c);
+    });
+    this.ipc.on('error', (e) => this.log('! kanal lokal gagal: ' + e.message));
+    this.ipc.listen(IPC_PATH, () => {
+      if (process.platform !== 'win32') fs.chmodSync(IPC_PATH, 0o600);
+    });
   }
 
   connect() {
@@ -86,103 +109,34 @@ export class Daemon {
   }
 
   notify(session, msg) {
-    for (const c of this.conns.values()) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title: session.meta.title || session.meta.repo });
+    for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title: session.meta.title || session.meta.repo });
   }
 }
 
-class PhoneConn {
-  constructor(daemon, cid) {
+// RPC bersama untuk HP (lewat relay) dan terminal (lokal).
+class RpcConn {
+  constructor(daemon) {
     this.d = daemon;
-    this.cid = cid;
     this.ready = false;
-    this.channel = null;
     this.sub = null; // { session, listener }
     this.queue = [];
   }
 
+  push() {
+    throw new Error('not implemented');
+  }
+
   closed() {
     this.unsubscribe();
-    this.d.conns.delete(this.cid);
   }
 
-  send(obj) {
-    this.d.sendRaw(this.cid, obj);
-  }
-
-  push(msg) {
-    if (this.channel) this.send(this.channel.seal(msg));
-  }
-
-  onMessage(raw) {
-    let m;
+  async handleRpc({ id, m, p = {} }) {
     try {
-      m = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    try {
-      if (m.t === 'e' && this.channel) return this.onRpc(this.channel.open(m));
-      if (m.t === 'pair1') return this.pair1(m);
-      if (m.t === 'pair3') return this.pair3(m);
-      if (m.t === 'auth1') return this.auth1(m);
-      if (m.t === 'auth3') return this.auth3(m);
+      const r = await this.call(m, p);
+      this.push({ id, r: r ?? null });
     } catch (e) {
-      this.d.log('! pesan ditolak: ' + e.message);
-      this.d.kick(this.cid, 'protocol');
+      this.push({ id, err: String(e?.message || e) });
     }
-  }
-
-  // ---------- Pairing PIN ----------
-  pair1(m) {
-    const s = this.d.secrets;
-    if (!s.prs) return this.send({ t: 'pair_err', reason: 'nopin' });
-    if (s.pinFails >= MAX_PIN_FAILS) return this.send({ t: 'pair_err', reason: 'locked' });
-    if (Date.now() - this.d.lastPairAttempt < 3000) return this.send({ t: 'pair_err', reason: 'slow' });
-    this.d.lastPairAttempt = Date.now();
-    s.pinFails++;
-    this.d.saveSecrets();
-    const r = C.pairRespondMachine(C.hexToBytes(s.prs), m);
-    this.pairState = { ...r.state, name: String(m.name || 'HP').slice(0, 60) };
-    this.send({ t: 'pair2', ...r.msg, left: MAX_PIN_FAILS - s.pinFails });
-  }
-
-  pair3(m) {
-    if (!this.pairState) return;
-    const secret = C.pairVerifyMachine(this.pairState, m);
-    const name = this.pairState.name;
-    this.pairState = null;
-    if (!secret) return this.send({ t: 'pair_err', reason: 'pin' });
-    const s = this.d.secrets;
-    s.pinFails = 0;
-    const deviceId = randomBytes(8).toString('hex');
-    s.devices[deviceId] = { name, secret: C.bytesToHex(secret), pairedAt: Date.now(), lastSeen: Date.now() };
-    this.d.saveSecrets();
-    this.d.log(`✓ Perangkat baru dipasangkan: ${name} (${deviceId})`);
-    this.send({ t: 'pair_ok', deviceId });
-  }
-
-  // ---------- Autentikasi perangkat terpasang ----------
-  auth1(m) {
-    const dev = this.d.secrets.devices[m.deviceId];
-    if (!dev) return this.send({ t: 'auth_err', reason: 'unknown_device' });
-    const r = C.authRespondMachine(C.hexToBytes(dev.secret), m);
-    this.authState = { ...r.state, deviceId: m.deviceId };
-    this.send({ t: 'auth2', ...r.msg });
-  }
-
-  auth3(m) {
-    if (!this.authState) return;
-    const ch = C.authVerifyMachine(this.authState, m);
-    const deviceId = this.authState.deviceId;
-    this.authState = null;
-    if (!ch) return this.send({ t: 'auth_err', reason: 'bad_mac' });
-    this.channel = ch;
-    this.ready = true;
-    this.deviceId = deviceId;
-    const dev = this.d.secrets.devices[deviceId];
-    dev.lastSeen = Date.now();
-    this.d.saveSecrets();
-    this.push({ ev: 'ready', info: this.info() });
   }
 
   info() {
@@ -193,19 +147,6 @@ class PhoneConn {
   unsubscribe() {
     if (this.sub) this.sub.session.off('event', this.sub.listener);
     this.sub = null;
-  }
-
-  // ---------- RPC ----------
-  async onRpc(msg) {
-    // Revoke berlaku langsung.
-    if (!this.d.secrets.devices[this.deviceId]) return this.d.kick(this.cid, 'revoked');
-    const { id, m, p = {} } = msg;
-    try {
-      const r = await this.call(m, p);
-      this.push({ id, r: r ?? null });
-    } catch (e) {
-      this.push({ id, err: String(e?.message || e) });
-    }
   }
 
   async call(m, p) {
@@ -306,7 +247,9 @@ class PhoneConn {
       }
       case 'pr': {
         const s = S.get(p.id);
-        const pr = await createPR(sec.githubToken, s.meta.repo, { head: s.meta.branch, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
+        // Sesi lokal bisa pindah branch dari terminal: pakai branch yang sedang aktif.
+        const head = (await gitStatus(s.meta.cwd)).branch;
+        const pr = await createPR(sec.githubToken, s.meta.repo, { head, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
         s.emitEvent({ k: 'note', d: `PR #${pr.number} dibuat: ${pr.url}` });
         return pr;
       }
@@ -324,5 +267,154 @@ class PhoneConn {
         const es = this.queue.splice(0);
         this.push({ ev: 'events', sid, es });
       }, 60);
+  }
+}
+
+// Terminal di PC yang sama: JSON per baris lewat named pipe / unix socket.
+class LocalConn extends RpcConn {
+  constructor(daemon, sock) {
+    super(daemon);
+    this.sock = sock;
+    let buf = '';
+    sock.setEncoding('utf8');
+    sock.on('data', (chunk) => {
+      buf += chunk;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (line) this.onLine(line);
+      }
+    });
+    sock.on('error', () => {});
+    sock.on('close', () => this.closed());
+  }
+
+  closed() {
+    super.closed();
+    this.d.locals.delete(this);
+  }
+
+  push(msg) {
+    if (!this.sock.destroyed) this.sock.write(JSON.stringify(msg) + '\n');
+  }
+
+  onLine(line) {
+    let m;
+    try {
+      m = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (!this.ready) {
+      const want = Buffer.from(String(this.d.secrets.localToken));
+      const got = Buffer.from(String(m.token || ''));
+      if (m.t !== 'hello' || got.length !== want.length || !timingSafeEqual(got, want)) {
+        this.push({ ev: 'denied' });
+        return this.sock.end();
+      }
+      this.ready = true;
+      return this.push({ ev: 'ready', info: this.info(), pid: process.pid });
+    }
+    this.handleRpc(m);
+  }
+}
+
+class PhoneConn extends RpcConn {
+  constructor(daemon, cid) {
+    super(daemon);
+    this.cid = cid;
+    this.channel = null;
+  }
+
+  closed() {
+    super.closed();
+    this.d.conns.delete(this.cid);
+  }
+
+  send(obj) {
+    this.d.sendRaw(this.cid, obj);
+  }
+
+  push(msg) {
+    if (this.channel) this.send(this.channel.seal(msg));
+  }
+
+  onMessage(raw) {
+    let m;
+    try {
+      m = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    try {
+      if (m.t === 'e' && this.channel) return this.onRpc(this.channel.open(m));
+      if (m.t === 'pair1') return this.pair1(m);
+      if (m.t === 'pair3') return this.pair3(m);
+      if (m.t === 'auth1') return this.auth1(m);
+      if (m.t === 'auth3') return this.auth3(m);
+    } catch (e) {
+      this.d.log('! pesan ditolak: ' + e.message);
+      this.d.kick(this.cid, 'protocol');
+    }
+  }
+
+  // ---------- Pairing PIN ----------
+  pair1(m) {
+    const s = this.d.secrets;
+    if (!s.prs) return this.send({ t: 'pair_err', reason: 'nopin' });
+    if (s.pinFails >= MAX_PIN_FAILS) return this.send({ t: 'pair_err', reason: 'locked' });
+    if (Date.now() - this.d.lastPairAttempt < 3000) return this.send({ t: 'pair_err', reason: 'slow' });
+    this.d.lastPairAttempt = Date.now();
+    s.pinFails++;
+    this.d.saveSecrets();
+    const r = C.pairRespondMachine(C.hexToBytes(s.prs), m);
+    this.pairState = { ...r.state, name: String(m.name || 'HP').slice(0, 60) };
+    this.send({ t: 'pair2', ...r.msg, left: MAX_PIN_FAILS - s.pinFails });
+  }
+
+  pair3(m) {
+    if (!this.pairState) return;
+    const secret = C.pairVerifyMachine(this.pairState, m);
+    const name = this.pairState.name;
+    this.pairState = null;
+    if (!secret) return this.send({ t: 'pair_err', reason: 'pin' });
+    const s = this.d.secrets;
+    s.pinFails = 0;
+    const deviceId = randomBytes(8).toString('hex');
+    s.devices[deviceId] = { name, secret: C.bytesToHex(secret), pairedAt: Date.now(), lastSeen: Date.now() };
+    this.d.saveSecrets();
+    this.d.log(`✓ Perangkat baru dipasangkan: ${name} (${deviceId})`);
+    this.send({ t: 'pair_ok', deviceId });
+  }
+
+  // ---------- Autentikasi perangkat terpasang ----------
+  auth1(m) {
+    const dev = this.d.secrets.devices[m.deviceId];
+    if (!dev) return this.send({ t: 'auth_err', reason: 'unknown_device' });
+    const r = C.authRespondMachine(C.hexToBytes(dev.secret), m);
+    this.authState = { ...r.state, deviceId: m.deviceId };
+    this.send({ t: 'auth2', ...r.msg });
+  }
+
+  auth3(m) {
+    if (!this.authState) return;
+    const ch = C.authVerifyMachine(this.authState, m);
+    const deviceId = this.authState.deviceId;
+    this.authState = null;
+    if (!ch) return this.send({ t: 'auth_err', reason: 'bad_mac' });
+    this.channel = ch;
+    this.ready = true;
+    this.deviceId = deviceId;
+    const dev = this.d.secrets.devices[deviceId];
+    dev.lastSeen = Date.now();
+    this.d.saveSecrets();
+    this.push({ ev: 'ready', info: this.info() });
+  }
+
+  // Revoke berlaku langsung.
+  onRpc(msg) {
+    if (!this.d.secrets.devices[this.deviceId]) return this.d.kick(this.cid, 'revoked');
+    return this.handleRpc(msg);
   }
 }

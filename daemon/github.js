@@ -146,6 +146,31 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
   return { cwd: wt, base, branch };
 }
 
+// Folder repo lokal yang dibuka langsung dari terminal (seperti `claude`):
+// tanpa clone/worktree, agen bekerja di folder itu sendiri.
+export async function inspectLocalRepo(dir) {
+  const top = (await git(dir, ['rev-parse', '--show-toplevel']).catch(() => '')).trim();
+  if (!top) throw new Error('Folder ini bukan repo git: ' + dir);
+  const url = (await git(top, ['remote', 'get-url', 'origin']).catch(() => '')).trim();
+  const m = url.match(/github\.com[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/);
+  const repo = m ? `${m[1]}/${m[2]}` : 'lokal/' + path.basename(top);
+  const branch = (await git(top, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => 'HEAD')).trim();
+  const base = (await git(top, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim().replace(/^origin\//, '') || branch;
+  return { cwd: path.resolve(top), repo, branch, base, github: !!m };
+}
+
+// Branch aktif tanpa menjalankan git (dibaca dari HEAD; worktree punya file .git).
+export function currentBranch(cwd) {
+  try {
+    let gitDir = path.join(cwd, '.git');
+    if (fs.statSync(gitDir).isFile()) gitDir = path.resolve(cwd, fs.readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim());
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    return head.startsWith('ref: refs/heads/') ? head.slice(16) : head.slice(0, 7);
+  } catch {
+    return null;
+  }
+}
+
 export async function removeWorktree(cwd) {
   const baseDir = path.join(path.dirname(cwd), '_base');
   await git(baseDir, ['worktree', 'remove', '--force', cwd]).catch(() => fs.rmSync(cwd, { recursive: true, force: true }));
