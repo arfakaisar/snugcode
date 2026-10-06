@@ -5,6 +5,7 @@ import path from 'node:path';
 import { WORKSPACES } from './config.js';
 
 const API = 'https://api.github.com';
+export const TOKEN_INVALID = 'Token GitHub di PC ini tidak berlaku lagi (dicabut/kedaluwarsa). Jalankan `pocketcode login` di PC.';
 
 export async function gh(token, method, url, body) {
   const res = await fetch(url.startsWith('http') ? url : API + url, {
@@ -18,6 +19,7 @@ export async function gh(token, method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (res.status === 401) throw new Error(TOKEN_INVALID);
   if (!res.ok) throw new Error(`GitHub ${res.status}: ${data?.message || res.statusText}`);
   return data;
 }
@@ -77,7 +79,9 @@ const slim = (r) => ({ full: r.full_name, private: r.private, branch: r.default_
 // Token disuntikkan lewat env hanya untuk perintah git milik daemon,
 // tidak pernah ditulis ke .git/config dan tidak terlihat oleh agen.
 export function gitEnv(token) {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  // Jangan pernah memunculkan dialog login (Git Credential Manager) di desktop:
+  // daemon sering dipakai dari jauh dan dialog itu akan menggantung proses.
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
   if (token) {
     env.GIT_CONFIG_COUNT = '1';
     env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
@@ -89,7 +93,9 @@ export function gitEnv(token) {
 export function git(cwd, args, token, opts = {}) {
   return new Promise((resolve, reject) => {
     execFile('git', ['-c', 'core.quotepath=off', ...args], { cwd, env: gitEnv(token), maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 10 * 60 * 1000 }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || err.message).trim()));
+      const msg = (stderr || err?.message || '').trim();
+      if (err && token && /Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]/i.test(msg)) reject(new Error(TOKEN_INVALID));
+      else if (err) reject(new Error(msg));
       else resolve(stdout);
     });
   });

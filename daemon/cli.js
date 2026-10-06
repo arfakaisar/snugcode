@@ -20,7 +20,7 @@ import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'start', 'stop', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
+const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: pocketcode "jelaskan repo ini".
@@ -378,6 +378,38 @@ function status() {
   });
 }
 
+// Login ulang GitHub saja (mis. token dicabut), tanpa mengulang seluruh setup.
+async function login() {
+  if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur.');
+  console.log(c.b('Login GitHub untuk PC ini') + c.d(' (clone, push, PR)'));
+  const token = await deviceFlowLogin(GITHUB_CLIENT_ID, (code, uri) => {
+    console.log(`  Buka ${c.b(uri)}\n  lalu masukkan kode ${c.b(code)}`);
+    if (!flags['no-browser']) openBrowser(uri);
+    console.log(c.d('  Menunggu…'));
+  });
+  const me = await gh(token, 'GET', '/user');
+  // Daemon menyimpan secrets di memori: hentikan dulu agar token baru tidak tertimpa.
+  const pid = runningPid();
+  if (pid) {
+    try {
+      process.kill(pid);
+    } catch {}
+    for (let i = 0; i < 40 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
+  }
+  const cfg = loadConfig();
+  const sec = loadSecrets();
+  sec.githubToken = token;
+  cfg.githubLogin = me.login;
+  cfg.githubId = me.id;
+  saveConfig(cfg);
+  saveSecrets(sec);
+  console.log(c.g(`✓ GitHub: @${me.login}`));
+  if (pid) {
+    spawnDetached();
+    console.log(c.g('✓ Daemon dinyalakan ulang dengan token baru.'));
+  }
+}
+
 function isSetUp() {
   const cfg = loadConfig();
   const sec = loadSecrets();
@@ -402,6 +434,7 @@ function help() {
   ${c.g('pocketcode --pick')}          pilih sesi (termasuk sesi dari HP)
 
   pocketcode setup            setup / ubah konfigurasi
+  pocketcode login            login ulang GitHub (token dicabut/kedaluwarsa)
   pocketcode autostart on     jalankan daemon di latar belakang + saat login
   pocketcode start | stop     jalankan / hentikan daemon
   pocketcode pin              ganti PIN / buka kunci
@@ -409,7 +442,7 @@ function help() {
   pocketcode status           ringkasan konfigurasi`);
 }
 
-const commands = { tui, help, setup, start, stop, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+const commands = { tui, help, setup, login, start, stop, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);
