@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { SESSIONS_DIR, CLAUDE_DIR, anthropicBaseUrl } from './config.js';
-import { prepareWorktree, removeWorktree } from './github.js';
+import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from './github.js';
 
 const INDEX = path.join(SESSIONS_DIR, 'index.json');
 const OUT_LIMIT = 4000;
@@ -16,9 +16,9 @@ const OUT_LIMIT = 4000;
 const SAFE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'TodoWrite', 'Task', 'Agent', 'WebSearch', 'WebFetch', 'NotebookRead', 'ToolSearch']);
 
 const MOBILE_NOTE = `
-You are being driven remotely from a phone through the "pocketcode" app.
-- The user reads your output on a small screen: keep messages concise, prefer short paragraphs and lists.
-- The repository is a git worktree on the user's computer. Do NOT run \`git push\` yourself; the user pushes from the app. Committing is fine when asked.
+You are being driven through the "pocketcode" app, from a phone or from the pocketcode terminal UI (the same session can be continued on either).
+- The user may read your output on a small screen: keep messages concise, prefer short paragraphs and lists.
+- The repository is on the user's computer. Do NOT run \`git push\` yourself; the user pushes from the app (/push in the terminal). Committing is fine when asked.
 - Work inside the current working directory.`;
 
 const isGitPush = (tool, input) => tool === 'Bash' && /\bgit\s+push\b/.test(input?.command || '');
@@ -115,7 +115,9 @@ export class Session extends EventEmitter {
 
   summary() {
     const m = this.meta;
-    return { id: m.id, repo: m.repo, branch: m.branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto };
+    // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
+    const branch = (m.local && currentBranch(m.cwd)) || m.branch;
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, local: !!m.local, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -353,7 +355,19 @@ export class SessionManager {
     return s;
   }
 
-  async create({ repo, base, branch, model }) {
+  async create({ repo, base, branch, model, local }) {
+    if (local) {
+      // Folder lokal dari terminal: pakai ulang sesi yang sudah ada untuk folder yang sama.
+      const info = await inspectLocalRepo(local);
+      const existing = [...this.sessions.values()].find((s) => s.meta.local && path.resolve(s.meta.cwd).toLowerCase() === info.cwd.toLowerCase());
+      if (existing) return existing;
+      const id = randomBytes(4).toString('hex');
+      const meta = { id, repo: info.repo, cwd: info.cwd, branch: info.branch, base: info.base, local: true, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
+      const s = new Session(meta, this);
+      this.sessions.set(id, s);
+      this.saveIndex();
+      return s;
+    }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('Format repo harus owner/nama');
     const id = randomBytes(4).toString('hex');
     branch = (branch || '').trim() || 'pocket/' + id;
@@ -371,6 +385,7 @@ export class SessionManager {
     this.sessions.delete(id);
     this.saveIndex();
     fs.rmSync(s.logFile, { force: true });
-    await removeWorktree(s.meta.cwd);
+    // Folder lokal milik pengguna tidak pernah dihapus; hanya riwayat sesinya.
+    if (!s.meta.local) await removeWorktree(s.meta.cwd);
   }
 }

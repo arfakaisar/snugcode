@@ -4,8 +4,16 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 export const HOME = process.env.POCKETCODE_HOME || path.join(os.homedir(), '.pocketcode');
+
+// Kanal lokal daemon <-> terminal (TUI): named pipe di Windows, unix socket di
+// macOS/Linux. Unik per folder data agar beberapa instalasi tidak bentrok.
+export const IPC_PATH =
+  process.platform === 'win32'
+    ? '\\\\.\\pipe\\pocketcode-' + createHash('sha1').update(HOME.toLowerCase()).digest('hex').slice(0, 12)
+    : path.join(HOME, 'daemon.sock');
 export const WORKSPACES = path.join(HOME, 'workspaces');
 export const SESSIONS_DIR = path.join(HOME, 'sessions');
 export const CLAUDE_DIR = path.join(HOME, 'claude');

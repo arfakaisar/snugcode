@@ -4,7 +4,8 @@
   "description": "Remote coding agent (Claude Code harness + 9router) di PC-mu, dikendalikan dari HP.",
   "type": "module",
   "bin": {
-    "pocketcode": "daemon/cli.js"
+    "pocketcode": "daemon/cli.js",
+    "pocket": "daemon/cli.js"
   },
   "files": [
     "daemon",

@@ -20,8 +20,11 @@ import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 
 const CLI = fileURLToPath(import.meta.url);
+const COMMAND_NAMES = ['setup', 'start', 'stop', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
 const args = process.argv.slice(2);
-const cmd = args[0] && !args[0].startsWith('--') ? args.shift() : 'start';
+// Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
+// perintah dianggap prompt awal: pocketcode "jelaskan repo ini".
+const cmd = args[0] && COMMAND_NAMES.includes(args[0]) ? args.shift() : 'tui';
 const flags = {};
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) {
@@ -375,11 +378,38 @@ function status() {
   });
 }
 
-const commands = { setup, start, stop, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
-if (!commands[cmd]) {
-  console.log('Perintah: setup | start | stop | autostart [on|off] | pin | devices | revoke <id|all> | status');
-  process.exit(1);
+function isSetUp() {
+  const cfg = loadConfig();
+  const sec = loadSecrets();
+  return !!(cfg.relayUrl && sec.machineToken && sec.routerKey && sec.prs);
 }
+
+async function tui() {
+  if (!isSetUp()) {
+    console.log(c.y('Belum setup. Menjalankan setup dulu…\n'));
+    await setup();
+  }
+  const { runTui } = await import('./tui.js');
+  const prompt = args.filter((a) => !a.startsWith('--')).join(' ').trim();
+  await runTui({ prompt, pick: !!flags.pick || !!flags.sessions });
+}
+
+function help() {
+  console.log(`${c.b('pocketcode')} — coding agent di PC-mu, dari terminal & HP
+
+  ${c.g('pocketcode')}                 buka UI terminal (folder repo ini jadi sesinya)
+  ${c.g('pocketcode "prompt"')}        buka UI dan langsung kirim prompt
+  ${c.g('pocketcode --pick')}          pilih sesi (termasuk sesi dari HP)
+
+  pocketcode setup            setup / ubah konfigurasi
+  pocketcode autostart on     jalankan daemon di latar belakang + saat login
+  pocketcode start | stop     jalankan / hentikan daemon
+  pocketcode pin              ganti PIN / buka kunci
+  pocketcode devices          HP yang terpasang;  pocketcode revoke <id|all>
+  pocketcode status           ringkasan konfigurasi`);
+}
+
+const commands = { tui, help, setup, start, stop, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);
