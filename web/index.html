@@ -3,25 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
-  <meta name="theme-color" content="#0b0e14">
+  <meta name="theme-color" content="#07090d">
+  <meta name="color-scheme" content="dark">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="pocketcode">
+  <meta name="format-detection" content="telephone=no">
   <title>pocketcode</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header id="bar">
-    <button id="back" class="icon" aria-label="Kembali" hidden>‹</button>
-    <div id="title"><span id="dot"></span><span id="titleText">pocketcode</span></div>
-    <button id="menu" class="icon" aria-label="Menu" hidden>⋯</button>
-  </header>
-  <main id="view"></main>
-  <div id="sheet" hidden><div id="sheetBody"></div></div>
-  <div id="toast" hidden></div>
+  <div id="app">
+    <header id="bar">
+      <button id="back" class="iconbtn" aria-label="Kembali" hidden></button>
+      <div id="title">
+        <div id="titleRow"><span id="dot"></span><span id="titleText">pocketcode</span></div>
+        <div id="subText"></div>
+      </div>
+      <div id="actions"></div>
+    </header>
+    <main id="view"></main>
+  </div>
+  <div id="sheet" hidden>
+    <div id="sheetBackdrop"></div>
+    <div id="sheetPanel" role="dialog" aria-modal="true">
+      <div id="sheetGrab"><span></span></div>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>

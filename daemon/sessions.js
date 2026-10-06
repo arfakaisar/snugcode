@@ -21,6 +21,8 @@ You are being driven remotely from a phone through the "pocketcode" app.
 - The repository is a git worktree on the user's computer. Do NOT run \`git push\` yourself; the user pushes from the app. Committing is fine when asked.
 - Work inside the current working directory.`;
 
+const isGitPush = (tool, input) => tool === 'Bash' && /\bgit\s+push\b/.test(input?.command || '');
+
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
   return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} karakter dipotong)` : s;
@@ -151,7 +153,7 @@ export class Session extends EventEmitter {
   }
 
   pendingPerms() {
-    return [...this.perms.entries()].map(([pid, p]) => ({ pid, tool: p.tool, summary: toolSummary(p.tool, p.input, this.meta.cwd), title: p.title }));
+    return [...this.perms.entries()].map(([pid, p]) => ({ pid, tool: p.tool, summary: toolSummary(p.tool, p.input, this.meta.cwd), title: p.title, push: isGitPush(p.tool, p.input) }));
   }
 
   async send(text) {
@@ -253,7 +255,7 @@ export class Session extends EventEmitter {
   }
 
   askPermission(tool, input, opts) {
-    const isPush = tool === 'Bash' && /\bgit\s+push\b/.test(input?.command || '');
+    const isPush = isGitPush(tool, input);
     if (!isPush && (SAFE_TOOLS.has(tool) || this.meta.auto || this.alwaysAllow.has(tool))) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
