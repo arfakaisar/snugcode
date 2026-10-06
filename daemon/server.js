@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import * as C from '../shared/crypto.js';
 import { loadSecrets, saveSecrets, saveConfig } from './config.js';
 import { SessionManager } from './sessions.js';
+import { listModels, probeModel } from './router.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh } from './github.js';
 
 const MAX_PIN_FAILS = 5;
@@ -214,17 +215,29 @@ class PhoneConn {
     switch (m) {
       case 'info':
         return this.info();
-      case 'models': {
-        const r = await fetch(d.config.routerUrl.replace(/\/+$/, '') + '/models', { headers: { authorization: 'Bearer ' + sec.routerKey } });
-        if (!r.ok) throw new Error('9router: ' + r.status);
-        const j = await r.json();
-        return j.data.filter((x) => x.capabilities?.tools !== false).map((x) => x.id);
-      }
+      case 'models': // versi lama: daftar ID saja
+        return (await listModels(d.config, sec.routerKey)).map((m) => m.id);
+      case 'modelsInfo':
+        return listModels(d.config, sec.routerKey, { fresh: !!p.fresh });
+      case 'probeModel':
+        if (typeof p.model !== 'string' || !p.model) throw new Error('model kosong');
+        return probeModel(d.config, sec.routerKey, p.model);
       case 'setModel':
-        d.config.model = p.model;
+        if (p.model) d.config.model = p.model;
         if (p.smallModel) d.config.smallModel = p.smallModel;
         saveConfig(d.config);
         return this.info();
+      case 'setSessionModel': {
+        const s = S.get(p.id);
+        if (s.status === 'running') throw new Error('Tunggu agen selesai (atau Stop) sebelum ganti model.');
+        if (typeof p.model !== 'string' || !p.model) throw new Error('model kosong');
+        if (s.meta.model !== p.model) {
+          s.emitEvent({ k: 'note', d: `◆ model: ${s.meta.model} → ${p.model}` });
+          s.meta.model = p.model;
+          S.saveIndex();
+        }
+        return s.summary();
+      }
       case 'repos':
         if (!sec.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `pocketcode setup` di PC.');
         return listRepos(sec.githubToken, p.q);
