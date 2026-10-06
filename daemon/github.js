@@ -107,17 +107,41 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
     fs.mkdirSync(repoDir, { recursive: true });
     await git(repoDir, ['clone', '--no-checkout', '--filter=blob:none', `https://github.com/${full}.git`, '_base'], token);
   }
+  // Clone tetap "memegang" branch default (mis. main) walau tanpa checkout,
+  // sehingga branch itu tidak bisa dibuka di worktree sesi. Lepaskan HEAD-nya
+  // (detached) tanpa menyentuh file. Aman diulang untuk clone lama.
+  if (await git(baseDir, ['symbolic-ref', '-q', 'HEAD']).then(() => true, () => false)) {
+    const head = (await git(baseDir, ['rev-parse', 'HEAD'])).trim();
+    await git(baseDir, ['update-ref', '--no-deref', 'HEAD', head]);
+  }
   await git(baseDir, ['fetch', '--prune', 'origin'], token);
   if (!base) base = (await git(baseDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], token).catch(() => 'origin/main')).trim().replace(/^origin\//, '');
 
+  // Branch yang sedang dibuka sesi lain tidak bisa dibuka dua kali.
+  const list = await git(baseDir, ['worktree', 'list', '--porcelain']);
+  const holder = list
+    .split(/\n\n+/)
+    .map((b) => ({ dir: b.match(/^worktree (.+)$/m)?.[1], ref: b.match(/^branch (.+)$/m)?.[1] }))
+    .find((w) => w.ref === 'refs/heads/' + branch);
+  if (holder) {
+    const sid = path.basename(holder.dir || '').replace(/^s-/, '');
+    throw new Error(`Branch "${branch}" sedang dibuka di sesi lain (${sid}). Buka sesi itu, atau hapus sesinya dulu.`);
+  }
+
   const wt = path.join(repoDir, 's-' + sessionId);
-  const remoteBranch = (await git(baseDir, ['ls-remote', '--heads', 'origin', branch], token)).trim();
-  if (remoteBranch) {
-    // Lanjutkan branch yang sudah ada di GitHub.
-    await git(baseDir, ['worktree', 'add', '-B', branch, wt, 'origin/' + branch], token);
-    await git(wt, ['branch', '--set-upstream-to=origin/' + branch], token);
+  const hasRemote = !!(await git(baseDir, ['ls-remote', '--heads', 'origin', branch], token)).trim();
+  const hasLocal = await git(baseDir, ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch]).then(() => true, () => false);
+  if (hasLocal) {
+    // Branch lokal (mis. dari sesi lama yang belum di-push): jangan ditimpa.
+    await git(baseDir, ['worktree', 'add', wt, branch], token);
+    if (hasRemote) {
+      await git(wt, ['branch', '--set-upstream-to=origin/' + branch]);
+      await git(wt, ['merge', '--ff-only', 'origin/' + branch]).catch(() => {}); // bercabang → biarkan, terlihat di status git
+    }
+  } else if (hasRemote) {
+    await git(baseDir, ['worktree', 'add', '--track', '-b', branch, wt, 'origin/' + branch], token);
   } else {
-    await git(baseDir, ['worktree', 'add', '-b', branch, wt, 'origin/' + base], token);
+    await git(baseDir, ['worktree', 'add', '--no-track', '-b', branch, wt, 'origin/' + base], token);
   }
   return { cwd: wt, base, branch };
 }
