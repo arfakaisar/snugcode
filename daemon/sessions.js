@@ -186,6 +186,7 @@ export class Session extends EventEmitter {
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'pocketcode/0.1',
       GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
     });
 
     const streamed = new Set();
@@ -296,7 +297,7 @@ export class Session extends EventEmitter {
     const isWin = process.platform === 'win32';
     const p = spawn(isWin ? 'powershell.exe' : process.env.SHELL || 'bash', isWin ? ['-NoProfile', '-Command', cmd] : ['-lc', cmd], {
       cwd: this.meta.cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
     });
     this.shellProc = p;
     let buf = '';
