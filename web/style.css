@@ -555,6 +555,17 @@ input[type=range]:disabled { opacity: .3; }
 .probe { font-size: 12px; min-height: 20px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; word-break: break-word; }
 .probe .ok { color: var(--green); }
 
+/* ---------- login GitHub ---------- */
+.card.ghwarn { border-color: #6e2a2f; background: linear-gradient(180deg, #2a1416, var(--surface)); align-items: center; }
+.card.ghwarn .name { color: #ffb3b3; white-space: normal; }
+.ghcode {
+  display: flex; align-items: center; justify-content: center; gap: 12px; margin: 14px 0;
+  padding: 18px 12px; border-radius: var(--r-lg); border: 1px dashed var(--line-2); background: var(--surface-2);
+  font-size: clamp(26px, 9vw, 34px); font-weight: 700; letter-spacing: .14em; color: var(--green);
+  user-select: all; -webkit-user-select: all;
+}
+.ghcode .copybtn { font-size: 12px; letter-spacing: 0; }
+
 /* ---------- toast ---------- */
 #toasts { position: fixed; z-index: 40; left: 0; right: 0; top: calc(var(--app-top) + var(--safe-t) + 64px); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 16px; }
 .toast {

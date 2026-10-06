@@ -5,7 +5,7 @@ import path from 'node:path';
 import { WORKSPACES } from './config.js';
 
 const API = 'https://api.github.com';
-export const TOKEN_INVALID = 'Token GitHub di PC ini tidak berlaku lagi (dicabut/kedaluwarsa). Jalankan `pocketcode login` di PC.';
+export const TOKEN_INVALID = 'Login GitHub di PC ini sudah tidak berlaku (token dicabut). Login ulang: tombol "Login GitHub" di aplikasi HP, /login di terminal, atau `pocketcode login`.';
 
 export async function gh(token, method, url, body) {
   const res = await fetch(url.startsWith('http') ? url : API + url, {
@@ -24,24 +24,40 @@ export async function gh(token, method, url, body) {
   return data;
 }
 
-export async function deviceFlowLogin(clientId, onCode) {
-  const post = (url, body) =>
-    fetch(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
-  const start = await post('https://github.com/login/device/code', { client_id: clientId, scope: 'repo read:user' });
+const postJson = (url, body) =>
+  fetch(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+
+// Device flow dipecah dua: mulai (dapat kode untuk pengguna) dan tunggu (token).
+// Token OAuth App tidak kedaluwarsa; hanya berhenti bila dicabut.
+export async function deviceFlowStart(clientId) {
+  const start = await postJson('https://github.com/login/device/code', { client_id: clientId, scope: 'repo read:user' });
   if (!start.device_code) throw new Error(start.error_description || 'Device flow gagal dimulai');
-  onCode(start.user_code, start.verification_uri);
+  return start;
+}
+
+export async function deviceFlowWait(clientId, start, { signal } = {}) {
   let interval = (start.interval || 5) * 1000;
-  for (;;) {
+  const deadline = Date.now() + (start.expires_in || 900) * 1000;
+  while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, interval));
-    const t = await post('https://github.com/login/oauth/access_token', {
+    if (signal?.aborted) throw new Error('dibatalkan');
+    const t = await postJson('https://github.com/login/oauth/access_token', {
       client_id: clientId,
       device_code: start.device_code,
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-    });
+    }).catch(() => ({ error: 'authorization_pending' }));
     if (t.access_token) return t.access_token;
     if (t.error === 'slow_down') interval += 5000;
+    else if (t.error === 'expired_token') break;
     else if (t.error !== 'authorization_pending') throw new Error(t.error_description || t.error);
   }
+  throw new Error('Kode login kedaluwarsa. Mulai login lagi.');
+}
+
+export async function deviceFlowLogin(clientId, onCode) {
+  const start = await deviceFlowStart(clientId);
+  onCode(start.user_code, start.verification_uri);
+  return deviceFlowWait(clientId, start);
 }
 
 // Ambil token GitHub dari credential helper git yang sudah login (mis. Git Credential Manager).

@@ -381,6 +381,16 @@ function status() {
 // Login ulang GitHub saja (mis. token dicabut), tanpa mengulang seluruh setup.
 async function login() {
   if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur.');
+  // Daemon berjalan: login lewat daemon, token langsung berlaku tanpa restart.
+  if (runningPid()) {
+    try {
+      const { loginViaDaemon } = await import('./tui.js');
+      return await loginViaDaemon({ openBrowser: !flags['no-browser'] });
+    } catch (e) {
+      if (!/ECONNREFUSED|ENOENT|tidak menjawab|token lokal/.test(e.message)) throw e;
+      // Daemon versi lama tanpa kanal lokal: lanjut cara lama (restart daemon).
+    }
+  }
   console.log(c.b('Login GitHub untuk PC ini') + c.d(' (clone, push, PR)'));
   const token = await deviceFlowLogin(GITHUB_CLIENT_ID, (code, uri) => {
     console.log(`  Buka ${c.b(uri)}\n  lalu masukkan kode ${c.b(code)}`);
