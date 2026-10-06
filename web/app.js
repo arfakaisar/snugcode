@@ -16,6 +16,14 @@ function h(tag, attrs = {}, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
   return el;
 }
+// replaceChildren/append bawaan mengubah null menjadi teks "null"; banyak tampilan
+// memakai pola `kondisi ? elemen : null`, jadi nilai kosong diabaikan di sini.
+for (const method of ['replaceChildren', 'append']) {
+  const orig = Element.prototype[method];
+  Element.prototype[method] = function (...kids) {
+    return orig.apply(this, kids.flat().filter((k) => k != null && k !== false));
+  };
+}
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const store = {
   get(k) {
@@ -605,6 +613,7 @@ function openMachine(m, { sid } = {}) {
     else showSessionsMeta();
   });
   conn.on('events', (msg) => current?.onEvents?.(msg));
+  conn.on('github', (msg) => onGithubStatus(msg));
   conn.on('notice', (msg) => {
     if (current?.session?.id === msg.sid && document.visibilityState === 'visible') return;
     toast(`${msg.title}: ${msg.msg}`);
@@ -682,10 +691,11 @@ async function showSessions() {
   clearInterval(current.workTimer);
   ui.set(current.m.name, { back: goMachines, dot: 'on', actions: [{ icon: 'dots', label: 'Pengaturan PC', onclick: showMachineMenu }] });
   showSessionsMeta();
+  setTimeout(renderGhBanner);
   const list = h('div', {}, skeletons(3));
   ui.view(
     h('div', { class: 'session' },
-      scrollCol(list, h('div', { style: 'height:80px' })),
+      scrollCol(h('div', { id: 'ghBanner' }), list, h('div', { style: 'height:80px' })),
       h('button', { class: 'fab', onclick: () => (haptic(), showNewSession()) }, ic('plus'), 'Sesi baru'),
     ),
   );
@@ -733,6 +743,86 @@ function showSessionsMeta() {
   ui.sub(`◆ ${M.modelLabel(info.model)}${info.github ? ' · @' + info.github : ' · GitHub belum login'}`);
 }
 
+// ---------- Login GitHub PC (dari HP) ----------
+// Token GitHub di PC bisa dicabut. Daemon memulai device flow dan kodenya
+// tampil di sini, jadi login ulang bisa dilakukan dari mana saja.
+const ghBad = () => ['invalid', 'missing'].includes(current?.info?.githubState);
+
+function renderGhBanner() {
+  const el = document.getElementById('ghBanner');
+  if (!el) return;
+  if (!ghBad()) return el.replaceChildren();
+  el.replaceChildren(
+    h('button', { class: 'card ghwarn', onclick: () => githubLoginSheet() },
+      h('span', { class: 'avatar off' }, ic('github')),
+      h('span', { class: 'grow' },
+        h('div', { class: 'name' }, current.info.githubState === 'missing' ? 'GitHub belum login di PC ini' : 'Login GitHub di PC ini tidak berlaku'),
+        h('div', { class: 'sub', style: 'white-space:normal' }, 'Push, PR, dan daftar repo tidak bisa dipakai. Ketuk untuk login ulang dari HP.'),
+      ),
+      ic('right', 'chev'),
+    ),
+  );
+}
+
+function onGithubStatus(st) {
+  if (!current?.info) return;
+  const was = current.info.githubState;
+  current.info.githubState = st.state;
+  if (st.login) current.info.github = st.login;
+  renderGhBanner();
+  showSessionsMeta();
+  current.ghSheet?.(st);
+  if (st.state === 'invalid' && was !== 'invalid' && !current.ghSheet) toast('Login GitHub di PC tidak berlaku — ketuk banner untuk login ulang', true, 5000);
+}
+
+async function githubLoginSheet() {
+  const body = h('div', {}, loading('Meminta kode login ke GitHub…'));
+  ui.sheet(ui.head('Login GitHub', { sub: 'untuk ' + current.m.name }), body);
+  let timer;
+  const close = () => {
+    clearInterval(timer);
+    current.ghSheet = null;
+  };
+  const render = (st) => {
+    clearInterval(timer);
+    if (st.state === 'ok' && !st.pending) {
+      haptic(25);
+      body.replaceChildren(
+        h('div', { class: 'empty' }, h('div', { class: 'big', style: 'color:var(--green)' }, '✓'), h('b', {}, 'GitHub tersambung'), `@${st.login} — push, PR, dan daftar repo bisa dipakai lagi.`),
+        h('button', { class: 'btn primary', onclick: () => (close(), ui.closeSheet()) }, 'Selesai'),
+      );
+      return;
+    }
+    const p = st.pending;
+    if (!p) return;
+    const left = h('span', {});
+    const tick = () => {
+      const s = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
+      left.textContent = s ? `kode berlaku ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : 'kode kedaluwarsa';
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+    const copyBtn = h('button', { class: 'copybtn', onclick: async (e) => (await copyText(p.code)) && (e.currentTarget.classList.add('done'), toast('Kode disalin')) }, ic('copy'), 'salin');
+    body.replaceChildren(
+      h('div', { class: 'muted small' }, 'Masukkan kode ini di halaman GitHub, lalu tekan Authorize:'),
+      h('div', { class: 'ghcode' }, h('span', {}, p.code), copyBtn),
+      p.error
+        ? h('div', { class: 'err' }, p.error)
+        : h('div', { class: 'loading', style: 'justify-content:center' }, h('span', { class: 'spinner' }), h('span', {}, 'menunggu otorisasi · ', left)),
+      h('a', { class: 'btn primary', href: p.uri, target: '_blank', rel: 'noopener', onclick: () => copyText(p.code) }, ic('github'), 'Salin kode & buka GitHub'),
+      h('div', { class: 'dim small', style: 'margin-top:12px;text-align:center' }, p.uri.replace(/^https:\/\//, '')),
+      p.error ? h('button', { class: 'btn', style: 'margin-top:10px', onclick: () => githubLoginSheet() }, ic('refresh'), 'Minta kode baru') : null,
+    );
+  };
+  current.ghSheet = render;
+  try {
+    render(await conn.call('githubLogin'));
+  } catch (e) {
+    close();
+    body.replaceChildren(h('div', { class: 'err' }, /Metode tidak dikenal/.test(e.message) ? 'Perbarui pocketcode di PC untuk login GitHub dari HP (jalankan `pocketcode login` di PC).' : e.message));
+  }
+}
+
 function modelItem(t1, id, onclick) {
   return menuItem({ icon: 'cpu', t1, t2: M.modelLabel(id) || '(belum dipilih)', onclick });
 }
@@ -757,6 +847,10 @@ function showMachineMenu() {
     h('div', { class: 'group' },
       modelItem('Default untuk sesi baru', info.model, () => pick('Model default', 'model')),
       modelItem('Model kecil (tugas ringan)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
+    ),
+    h('div', { class: 'label' }, 'GitHub'),
+    h('div', { class: 'group' },
+      menuItem({ icon: 'github', t1: ghBad() ? 'Login GitHub (perlu)' : 'Login ulang GitHub', t2: info.github && !ghBad() ? '@' + info.github + ' · tersambung' : 'push, PR, dan daftar repo', onclick: () => githubLoginSheet() }),
     ),
     h('div', { class: 'label' }, 'Perangkat'),
     h('div', { class: 'group' },

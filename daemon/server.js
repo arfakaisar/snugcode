@@ -7,7 +7,8 @@ import * as C from '../shared/crypto.js';
 import { loadSecrets, saveSecrets, saveConfig, IPC_PATH } from './config.js';
 import { SessionManager } from './sessions.js';
 import { listModels, probeModel } from './router.js';
-import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh } from './github.js';
+import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, TOKEN_INVALID } from './github.js';
+import { GithubAuth } from './ghauth.js';
 
 const MAX_PIN_FAILS = 5;
 
@@ -22,6 +23,11 @@ export class Daemon {
     this.stopped = false;
     this.lastPairAttempt = 0;
     this.locals = new Set();
+    this.github = new GithubAuth(this);
+    // Kabari semua HP & terminal yang tersambung saat status login GitHub berubah.
+    this.github.on('change', (st) => {
+      for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'github', ...st });
+    });
   }
 
   saveSecrets() {
@@ -31,6 +37,7 @@ export class Daemon {
   start() {
     this.connect();
     this.listenLocal();
+    this.github.startChecks();
   }
 
   stop() {
@@ -135,13 +142,14 @@ class RpcConn {
       const r = await this.call(m, p);
       this.push({ id, r: r ?? null });
     } catch (e) {
+      if (e?.message === TOKEN_INVALID) this.d.github.markInvalid();
       this.push({ id, err: String(e?.message || e) });
     }
   }
 
   info() {
     const c = this.d.config;
-    return { name: c.machineName, model: c.model, smallModel: c.smallModel, router: c.routerUrl, github: c.githubLogin || null, platform: process.platform };
+    return { name: c.machineName, model: c.model, smallModel: c.smallModel, router: c.routerUrl, github: c.githubLogin || null, githubState: this.d.github.state, platform: process.platform };
   }
 
   unsubscribe() {
@@ -156,6 +164,10 @@ class RpcConn {
     switch (m) {
       case 'info':
         return this.info();
+      case 'githubStatus':
+        return p.check ? d.github.check() : d.github.status();
+      case 'githubLogin':
+        return d.github.begin();
       case 'models': // versi lama: daftar ID saja
         return (await listModels(d.config, sec.routerKey)).map((m) => m.id);
       case 'modelsInfo':

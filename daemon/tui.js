@@ -287,6 +287,68 @@ async function connectDaemon(onStatus) {
   throw new Error('Daemon tidak bisa dinyalakan. Cek log: ' + path.join(HOME, 'daemon.log'));
 }
 
+// ---------- clipboard & browser (untuk kode login GitHub) ----------
+export function copyClipboard(text) {
+  const tries = process.platform === 'win32' ? [['clip']] : process.platform === 'darwin' ? [['pbcopy']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b']];
+  for (const [cmd, ...a] of tries) {
+    try {
+      execFileSync(cmd, a, { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+      return true;
+    } catch {}
+  }
+  return false;
+}
+export function openUrl(url) {
+  const p =
+    process.platform === 'win32'
+      ? spawn('cmd', ['/c', 'start', '""', url.replace(/&/g, '^&')], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true })
+      : spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' });
+  p.on('error', () => {});
+  p.unref();
+}
+// Kotak kode login yang mudah dibaca & disalin.
+function ghCodeBox(p, copied) {
+  const W = Math.min(cols() - 1, 64);
+  const row = (l = '') => c.line('│ ') + pad(trunc(l, W - 4), W - 4) + c.line(' │');
+  const code = [...p.code].join(' ');
+  const center = (s) => ' '.repeat(Math.max(0, Math.floor((W - 4 - width(s)) / 2))) + s;
+  return [
+    '',
+    c.line('╭─ ') + bold('Login GitHub') + c.line(' ' + '─'.repeat(Math.max(0, W - 17)) + '╮'),
+    row(),
+    row(center(bold(gradient(code, PAL.green, PAL.cyan)))),
+    row(),
+    row(`1. buka ${under(c.blue(p.uri))}`),
+    row(`2. masukkan kode di atas${copied ? dim(' (sudah disalin ke clipboard)') : ''}`),
+    row('3. tekan Authorize — selesai, tidak perlu restart'),
+    row(),
+    c.line('╰' + '─'.repeat(W - 2) + '╯'),
+  ];
+}
+
+// `pocketcode login` saat daemon berjalan: login lewat daemon (tanpa restart).
+export async function loginViaDaemon({ openBrowser = true } = {}) {
+  const { client } = await tryConnect(loadSecrets().localToken);
+  try {
+    const st = await client.call('githubLogin');
+    if (!st.pending) throw new Error('Gagal memulai login GitHub');
+    const copied = copyClipboard(st.pending.code);
+    console.log(ghCodeBox(st.pending, copied).join('\n'));
+    if (openBrowser) openUrl(st.pending.uri);
+    console.log(dim('  menunggu otorisasi… (Ctrl+C untuk batal)'));
+    const res = await new Promise((resolve, reject) => {
+      client.on('github', (m) => {
+        if (m.state === 'ok' && !m.pending) resolve(m);
+        else if (m.pending?.error) reject(new Error(m.pending.error));
+      });
+      client.on('closed', () => reject(new Error('Koneksi ke daemon terputus')));
+    });
+    console.log(c.green(`✓ GitHub tersambung: @${res.login}`) + dim(' — langsung dipakai daemon, HP, dan terminal.'));
+  } finally {
+    client.sock.end();
+  }
+}
+
 // ---------- utilitas tampilan ----------
 const SPIN = ['✶', '✸', '✹', '✺', '✹', '✸'];
 const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
@@ -321,6 +383,7 @@ const COMMANDS = [
   ['/push', 'push branch ke GitHub'],
   ['/pr', 'buat Pull Request [judul]'],
   ['/auto', 'nyalakan/matikan auto-izin'],
+  ['/login', 'login ulang GitHub (push, PR, repo)'],
   ['/clear', 'bersihkan layar'],
   ['/delete', 'hapus sesi ini'],
   ['/exit', 'keluar (sesi tetap jalan di PC)'],
@@ -484,6 +547,7 @@ class App {
       const g = this.git;
       parts.push(c.blue('git ') + c.soft(g?.branch || s.branch) + (g && g.files ? c.yellow(` +${g.files}`) : '') + (g && g.ahead ? c.green(` ↑${g.ahead}`) : ''));
       if (s.auto) parts.push(c.red('⚡ auto-izin'));
+      if (['invalid', 'missing'].includes(this.info.githubState)) parts.push(c.red('GitHub: perlu /login'));
       if (s.local) parts.push(dim(tildify(s.cwd || '')));
       else parts.push(dim(s.repo));
     }
@@ -929,7 +993,11 @@ class App {
     }
     if (name === 'escape') {
       if (this.running) this.interrupt();
-      else if (sug.length) this.input = '';
+      else if (this.ghWaiting) {
+        // Berhenti menunggu di layar; kode tetap berlaku sampai kedaluwarsa.
+        this.ghWaiting = false;
+        this.busyText = null;
+      } else if (sug.length) this.input = '';
       else if (this.mode === 'shell' && !this.input) this.mode = 'chat';
       this.cursor = Math.min(this.cursor, [...this.input].length);
       return this.scheduleRender();
@@ -1171,6 +1239,8 @@ class App {
           return this.pickSession();
         case '/new':
           return this.newSession(arg);
+        case '/login':
+          return this.loginGithub();
         case '/auto': {
           need();
           const on = !s.auto;
@@ -1248,6 +1318,37 @@ class App {
       this.busyText = null;
       this.setFlash(e.message, true, 5000);
     }
+  }
+
+  // ---- login GitHub ----
+  async loginGithub() {
+    const st = await this.cl.call('githubLogin');
+    if (!st.pending) return this.setFlash('Gagal memulai login GitHub', true);
+    const copied = copyClipboard(st.pending.code);
+    this.print(ghCodeBox(st.pending, copied));
+    openUrl(st.pending.uri);
+    this.ghWaiting = true;
+    this.busyText = 'Menunggu otorisasi GitHub (esc batal)';
+    this.scheduleRender();
+  }
+  onGithub(st) {
+    const was = this.info.githubState;
+    this.info.githubState = st.state;
+    if (st.login) this.info.github = st.login;
+    if (this.ghWaiting && st.state === 'ok' && !st.pending) {
+      this.ghWaiting = false;
+      this.busyText = null;
+      this.print(['', c.green('● ') + bold('GitHub tersambung') + c.soft(` @${st.login}`) + dim(' — push, PR, dan daftar repo bisa dipakai lagi')]);
+    } else if (this.ghWaiting && st.pending?.error) {
+      this.ghWaiting = false;
+      this.busyText = null;
+      this.print(['', c.red('✗ Login GitHub gagal: ' + st.pending.error) + dim(' — coba /login lagi')]);
+    } else if (st.state === 'invalid' && was !== 'invalid') this.printGhWarning();
+    this.scheduleRender();
+  }
+  printGhWarning() {
+    const title = this.info.githubState === 'missing' ? 'GitHub belum login di PC ini' : 'Login GitHub di PC ini tidak berlaku';
+    this.print(['', c.red('● ') + bold(c.red(title)) + dim(' — push, PR, dan daftar repo tidak bisa dipakai.'), `  ${c.line('⎿')}  ketik ${c.cyan('/login')} untuk login ulang (kode tampil di sini, bisa juga dari HP)`]);
   }
 
   async pickSession() {
@@ -1416,11 +1517,16 @@ export async function runTui({ prompt = '', pick = false } = {}) {
   };
   process.on('exit', cleanup);
   process.on('SIGINT', () => app.exit());
+  // Error tak terduga ditampilkan sebagai pesan, bukan mematikan UI.
+  const soft = (e) => app.setFlash(String(e?.message || e), true, 6000);
+  process.on('unhandledRejection', soft);
+  process.on('uncaughtException', soft);
 
   app.cl.on('events', (m) => {
     if (m.sid !== app.session?.id) return;
     for (const e of m.es) app.onEvent(e);
   });
+  app.cl.on('github', (m) => app.onGithub(m));
   app.cl.on('notice', (m) => {
     if (m.sid !== app.session?.id) app.setFlash(`${m.title}: ${m.msg}`);
   });
@@ -1450,6 +1556,12 @@ export async function runTui({ prompt = '', pick = false } = {}) {
   } catch (e) {
     app.setFlash(e.message, true, 8000);
   }
+  // Status GitHub dicek ulang di awal agar peringatan langsung terlihat.
+  app.cl.call('githubStatus', { check: true }).then((st) => {
+    if (!st) return;
+    app.info.githubState = st.state;
+    if (['invalid', 'missing'].includes(st.state)) app.printGhWarning();
+  }, () => {});
   app.render();
   if (prompt && app.session) {
     app.input = prompt;
