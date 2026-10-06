@@ -108,6 +108,7 @@ POCKETCODE_HOME=/tmp/pc node daemon/cli.js start
 
 npm test                                   # unit test kripto
 node test/e2e-phone.mjs                    # simulasi HP: pairing → sesi → agen → git
+node test/worktree.it.mjs                  # skenario branch/worktree (butuh internet)
 ```
 
 ## TODO / ide berikutnya
