@@ -55,7 +55,10 @@ Cara pakai:
 - **⚡ auto-izin**: semua perintah dijalankan tanpa bertanya, kecuali push.
 - **⎇ git**: status, diff berwarna, commit, push, dan Pull Request.
 - **■**: hentikan agen yang sedang berjalan.
-- Menu `⋯` di daftar sesi: ganti model default.
+- **◆ model**: pilih model 9router, di menu `⋯` (default untuk sesi baru dan model kecil), saat membuat sesi, atau di tengah sesi (berlaku mulai pesan berikutnya).
+  - Varian effort yang di 9router berupa ID terpisah (misal `ag/gemini-3.8-flash-low` / `-medium` / `-high`) digabung jadi **satu model dengan slider effort**. Kalau ada versi tanpa akhiran, ia muncul sebagai pilihan **auto** (bawaan router). Model yang hanya punya satu tingkat (misal `ag/gemini-3.1-pro-low`) ditampilkan dengan label tetap.
+  - Model yang dipilih **diuji otomatis** dengan satu pesan kecil. Ini penting karena sebagian model yang sudah dihentikan tetap membalas "sukses" dengan teks seperti *"…is no longer available"*, dan hal itu tidak terlihat dari daftar model.
+  - Hanya model yang mendukung tool calling yang ditampilkan, karena agen membutuhkannya.
 
 ## Perintah CLI
 

@@ -1,5 +1,6 @@
 // pocketcode PWA — UI terminal untuk mengendalikan agen di PC dari HP.
 import * as C from '../shared/crypto.js';
+import * as M from '../shared/models.js';
 
 // ---------- util ----------
 const $ = (s) => document.querySelector(s);
@@ -366,19 +367,20 @@ async function showSessions() {
   const list = h('div', {}, h('p', { class: 'dim spin' }, 'Memuat '));
   ui.view(
     h('div', { class: 'pad' },
-      h('div', { class: 'meta' }, `model: ${info.model}${info.github ? ' · github: @' + info.github : ' · GitHub belum login'}`),
+      h('div', { class: 'meta', id: 'machineMeta' }),
       h('button', { class: 'btn primary', onclick: showNewSession }, '+ Sesi baru'),
       h('h2', {}, 'Sesi'),
       list,
     ),
   );
+  showSessionsMeta();
   try {
     const sessions = await conn.call('sessions');
     if (!sessions.length) return list.replaceChildren(h('p', { class: 'dim' }, 'Belum ada sesi. Buat sesi baru untuk memilih repo.'));
     list.replaceChildren(
       ...sessions.map((s) =>
         h('button', { class: 'item btn', onclick: () => showSession(s) },
-          h('span', { class: 'grow' }, h('div', { class: 'name' }, s.title || '(belum ada prompt)'), h('div', { class: 'sub' }, `${s.repo} · ${s.branch} · ${ago(s.updatedAt)}`)),
+          h('span', { class: 'grow' }, h('div', { class: 'name' }, s.title || '(belum ada prompt)'), h('div', { class: 'sub' }, `${s.repo} · ${s.branch} · ${M.modelLabel(s.model)} · ${ago(s.updatedAt)}`)),
           s.status === 'running' ? h('span', { class: 'pill run' }, 'jalan') : null,
         ),
       ),
@@ -388,35 +390,220 @@ async function showSessions() {
   }
 }
 
+function modelRow(label, id, onclick) {
+  return h('button', { class: 'item btn', onclick },
+    h('span', { class: 'grow' }, h('div', { class: 'sub' }, label), h('div', { class: 'name' }, '◆ ' + (M.modelLabel(id) || '(belum dipilih)'))),
+    h('span', { class: 'dim' }, '›'),
+  );
+}
+
+function showSessionsMeta() {
+  const el = document.getElementById('machineMeta');
+  const info = current.info;
+  if (el) el.textContent = `◆ ${M.modelLabel(info.model)}${info.github ? ' · github: @' + info.github : ' · GitHub belum login'}`;
+}
+
 async function showMachineMenu() {
   const info = current.info;
-  const sel = h('select', { class: 'field' }, h('option', {}, info.model));
-  const small = h('select', { class: 'field' }, h('option', {}, info.smallModel || info.model));
-  ui.sheet(
-    h('h2', {}, 'Model default'),
-    sel,
-    h('h2', {}, 'Model kecil (tugas ringan)'),
-    small,
-    h('button', {
-      class: 'btn primary',
-      onclick: async () => {
-        current.info = await conn.call('setModel', { model: sel.value, smallModel: small.value });
-        ui.closeSheet();
-        toast('Model disimpan');
-        showSessions();
+  const pick = (title, field) =>
+    pickModel({
+      title,
+      current: info[field] || info.model,
+      onBack: showMachineMenu,
+      onPick: async (id) => {
+        current.info = await conn.call('setModel', { [field]: id });
+        toast('✓ ' + title + ': ' + M.modelLabel(id));
+        showMachineMenu();
+        showSessionsMeta();
       },
-    }, 'Simpan'),
+    });
+  ui.sheet(
+    h('h2', {}, 'Model'),
+    modelRow('default untuk sesi baru', info.model, () => pick('Model default', 'model')),
+    modelRow('model kecil (tugas ringan di belakang layar)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
     h('h2', {}, 'Notifikasi'),
     h('button', { class: 'btn', onclick: () => Notification?.requestPermission().then((p) => toast('Notifikasi: ' + p)) }, 'Izinkan notifikasi'),
     h('h2', {}, 'Perangkat ini'),
     h('button', { class: 'btn danger', onclick: () => (store.set('dev.' + current.m.id, null), ui.closeSheet(), openMachine(current.m)) }, 'Lupakan pairing HP ini'),
   );
+}
+
+// ---------- Pemilih model + slider effort ----------
+const modelCache = { list: null, at: 0, probes: new Map() };
+const isOldDaemon = (e) => /Metode tidak dikenal/.test(e?.message || '');
+
+async function loadModels(fresh = false) {
+  if (!fresh && modelCache.list && Date.now() - modelCache.at < 5 * 60 * 1000) return modelCache.list;
+  let list;
   try {
-    const models = await conn.call('models');
-    for (const [s, v] of [[sel, info.model], [small, info.smallModel || info.model]]) s.replaceChildren(...models.map((m) => h('option', { selected: m === v }, m)));
+    list = await conn.call('modelsInfo', { fresh });
   } catch (e) {
-    toast(e.message, true);
+    if (!isOldDaemon(e)) throw e;
+    list = await conn.call('models'); // daemon versi lama: hanya ID
   }
+  modelCache.list = list;
+  modelCache.at = Date.now();
+  return list;
+}
+
+function probeModel(id, retest = false) {
+  if (retest) modelCache.probes.delete(id);
+  if (!modelCache.probes.has(id)) {
+    const p = conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk menguji model.' : e.message }));
+    modelCache.probes.set(id, p);
+    // Jangan simpan kegagalan koneksi; error dari model tetap disimpan (5 menit).
+    p.then((r) => (r.ok === null ? modelCache.probes.delete(id) : setTimeout(() => modelCache.probes.delete(id), 5 * 60 * 1000)));
+  }
+  return modelCache.probes.get(id);
+}
+
+// Sheet pemilih model. onPick(id) dipanggil saat "Pakai" ditekan.
+async function pickModel({ title, current: cur, onPick, onBack }) {
+  const q = h('input', { class: 'field', placeholder: 'Cari model…', autocapitalize: 'off', autocomplete: 'off' });
+  const list = h('div', { class: 'mlist' }, h('p', { class: 'dim spin' }, 'Memuat model '));
+  const probeLine = h('div', { class: 'probe' });
+  const useBtn = h('button', { class: 'btn primary' }, 'Pakai');
+  const footer = h('div', { class: 'sheetfoot' }, probeLine, useBtn);
+  ui.sheet(
+    h('div', { class: 'row' }, onBack ? h('button', { class: 'icon', onclick: onBack, 'aria-label': 'Kembali' }, '‹') : null, h('h2', { style: 'margin:0;flex:1' }, title)),
+    q, list, footer,
+  );
+
+  let groups;
+  try {
+    groups = M.groupModels(await loadModels());
+  } catch (e) {
+    return list.replaceChildren(h('p', { class: 'err' }, e.message));
+  }
+  if (!groups.length) return list.replaceChildren(h('p', { class: 'err' }, 'Tidak ada model dengan tool calling di 9router.'));
+  // Daftar model 9router bisa berubah kapan saja (model mati dihapus).
+  const exact = cur ? M.findGroup(groups, cur) : null;
+  const p = cur ? M.parseModelId(cur) : null;
+  const sameGroup = !exact && p ? groups.find((g) => g.key === (p.provider ? p.provider + '/' : '') + p.base) : null;
+  if (cur && !exact)
+    list.before(h('p', { class: 'e', style: 'margin:8px 0 0' }, sameGroup ? `⚠ Varian ${cur} sudah tidak ada di 9router. Pilih tingkat effort lain.` : `⚠ ${cur} sudah tidak ada di 9router. Pilih model lain.`));
+  const g0 = exact || sameGroup || groups[0];
+  const sel = { group: g0, effort: M.defaultChoice(g0, cur) };
+  let probeTimer;
+  let probeFor = null;
+
+  const resolved = () => M.resolveId(sel.group, sel.effort);
+  const update = () => {
+    const id = resolved();
+    useBtn.textContent = id === cur ? '✓ Sedang dipakai' : 'Pakai ' + M.modelLabel(id);
+    useBtn.disabled = id === cur;
+    useBtn.classList.remove('warnbtn');
+    probeLine.replaceChildren(h('span', { class: 'dim spin' }, 'menguji ' + M.modelLabel(id) + ' '));
+    clearTimeout(probeTimer);
+    probeFor = id;
+    probeTimer = setTimeout(async () => {
+      const r = await probeModel(id);
+      if (probeFor !== id) return;
+      const retest = h('button', { class: 'linkbtn', onclick: () => (probeModel(id, true), update()) }, 'uji ulang');
+      if (r.ok) probeLine.replaceChildren(h('span', { class: 'ok' }, `✓ siap · ${(r.ms / 1000).toFixed(1)}s`), ' ', retest);
+      else if (r.ok === null) probeLine.replaceChildren(h('span', { class: 'dim' }, r.err), ' ', retest);
+      else {
+        probeLine.replaceChildren(h('span', { class: 'e' }, '✗ ' + r.err), ' ', retest);
+        if (id !== cur) {
+          useBtn.textContent = 'Tetap pakai ' + M.modelLabel(id);
+          useBtn.classList.add('warnbtn');
+        }
+      }
+    }, 500);
+  };
+
+  const effortPanel = (g) => {
+    if (!g.slider) return null;
+    const val = h('b', {}, '');
+    const panel = h('div', { class: 'effort', onclick: (e) => e.stopPropagation() });
+    const head = h('div', { class: 'row' }, h('span', { class: 'dim' }, 'effort'), val);
+    const setVal = () => (val.textContent = sel.effort === null ? 'auto (bawaan)' : M.EFFORT_LABEL[sel.effort] || sel.effort);
+    let slider = null;
+    let autoChip = null;
+    if (g.auto) {
+      autoChip = h('button', { class: 'chip' }, 'auto');
+      autoChip.onclick = () => {
+        sel.effort = sel.effort === null ? g.levels[Math.floor((g.levels.length - 1) / 2)]?.effort ?? null : null;
+        sync();
+      };
+      head.append(h('span', { style: 'flex:1' }), autoChip);
+    }
+    panel.append(head);
+    if (g.levels.length >= 2) {
+      slider = h('input', { type: 'range', min: '0', max: String(g.levels.length - 1), step: '1', 'aria-label': 'Tingkat effort' });
+      slider.oninput = () => {
+        sel.effort = g.levels[+slider.value].effort;
+        sync();
+      };
+      panel.append(slider, h('div', { class: 'ticks' }, ...g.levels.map((l, i) => h('span', { onclick: () => ((sel.effort = l.effort), sync()) }, M.EFFORT_LABEL[l.effort] || l.effort))));
+    } else if (g.levels.length === 1) {
+      // Hanya auto + satu tingkat: cukup dua pilihan.
+      const only = h('button', { class: 'chip' }, M.EFFORT_LABEL[g.levels[0].effort]);
+      only.onclick = () => ((sel.effort = g.levels[0].effort), sync());
+      head.append(only);
+      panel.only = only;
+    }
+    panel.append(h('div', { class: 'hint' }, 'kiri: cepat & hemat · kanan: berpikir lebih dalam, lebih lambat'));
+    const sync = () => {
+      setVal();
+      if (slider) {
+        const i = g.levels.findIndex((l) => l.effort === sel.effort);
+        slider.disabled = sel.effort === null;
+        if (i >= 0) slider.value = String(i);
+      }
+      autoChip?.classList.toggle('on', sel.effort === null);
+      panel.only?.classList.toggle('on', sel.effort !== null);
+      update();
+    };
+    sync();
+    return panel;
+  };
+
+  const render = () => {
+    const term = q.value.trim().toLowerCase();
+    const shown = groups.filter((g) => !term || g.key.toLowerCase().includes(term));
+    const out = [];
+    let lastProvider = null;
+    for (const g of shown) {
+      if (g.provider !== lastProvider) {
+        lastProvider = g.provider;
+        out.push(h('div', { class: 'mprov' }, (M.PROVIDER_LABEL[g.provider] || g.provider || 'lainnya') + (g.provider ? ` · ${g.provider}/` : '')));
+      }
+      const isSel = g === sel.group;
+      const inUse = g.variants.some((v) => v.id === cur);
+      const badges = [
+        g.ctx ? M.ctxLabel(g.ctx) : null,
+        g.slider ? `effort ${g.levels.length + (g.auto ? 1 : 0)}` : g.fixed ? 'effort: ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null,
+        g.vision ? 'gambar' : null,
+      ].filter(Boolean);
+      const row = h('div', { class: 'model' + (isSel ? ' sel' : ''), onclick: () => {
+        if (sel.group === g) return;
+        sel.group = g;
+        sel.effort = M.defaultChoice(g, cur);
+        render();
+        update();
+      } },
+        h('div', { class: 'row' }, h('span', { class: 'mname' }, g.name), inUse ? h('span', { class: 'pill on' }, 'dipakai') : null),
+        h('div', { class: 'sub' }, badges.join(' · ')),
+        isSel ? effortPanel(g) : null,
+      );
+      out.push(row);
+    }
+    list.replaceChildren(...(out.length ? out : [h('p', { class: 'dim' }, 'Tidak ada model yang cocok.')]));
+  };
+  q.oninput = render;
+  useBtn.onclick = async () => {
+    useBtn.disabled = true;
+    try {
+      await onPick(resolved());
+    } catch (e) {
+      toast(e.message, true);
+      useBtn.disabled = false;
+    }
+  };
+  render();
+  update();
+  list.querySelector('.model.sel')?.scrollIntoView({ block: 'center' });
 }
 
 // ---------- Layar: sesi baru ----------
@@ -426,21 +613,21 @@ function showNewSession() {
   const results = h('div', {}, h('p', { class: 'dim spin' }, 'Memuat repo '));
   ui.view(h('div', { class: 'pad' }, q, results));
   let timer;
+  const row = (r) =>
+    h('button', { class: 'item btn', onclick: () => pickBranch(r) },
+      h('span', { class: 'grow' }, h('div', { class: 'name' }, r.full), h('div', { class: 'sub' }, r.desc || (r.pushed ? 'push ' + ago(Date.parse(r.pushed)) : ''))),
+      r.private ? h('span', { class: 'pill' }, 'private') : null,
+    );
   const load = async () => {
+    const term = q.value.trim();
+    const typed = /^[\w.-]+\/[\w.-]+$/.test(term) ? { full: term, desc: 'pakai nama ini' } : null;
     try {
-      const repos = await conn.call('repos', { q: q.value.trim() || undefined });
-      const typed = /^[\w.-]+\/[\w.-]+$/.test(q.value.trim()) && !repos.some((r) => r.full === q.value.trim()) ? [{ full: q.value.trim(), desc: 'pakai nama ini' }] : [];
-      results.replaceChildren(
-        ...[...typed, ...repos].map((r) =>
-          h('button', { class: 'item btn', onclick: () => pickBranch(r) },
-            h('span', { class: 'grow' }, h('div', { class: 'name' }, r.full), h('div', { class: 'sub' }, r.desc || (r.pushed ? 'push ' + ago(Date.parse(r.pushed)) : ''))),
-            r.private ? h('span', { class: 'pill' }, 'private') : null,
-          ),
-        ),
-      );
-      if (!typed.length && !repos.length) results.replaceChildren(h('p', { class: 'dim' }, 'Tidak ada repo.'));
+      const repos = await conn.call('repos', { q: term || undefined });
+      const list = [...(typed && !repos.some((r) => r.full === term) ? [typed] : []), ...repos];
+      results.replaceChildren(...(list.length ? list.map(row) : [h('p', { class: 'dim' }, 'Tidak ada repo.')]));
     } catch (e) {
-      results.replaceChildren(h('p', { class: 'err' }, e.message), h('p', { class: 'dim' }, 'Kamu tetap bisa mengetik owner/nama untuk repo publik.'));
+      // Tanpa login GitHub tetap bisa membuka repo publik dengan mengetik owner/nama.
+      results.replaceChildren(...(typed ? [row(typed)] : []), h('p', { class: 'err' }, e.message), h('p', { class: 'dim' }, 'Kamu tetap bisa mengetik owner/nama untuk repo publik.'));
     }
   };
   q.oninput = () => {
@@ -465,12 +652,24 @@ async function pickBranch(repo) {
     newName.hidden = v !== 'new';
   };
   setMode('new');
+  let model = current.info.model;
+  const modelSlot = h('div', {});
+  const nodes = [];
+  const reshow = () => ui.sheet(...nodes);
+  const renderModel = () =>
+    modelSlot.replaceChildren(
+      modelRow('model untuk sesi ini', model, () =>
+        pickModel({ title: 'Model sesi', current: model, onBack: reshow, onPick: (id) => ((model = id), renderModel(), reshow()) }),
+      ),
+    );
+  renderModel();
   btn.onclick = async () => {
     btn.disabled = true;
     btn.textContent = 'Menyiapkan repo (clone/fetch)…';
     err.textContent = '';
     try {
       const params = mode.v === 'new' ? { repo: repo.full, base: branches.value || undefined, branch: newName.value.trim() || undefined } : { repo: repo.full, branch: branches.value || repo.branch };
+      params.model = model;
       const s = await conn.call('create', params);
       ui.closeSheet();
       showSession(s);
@@ -480,7 +679,8 @@ async function pickBranch(repo) {
       btn.textContent = 'Mulai sesi';
     }
   };
-  ui.sheet(h('h2', {}, repo.full), modeNew, modeExisting, h('h2', {}, 'Branch base / yang dilanjutkan'), branches, h('h2', {}, ''), newName, err, btn);
+  nodes.push(h('h2', {}, repo.full), modeNew, modeExisting, h('h2', {}, 'Branch base / yang dilanjutkan'), branches, h('div', { style: 'height:8px' }), newName, modelSlot, err, btn);
+  reshow();
   try {
     const list = await conn.call('branches', { repo: repo.full });
     branches.replaceChildren(...list.map((b) => h('option', { value: b, selected: b === repo.branch }, b)));
@@ -496,7 +696,29 @@ function showSession(s) {
   const input = h('textarea', { id: 'input', rows: 1, placeholder: 'Minta sesuatu… (awali ! untuk perintah shell)', autocapitalize: 'sentences' });
   const send = h('button', { id: 'send' }, '↵');
   const autoChip = h('button', {}, '');
+  const modelChip = h('button', {}, '');
+  const setModelChip = () => (modelChip.textContent = '◆ ' + M.modelLabel(current.session.model));
+  setModelChip();
+  modelChip.onclick = () => {
+    if (current.running) return toast('Tunggu agen selesai (atau ■ Stop) sebelum ganti model.', true);
+    pickModel({
+      title: 'Model sesi ini',
+      current: current.session.model,
+      onPick: async (id) => {
+        let sum;
+        try {
+          sum = await conn.call('setSessionModel', { id: s.id, model: id });
+        } catch (e) {
+          throw isOldDaemon(e) ? new Error('Perbarui pocketcode di PC untuk ganti model di tengah sesi.') : e;
+        }
+        current.session.model = sum.model;
+        setModelChip();
+        ui.closeSheet();
+      },
+    });
+  };
   const chips = h('div', { id: 'chips' },
+    modelChip,
     h('button', { onclick: () => showGit() }, '⎇ git'),
     autoChip,
     h('button', { onclick: () => (input.value = '!git status', input.focus()) }, '! shell'),
@@ -580,7 +802,7 @@ async function reattach(fresh) {
     }
     for (const p of res.perms) r.add({ k: 'perm', ...p });
     current.setRunning(res.session.status === 'running');
-    if (fresh && !res.events.length) r.line('meta', `${s.repo} · branch ${s.branch} · model ${s.model}\nKetik permintaan di bawah. Awali dengan ! untuk menjalankan perintah shell langsung.`);
+    if (fresh && !res.events.length) r.line('meta', `${s.repo} · branch ${s.branch} · ◆ ${M.modelLabel(s.model)}\nKetik permintaan di bawah. Awali dengan ! untuk menjalankan perintah shell langsung. Ketuk ◆ untuk ganti model/effort.`);
     r.scroll(true);
   } catch (e) {
     toast(e.message, true);
@@ -591,7 +813,7 @@ async function sessionMenu() {
   const s = current.session;
   ui.sheet(
     h('h2', {}, 'Sesi'),
-    h('div', { class: 'meta' }, `${s.repo}\nbranch: ${s.branch} (base ${s.base})\nmodel: ${s.model}`),
+    h('div', { class: 'meta', style: 'white-space:pre-wrap' }, `${s.repo}\nbranch: ${s.branch} (base ${s.base})\nmodel: ${s.model}`),
     h('button', { class: 'btn', onclick: () => (ui.closeSheet(), showGit()) }, '⎇ Git: status, diff, commit, push, PR'),
     h('button', {
       class: 'btn danger',
