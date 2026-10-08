@@ -42,6 +42,7 @@ export class Daemon {
     this.connect();
     this.listenLocal();
     this.github.startChecks();
+    this.startUpdateChecks();
   }
 
   stop() {
@@ -49,8 +50,30 @@ export class Daemon {
     this.keepAwake?.stop();
     this.sessions?.close();
     clearInterval(this.ping);
+    clearInterval(this.updateTimer);
     this.ws?.close();
     this.ipc?.close();
+  }
+
+  broadcast(obj) {
+    for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push(obj);
+  }
+
+  startUpdateChecks() {
+    setTimeout(() => this.checkAndBroadcastUpdate(), 5000);
+    this.updateTimer = setInterval(() => this.checkAndBroadcastUpdate(), 10 * 60 * 1000);
+    this.updateTimer.unref?.();
+  }
+
+  async checkAndBroadcastUpdate() {
+    if (this.stopped) return;
+    try {
+      const st = await checkUpdate(this.config, this.secrets);
+      if (st.updateAvailable) {
+        this.lastUpdateStatus = st;
+        this.broadcast({ ev: 'update', ...st });
+      }
+    } catch {}
   }
 
   // Kanal lokal untuk `pocketcode` di terminal. Hanya bisa diakses user yang sama
@@ -354,7 +377,9 @@ class LocalConn extends RpcConn {
         return this.sock.end();
       }
       this.ready = true;
-      return this.push({ ev: 'ready', info: this.info(), pid: process.pid });
+      this.push({ ev: 'ready', info: this.info(), pid: process.pid });
+      if (this.d.lastUpdateStatus?.updateAvailable) this.push({ ev: 'update', ...this.d.lastUpdateStatus });
+      return;
     }
     this.handleRpc(m);
   }
@@ -450,6 +475,7 @@ class PhoneConn extends RpcConn {
     dev.lastSeen = Date.now();
     this.d.saveSecrets();
     this.push({ ev: 'ready', info: this.info() });
+    if (this.d.lastUpdateStatus?.updateAvailable) this.push({ ev: 'update', ...this.d.lastUpdateStatus });
   }
 
   // Revoke berlaku langsung.
