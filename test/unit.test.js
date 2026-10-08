@@ -246,3 +246,14 @@ test('izin: push & penulisan ke remote selalu dikenali', async () => {
   for (const cmd of no) assert.ok(!isRemoteWrite('Bash', { command: cmd }), cmd);
   assert.ok(!isRemoteWrite('Read', { command: 'git push' }));
 });
+
+test('fastModelVariant: varian effort tinggi diturunkan ke low untuk smallModel/subagent', async () => {
+  const { fastModelVariant } = await import('../shared/models.js');
+  assert.equal(fastModelVariant('ag/gemini-3.8-flash-high'), 'ag/gemini-3.8-flash-low');
+  assert.equal(fastModelVariant('ag/gemini-3.8-flash-medium'), 'ag/gemini-3.8-flash-low');
+  assert.equal(fastModelVariant('ag/gemini-3.8-flash-low'), 'ag/gemini-3.8-flash-low');
+  assert.equal(fastModelVariant('cc/claude-opus-5-5-high'), 'cc/claude-opus-5-5-low');
+  assert.equal(fastModelVariant('ag/gemini-3.1-pro-low'), 'ag/gemini-3.1-pro-low');
+  assert.equal(fastModelVariant('cc/claude-opus-5-5'), 'cc/claude-opus-5-5');
+  assert.equal(fastModelVariant(null), null);
+});

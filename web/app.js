@@ -1833,6 +1833,12 @@ class Renderer {
           this.quiet ? flush() : requestAnimationFrame(flush);
         }
         return;
+      case 'thinking':
+        this.activity = `berpikir… (${e.words} kata)`;
+        return;
+      case 'toolStart':
+        this.activity = `menyiapkan ${e.name}…`;
+        return;
       case 'tool':
         return e.name === 'TodoWrite' ? this.todo(e) : this.tool(e);
       case 'result':

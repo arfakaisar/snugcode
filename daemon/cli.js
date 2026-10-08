@@ -18,6 +18,7 @@ import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME } fr
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
+import { fastModelVariant } from '../shared/models.js';
 import { checkUpdate, performUpdate } from './updater.js';
 
 const CLI = fileURLToPath(import.meta.url);
@@ -116,7 +117,8 @@ async function setup() {
     }
   }
   cfg.model = await pickModel(models, 'model', cfg.model || models[0]);
-  cfg.smallModel = await pickModel(models, 'small-model', cfg.smallModel || cfg.model);
+  const smallDefault = cfg.smallModel || fastModelVariant(cfg.model);
+  cfg.smallModel = await pickModel(models, 'small-model', smallDefault);
 
   // 2. Semua pertanyaan dulu, supaya langkah login bisa diselesaikan sekaligus.
   console.log(c.b('\n2) GitHub (untuk clone, push, dan PR)'));

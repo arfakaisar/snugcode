@@ -29,6 +29,17 @@ export const nativeEffortModel = (provider, base) => provider === 'cc' || (provi
 // Effort native yang ditawarkan slider (semuanya diterima opsi `effort` Agent SDK).
 const NATIVE_EFFORTS = ['low', 'medium', 'high', 'max'];
 
+// Mengembalikan varian cepat (low/minimal effort) dari suatu model.
+// Berguna untuk smallModel (Haiku) dan subagent agar tidak menahan thinking ribuan token.
+export function fastModelVariant(id) {
+  if (!id) return id;
+  const p = parseModelId(id);
+  if (p.effort && ['medium', 'high', 'xhigh', 'max'].includes(p.effort)) {
+    return (p.provider ? p.provider + '/' : '') + p.base + '-low';
+  }
+  return id;
+}
+
 // Untuk model Claude native, pisahkan ID asli router dengan virtual effort.
 // Contoh: "cc/claude-opus-5-5-high" -> { actualModel: "cc/claude-opus-5-5", effort: "high" }.
 export function resolveModelEffort(id) {
