@@ -8,6 +8,8 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { SESSIONS_DIR, CLAUDE_DIR, anthropicBaseUrl } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from './github.js';
+import { startRouterProxy } from './proxy.js';
+import { resolveModelEffort } from '../shared/models.js';
 
 const INDEX = path.join(SESSIONS_DIR, 'index.json');
 const OUT_LIMIT = 4000;
@@ -175,19 +177,25 @@ export class Session extends EventEmitter {
     this.setStatus('running');
     const env = { ...process.env };
     for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
+
+    const { actualModel, effort } = resolveModelEffort(this.meta.model);
+    const actualSmallModel = cfg.smallModel ? resolveModelEffort(cfg.smallModel).actualModel : actualModel;
+    const baseUrl = (await this.mgr.proxy?.ready()) || anthropicBaseUrl(cfg.routerUrl);
+
     Object.assign(env, {
-      ANTHROPIC_BASE_URL: anthropicBaseUrl(cfg.routerUrl),
+      ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN: sec.routerKey,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: this.meta.model,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: this.meta.model,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: cfg.smallModel || this.meta.model,
-      CLAUDE_CODE_SUBAGENT_MODEL: this.meta.model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: actualSmallModel,
+      CLAUDE_CODE_SUBAGENT_MODEL: actualModel,
       CLAUDE_CONFIG_DIR: CLAUDE_DIR,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'pocketcode/0.1',
       GIT_TERMINAL_PROMPT: '0',
       GCM_INTERACTIVE: 'never',
     });
+    if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
 
     const streamed = new Set();
     let currentMsgId = null;
@@ -196,7 +204,8 @@ export class Session extends EventEmitter {
       options: {
         cwd: this.meta.cwd,
         env,
-        model: this.meta.model,
+        model: actualModel,
+        ...(effort ? { effort } : {}),
         resume: this.meta.claudeSessionId || undefined,
         includePartialMessages: true,
         permissionMode: 'acceptEdits',
@@ -333,12 +342,21 @@ export class SessionManager {
     this.log = log;
     this.notify = notify || (() => {});
     this.sessions = new Map();
+    try {
+      this.proxy = startRouterProxy(config.routerUrl, secrets.routerKey);
+    } catch (e) {
+      this.log?.('! gagal memulai loopback proxy: ' + e.message);
+    }
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     let index = [];
     try {
       index = JSON.parse(fs.readFileSync(INDEX, 'utf8'));
     } catch {}
     for (const meta of index) if (fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
+  }
+
+  close() {
+    this.proxy?.close();
   }
 
   saveIndex() {

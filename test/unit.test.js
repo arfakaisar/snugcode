@@ -88,3 +88,61 @@ test('keepawake: inisialisasi dan penghentian bersih', async () => {
   ka.stop();
 });
 
+test('groupModels: cc/claude-opus-5-5 menghasilkan virtual slider effort', async () => {
+  const M = await import('../shared/models.js');
+  const ids = ['cc/claude-opus-5-5'];
+  const g = M.groupModels(ids);
+  assert.equal(g.length, 1);
+  const opus = g[0];
+  assert.equal(opus.key, 'cc/claude-opus-5-5');
+  assert.ok(opus.slider);
+  assert.deepEqual(opus.levels.map((l) => l.effort), ['low', 'medium', 'high', 'max']);
+  assert.equal(opus.auto, 'cc/claude-opus-5-5');
+
+  assert.equal(M.resolveId(opus, 'high'), 'cc/claude-opus-5-5-high');
+  assert.equal(M.resolveId(opus, null), 'cc/claude-opus-5-5');
+
+  const resolvedHigh = M.resolveModelEffort('cc/claude-opus-5-5-high');
+  assert.equal(resolvedHigh.actualModel, 'cc/claude-opus-5-5');
+  assert.equal(resolvedHigh.effort, 'high');
+
+  const resolvedAuto = M.resolveModelEffort('cc/claude-opus-5-5');
+  assert.equal(resolvedAuto.actualModel, 'cc/claude-opus-5-5');
+  assert.equal(resolvedAuto.effort, null);
+});
+
+test('loopback proxy: sanitasi header dan penghentian bersih', async () => {
+  const http = await import('node:http');
+  const { startRouterProxy } = await import('../daemon/proxy.js');
+
+  let interceptedHeaders = null;
+  const mockUpstream = http.createServer((req, res) => {
+    interceptedHeaders = req.headers;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+
+  await new Promise((resolve) => mockUpstream.listen(0, '127.0.0.1', resolve));
+  const upstreamPort = mockUpstream.address().port;
+
+  const proxy = startRouterProxy(`http://127.0.0.1:${upstreamPort}`, 'test-key');
+  await new Promise((resolve) => proxy.server.once('listening', resolve));
+
+  const res = await fetch(proxy.url + '/v1/messages', {
+    headers: {
+      'user-agent': 'claude-cli/1.0.0',
+      'x-app': 'cli',
+      'other': 'keep',
+    },
+  });
+  const json = await res.json();
+  assert.deepEqual(json, { ok: true });
+  assert.equal(interceptedHeaders['user-agent'], 'pocketcode/0.1');
+  assert.equal(interceptedHeaders['x-app'], undefined);
+  assert.equal(interceptedHeaders['other'], 'keep');
+  assert.equal(interceptedHeaders['x-api-key'], 'test-key');
+
+  proxy.close();
+  mockUpstream.close();
+});
+

@@ -21,6 +21,21 @@ export function parseModelId(id) {
   return m ? { provider, base: m[1], effort: m[2] } : { provider, base: rest, effort: null };
 }
 
+// Untuk model Claude (cc/ atau claude-*), pisahkan ID asli router dengan virtual effort.
+// Contoh: "cc/claude-opus-5-5-high" -> { actualModel: "cc/claude-opus-5-5", effort: "high" }.
+export function resolveModelEffort(id) {
+  if (!id) return { actualModel: '', effort: null };
+  const p = parseModelId(id);
+  const isVirtual = p.provider === 'cc' || (p.provider === '' && p.base.startsWith('claude-'));
+  if (isVirtual && p.effort) {
+    return {
+      actualModel: (p.provider ? p.provider + '/' : '') + p.base,
+      effort: p.effort,
+    };
+  }
+  return { actualModel: id, effort: null };
+}
+
 // list: [{ id, ctx?, vision?, reasoning? }] atau [string] (daemon versi lama).
 export function groupModels(list) {
   const groups = new Map();
@@ -36,6 +51,17 @@ export function groupModels(list) {
     g.variants.push({ effort: p.effort, id: m.id });
   }
   for (const g of groups.values()) {
+    // Model Claude native (cc/ atau claude-*):
+    // 9router tidak membagi model Claude per ID varian karena Claude memakai
+    // adaptive thinking & parameter output_config.effort native.
+    if (g.provider === 'cc' || (g.name.startsWith('claude-') && g.variants.length === 1 && g.variants[0].effort === null)) {
+      const nativeLevels = ['low', 'medium', 'high', 'max'];
+      for (const lev of nativeLevels) {
+        if (!g.variants.some((v) => v.effort === lev)) {
+          g.variants.push({ effort: lev, id: `${g.key}-${lev}`, virtual: true });
+        }
+      }
+    }
     // Model polos tanpa akhiran = pengaturan bawaan router ("auto").
     g.auto = g.variants.find((v) => v.effort === null)?.id || null;
     g.levels = g.variants.filter((v) => v.effort).sort((a, b) => EFFORTS.indexOf(a.effort) - EFFORTS.indexOf(b.effort));
