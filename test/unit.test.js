@@ -257,3 +257,14 @@ test('fastModelVariant: varian effort tinggi diturunkan ke low untuk smallModel/
   assert.equal(fastModelVariant('cc/claude-opus-5-5'), 'cc/claude-opus-5-5');
   assert.equal(fastModelVariant(null), null);
 });
+
+test('pocketcode prompt: mencakup identitas, arsitektur E2EE/daemon/worktree, dan aturan push', async () => {
+  const { POCKETCODE_SYSTEM_PROMPT } = await import('../daemon/prompt.js');
+  assert.ok(typeof POCKETCODE_SYSTEM_PROMPT === 'string' && POCKETCODE_SYSTEM_PROMPT.length > 500);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /pocketcode/i);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /E2EE|End-to-End Encrypted/);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /CPace|XChaCha20-Poly1305/);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /worktree/i);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /git push/i);
+});
+

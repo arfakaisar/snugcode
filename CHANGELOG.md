@@ -58,6 +58,10 @@ Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master
   berpikir dan nama tool yang sedang disiapkan, bukan layar hening yang terkesan macet.
 
 ### Lainnya
+- **Identitas & Pengetahuan Sistem Pocketcode (`daemon/prompt.js`)**: System prompt terpadu
+  disuntikkan ke Claude Agent SDK. Model kini sepenuhnya sadar bahwa ia adalah agen coding dari
+  pocketcode (bukan harness lain), mengerti arsitektur lokal daemon, E2EE relay Cloudflare, isolasi
+  git worktree, izin interaktif diff, dan fitur sistem pocketcode.
 - Riwayat event sesi dimuat dari `.jsonl` saat dibutuhkan (bukan semuanya saat daemon start) dan
   dibatasi 3000 event per sesi di memori; riwayat lengkap tetap di disk.
 - Scope GitHub: tambahkan `workflow` ke OAuth device flow (`repo read:user workflow`) agar token
