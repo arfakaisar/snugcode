@@ -385,6 +385,7 @@ const COMMANDS = [
   ['/auto', 'nyalakan/matikan auto-izin'],
   ['/login', 'login ulang GitHub (push, PR, repo)'],
   ['/update', 'periksa & pasang pembaruan jarak jauh'],
+  ['/clean', 'pindai & bersihkan worktree / repo yatim'],
   ['/restart', 'restart daemon di PC'],
   ['/clear', 'bersihkan layar'],
   ['/delete', 'hapus sesi ini'],
@@ -1353,6 +1354,23 @@ class App {
             return this.setFlash('Update gagal: ' + e.message, true);
           }
           return;
+        }
+        case '/clean': {
+          this.busyText = 'Memindai…';
+          this.scheduleRender();
+          try {
+            const r = await this.cl.call('cleanup');
+            this.busyText = null;
+            const wtCount = r.removedWorktrees?.length || 0;
+            const repoCount = r.removedRepos?.length || 0;
+            if (wtCount === 0 && repoCount === 0) {
+              return this.setFlash('✓ Workspace PC sudah bersih');
+            }
+            return this.setFlash(`✓ Dibersihkan: ${wtCount} worktree, ${repoCount} repo`);
+          } catch (e) {
+            this.busyText = null;
+            return this.setFlash('Gagal clean: ' + e.message, true);
+          }
         }
         case '/restart': {
           if (!(await this.confirm('Restart daemon', 'Restart daemon pocketcode sekarang?'))) return;

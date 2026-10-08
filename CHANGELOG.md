@@ -57,6 +57,15 @@ Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master
   sekarang ditangkap dan diteruskan ke UI (PWA & terminal). Pengguna langsung melihat progres kata
   berpikir dan nama tool yang sedang disiapkan, bukan layar hening yang terkesan macet.
 
+### Manajemen File & Ruang Kerja (`daemon/cleaner.js`, `daemon/sessions.js`, `daemon/cli.js`, `daemon/tui.js`, `web/app.js`)
+- **Pembersihan Sesi Tangguh**: penghapusan sesi kini menutup proses subagen & query terlebih dahulu (`s.close()`), mencegah kunci file Windows (`EBUSY`/`EPERM`). Fungsi `safeRm` menangani file read-only git packfile dengan retry rekursif dan penyesuaian izin chmod.
+- **Deteksi & Pembersihan Folder Yatim Otomatis**: sistem secara otomatis memindai PC host untuk mendeteksi folder worktree (`s-*`) yang tidak terhubung ke sesi aktif, repository yang sudah tidak memiliki sesi lagi, dan log `.jsonl` basi.
+- **Terintegrasi Tanpa Hambatan (Seamless)**:
+  - Berjalan otomatis di latar belakang saat daemon dinyalakan (startup).
+  - Berjalan otomatis segera setelah sesi dihapus (merapikan repository bila sesi terakhir dihapus).
+  - Berjalan berkala setiap 30 menit saat daemon aktif.
+  - Perintah CLI `pocketcode clean`, slash command `/clean` di TUI, dan tombol "Bersihkan folder tak terpakai" di menu Sistem & Pembaruan pada HP (PWA).
+
 ### Lainnya
 - **Identitas & Pengetahuan Sistem Pocketcode (`daemon/prompt.js`)**: System prompt terpadu
   disuntikkan ke Claude Agent SDK. Model kini sepenuhnya sadar bahwa ia adalah agen coding dari

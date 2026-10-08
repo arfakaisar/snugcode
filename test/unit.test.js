@@ -268,3 +268,69 @@ test('pocketcode prompt: mencakup identitas, arsitektur E2EE/daemon/worktree, da
   assert.match(POCKETCODE_SYSTEM_PROMPT, /git push/i);
 });
 
+test('cleaner: hapus orphan worktree, repo tak terpakai, dan log basi', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { cleanupWorkspaces, safeRm } = await import('../daemon/cleaner.js');
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-clean-'));
+  const wsDir = path.join(tmpRoot, 'workspaces');
+  const sessDir = path.join(tmpRoot, 'sessions');
+  fs.mkdirSync(wsDir, { recursive: true });
+  fs.mkdirSync(sessDir, { recursive: true });
+
+  try {
+    // 1. Repo aktif: arfakaisar__myrepo
+    //    Memiliki active worktree s-act1 dan orphan worktree s-orp1
+    const activeRepoDir = path.join(wsDir, 'arfakaisar__myrepo');
+    const actWt = path.join(activeRepoDir, 's-act1');
+    const orpWt = path.join(activeRepoDir, 's-orp1');
+    const baseDir = path.join(activeRepoDir, '_base');
+    fs.mkdirSync(actWt, { recursive: true });
+    fs.mkdirSync(orpWt, { recursive: true });
+    fs.mkdirSync(baseDir, { recursive: true });
+    fs.writeFileSync(path.join(actWt, 'app.js'), 'active');
+    fs.writeFileSync(path.join(orpWt, 'orphan.js'), 'orphan');
+
+    // 2. Repo tidak terpakai: user__unused
+    //    Hanya punya _base, tidak ada sesi aktif
+    const unusedRepoDir = path.join(wsDir, 'user__unused');
+    fs.mkdirSync(path.join(unusedRepoDir, '_base'), { recursive: true });
+
+    // 3. File logs
+    fs.writeFileSync(path.join(sessDir, 'act1.jsonl'), 'log1');
+    fs.writeFileSync(path.join(sessDir, 'old9.jsonl'), 'log9');
+
+    // Active session list
+    const activeSessions = [
+      { id: 'act1', repo: 'arfakaisar/myrepo', cwd: actWt },
+    ];
+
+    const res = await cleanupWorkspaces(activeSessions, {
+      workspacesDir: wsDir,
+      sessionsDir: sessDir,
+      minAgeMs: 0,
+    });
+
+    assert.equal(res.removedWorktrees.length, 1);
+    assert.equal(res.removedWorktrees[0], orpWt);
+    assert.equal(fs.existsSync(orpWt), false, 's-orp1 harus terhapus');
+    assert.equal(fs.existsSync(actWt), true, 's-act1 harus tetap ada');
+
+    assert.equal(res.removedRepos.length, 1);
+    assert.equal(res.removedRepos[0], unusedRepoDir);
+    assert.equal(fs.existsSync(unusedRepoDir), false, 'user__unused harus terhapus');
+    assert.equal(fs.existsSync(activeRepoDir), true, 'arfakaisar__myrepo harus tetap ada');
+
+    assert.equal(res.removedLogs.length, 1);
+    assert.equal(res.removedLogs[0], 'old9.jsonl');
+    assert.equal(fs.existsSync(path.join(sessDir, 'old9.jsonl')), false);
+    assert.equal(fs.existsSync(path.join(sessDir, 'act1.jsonl')), true);
+  } finally {
+    safeRm(tmpRoot);
+    assert.equal(fs.existsSync(tmpRoot), false, 'safeRm membersihkan tmpRoot');
+  }
+});
+
+
