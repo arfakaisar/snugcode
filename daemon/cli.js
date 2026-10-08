@@ -20,6 +20,7 @@ import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { fastModelVariant } from '../shared/models.js';
 import { checkUpdate, performUpdate } from './updater.js';
+import { writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
 const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
@@ -274,52 +275,17 @@ function spawnDetached() {
 
 function autostart() {
   const mode = args.find((a) => !a.startsWith('--')) || 'on';
-  const node = process.execPath;
   if (mode === 'on' && CLI.includes('_npx')) {
     console.log(c.y('! Kamu menjalankan lewat npx. Untuk autostart, pasang global dulu agar path-nya tetap:'));
     console.log(`    npm i -g ${PACKAGE_SPEC}   lalu   pocketcode autostart on`);
   }
-  if (process.platform === 'win32') {
-    const file = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'pocketcode.vbs');
-    if (mode === 'off') {
-      fs.rmSync(file, { force: true });
-      return console.log(c.g('✓ Autostart dimatikan.'));
-    }
-    const q = (s) => '""' + s + '""';
-    fs.writeFileSync(file, `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${q(node)} ${q(CLI)} start --log", 0, False\r\n`);
-    console.log(c.g('✓ Autostart aktif: ') + file);
-  } else if (process.platform === 'darwin') {
-    const file = path.join(os.homedir(), 'Library', 'LaunchAgents', 'dev.pocketcode.plist');
-    if (mode === 'off') {
-      spawnSync('launchctl', ['unload', file]);
-      fs.rmSync(file, { force: true });
-      return console.log(c.g('✓ Autostart dimatikan.'));
-    }
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>dev.pocketcode</string>
-  <key>ProgramArguments</key><array><string>${node}</string><string>${CLI}</string><string>start</string><string>--log</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${process.env.PATH}</string></dict>
-</dict></plist>
-`);
-    console.log(c.g('✓ Autostart aktif (launchd): ') + file);
-  } else {
-    const file = path.join(os.homedir(), '.config', 'systemd', 'user', 'pocketcode.service');
-    if (mode === 'off') {
-      spawnSync('systemctl', ['--user', 'disable', '--now', 'pocketcode']);
-      fs.rmSync(file, { force: true });
-      return console.log(c.g('✓ Autostart dimatikan.'));
-    }
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `[Unit]\nDescription=pocketcode daemon\nAfter=network-online.target\n\n[Service]\nExecStart=${node} ${CLI} start --log\nRestart=always\nRestartSec=5\nEnvironment=PATH=${process.env.PATH}\n\n[Install]\nWantedBy=default.target\n`);
-    spawnSync('systemctl', ['--user', 'daemon-reload']);
-    spawnSync('systemctl', ['--user', 'enable', 'pocketcode']);
-    console.log(c.g('✓ Autostart aktif (systemd --user): ') + file);
+  if (mode === 'off') {
+    disableAutostart();
+    return console.log(c.g('✓ Autostart dimatikan.'));
   }
+  const file = writeAutostart(CLI, process.execPath);
+  console.log(c.g('✓ Autostart aktif: ') + file);
+
   // Nyalakan sekarang juga bila belum berjalan.
   if (!runningPid()) {
     if (process.platform === 'linux') spawnSync('systemctl', ['--user', 'start', 'pocketcode']);
@@ -345,6 +311,8 @@ async function start() {
   }
   fs.writeFileSync(PID_FILE, String(process.pid));
   process.on('exit', () => runningPid() === process.pid && fs.rmSync(PID_FILE, { force: true }));
+  // Selalu sinkronkan skrip autostart jika autostart pernah diaktifkan pada sistem ini
+  syncAutostart(CLI, process.execPath);
   if (flags.log) {
     const out = fs.createWriteStream(LOG_FILE, { flags: 'a' });
     const write = (...a) => out.write(new Date().toISOString() + ' ' + util.format(...a).replace(/\x1b\[[0-9;]*m/g, '') + '\n');

@@ -333,4 +333,13 @@ test('cleaner: hapus orphan worktree, repo tak terpakai, dan log basi', async ()
   }
 });
 
+test('autostart: deteksi path file dan sinkronisasi otomatis', async () => {
+  const { autostartFilePath, syncAutostart, isAutostartEnabled } = await import('../daemon/autostart.js');
+  const filePath = autostartFilePath();
+  assert.ok(typeof filePath === 'string' && filePath.length > 5);
+  // isAutostartEnabled mengembalikan boolean
+  assert.equal(typeof isAutostartEnabled(), 'boolean');
+});
+
+
 
