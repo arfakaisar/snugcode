@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { PACKAGE_SPEC } from './defaults.js';
 import { loadConfig, saveConfig, HOME } from './config.js';
 import { nativeBinaryInstalled, missingBinaryMessage } from './nativebin.js';
+import { syncAutostart } from './autostart.js';
 
 const execFileAsync = promisify(execFile);
 const NPM_TIMEOUT = 10 * 60 * 1000;
@@ -186,6 +187,7 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
     await execFileAsync('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: ROOT, timeout: 60000 });
     await npmInstall(['install', '--omit=dev', '--include=optional'], { cwd: ROOT });
     verifyNativeBinary(ROOT);
+    syncAutostart(path.join(ROOT, 'daemon', 'cli.js'));
     const { stdout: newHead } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT });
     const commit = newHead.trim();
     cfg.installedCommit = commit;
@@ -199,7 +201,9 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
     .then((d) => d.sha?.slice(0, 7))
     .catch(() => null);
   await npmInstall(['install', '-g', PACKAGE_SPEC, '--include=optional']);
-  verifyNativeBinary(await globalPackageRoot());
+  const globalRoot = await globalPackageRoot();
+  verifyNativeBinary(globalRoot);
+  syncAutostart(path.join(globalRoot, 'daemon', 'cli.js'));
 
   if (commit) cfg.installedCommit = commit;
   else delete cfg.installedCommit; // dideteksi ulang dari waktu pemasangan
