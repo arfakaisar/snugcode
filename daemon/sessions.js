@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { SESSIONS_DIR, CLAUDE_DIR, anthropicBaseUrl } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from './github.js';
 import { startRouterProxy } from './proxy.js';
-import { resolveModelEffort } from '../shared/models.js';
+import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -187,6 +187,24 @@ export class Session extends EventEmitter {
     this.emitEvent({ k: 'text', d });
   }
 
+  pushThinking(t) {
+    if (!t) return;
+    const words = t.trim().split(/\s+/).filter(Boolean).length || 1;
+    this.thinkingWords = (this.thinkingWords || 0) + words;
+    if (!this.thinkingTimer) {
+      this.thinkingTimer = setTimeout(() => {
+        this.thinkingTimer = null;
+        if (this.thinkingWords) this.emitEvent({ k: 'thinking', words: this.thinkingWords }, { persist: false });
+      }, 200);
+    }
+  }
+
+  clearThinking() {
+    if (this.thinkingTimer) clearTimeout(this.thinkingTimer);
+    this.thinkingTimer = null;
+    this.thinkingWords = 0;
+  }
+
   setStatus(s) {
     this.status = s;
     this.meta.updatedAt = Date.now();
@@ -227,7 +245,10 @@ export class Session extends EventEmitter {
     for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
 
     const { actualModel, effort } = resolveModelEffort(this.meta.model);
-    const actualSmallModel = cfg.smallModel ? resolveModelEffort(cfg.smallModel).actualModel : actualModel;
+    // Tugas haiku / deskripsi tool / subagent selalu memakai varian cepat (low effort),
+    // agar prompt tidak tertahan thinking berlebih.
+    const smallCandidate = cfg.smallModel || fastModelVariant(this.meta.model);
+    const actualSmallModel = resolveModelEffort(fastModelVariant(smallCandidate)).actualModel || actualModel;
     const baseUrl = (await this.mgr.proxy?.ready()) || anthropicBaseUrl(cfg.routerUrl);
 
     Object.assign(env, {
@@ -236,7 +257,7 @@ export class Session extends EventEmitter {
       ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
       ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
       ANTHROPIC_DEFAULT_HAIKU_MODEL: actualSmallModel,
-      CLAUDE_CODE_SUBAGENT_MODEL: actualModel,
+      CLAUDE_CODE_SUBAGENT_MODEL: actualSmallModel,
       CLAUDE_CONFIG_DIR: CLAUDE_DIR,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'pocketcode/0.1',
@@ -280,10 +301,20 @@ export class Session extends EventEmitter {
         } else if (m.type === 'stream_event') {
           const ev = m.event;
           if (ev.type === 'message_start') currentMsgId = ev.message?.id;
-          else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+          else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+            this.clearThinking();
+            this.flushText();
+            this.emitEvent({ k: 'toolStart', name: ev.content_block.name }, { persist: false });
+          } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+            this.pushThinking(ev.delta.thinking);
+          } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+            this.clearThinking();
             streamed.add(currentMsgId);
             this.pushText(ev.delta.text);
-          } else if (ev.type === 'content_block_stop') this.flushText();
+          } else if (ev.type === 'content_block_stop') {
+            this.clearThinking();
+            this.flushText();
+          }
         } else if (m.type === 'assistant') {
           if (m.parent_tool_use_id) continue; // isi subagent tidak ditampilkan rinci
           for (const b of m.message.content || []) {
@@ -309,6 +340,7 @@ export class Session extends EventEmitter {
         }
       }
     } finally {
+      this.clearThinking();
       this.flushText();
       this.query = null;
       for (const p of this.perms.values()) p.resolve({ behavior: 'deny', message: 'Sesi dihentikan' });

@@ -44,6 +44,19 @@ Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master
 - Commit dicatat **sebelum** `npm install`, sehingga push yang masuk selama instalasi tetap
   terdeteksi sebagai pembaruan berikutnya.
 
+### Kecepatan & Responsivitas (`daemon/sessions.js`, `daemon/proxy.js`, `web/app.js`, `daemon/tui.js`)
+- **Subagent & Small Model tidak lagi tertahan effort tinggi**: `ANTHROPIC_DEFAULT_HAIKU_MODEL` dan
+  `CLAUDE_CODE_SUBAGENT_MODEL` dulu dipaksa memakai model utama (bahkan dengan effort `high`/`max`).
+  Akibatnya tugas kecil (deskripsi tool, subagent pencarian file, micro-tasks) memakan waktu 20–40 detik
+  per panggilan hanya untuk berpikir ribuan token. Sekarang `fastModelVariant` otomatis melunakkan
+  effort ke `-low` untuk model pembantu.
+- **Connection pool & TCP NoDelay di proxy**: proxy sekarang memakai persistent keep-alive agent
+  dan `setNoDelay(true)` pada soket masuk dan upstream, mencegah latensi buffering Nagle (40–200ms)
+  pada chunk streaming SSE.
+- **Indikator streaming thinking & tool call**: event `thinking_delta` dan `content_block_start` tool
+  sekarang ditangkap dan diteruskan ke UI (PWA & terminal). Pengguna langsung melihat progres kata
+  berpikir dan nama tool yang sedang disiapkan, bukan layar hening yang terkesan macet.
+
 ### Lainnya
 - Riwayat event sesi dimuat dari `.jsonl` saat dibutuhkan (bukan semuanya saat daemon start) dan
   dibatasi 3000 event per sesi di memori; riwayat lengkap tetap di disk.

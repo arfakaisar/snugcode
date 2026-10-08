@@ -45,8 +45,13 @@ export function createToolNameRewriter() {
 export function startRouterProxy(routerUrl) {
   const target = new URL(routerUrl.replace(/\/+$/, '').replace(/\/v1$/, ''));
   const transport = target.protocol === 'https:' ? https : http;
+  const agent =
+    target.protocol === 'https:'
+      ? new https.Agent({ keepAlive: true, keepAliveMsecs: 60000, maxSockets: 64, maxFreeSockets: 16, timeout: 120000 })
+      : new http.Agent({ keepAlive: true, keepAliveMsecs: 60000, maxSockets: 64, maxFreeSockets: 16, timeout: 120000 });
 
   const server = http.createServer((req, res) => {
+    req.socket?.setNoDelay?.(true);
     const headers = { ...req.headers, host: target.host };
     delete headers['accept-encoding'];
     delete headers['x-app'];
@@ -62,7 +67,7 @@ export function startRouterProxy(routerUrl) {
       } else res.destroy(); // stream sudah berjalan: putuskan agar SDK melihat error & retry
     };
 
-    const up = transport.request(target.origin + req.url, { method: req.method, headers }, (upRes) => {
+    const up = transport.request(target.origin + req.url, { method: req.method, headers, agent }, (upRes) => {
       const resHeaders = { ...upRes.headers };
       const rewrite = REWRITE_RE.test(String(upRes.headers['content-type'] || ''));
       if (rewrite) delete resHeaders['content-length'];
@@ -82,6 +87,7 @@ export function startRouterProxy(routerUrl) {
       upRes.on('end', () => res.end(rw.end()));
     });
 
+    up.on('socket', (s) => s.setNoDelay?.(true));
     up.on('error', (err) => fail(err.message));
     // Klien (SDK) membatalkan request (mis. tombol Stop) -> hentikan juga request ke router.
     res.on('close', () => {
@@ -114,6 +120,7 @@ export function startRouterProxy(routerUrl) {
     close() {
       try {
         server.close();
+        agent.destroy();
       } catch {}
     },
   };

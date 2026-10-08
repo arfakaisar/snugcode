@@ -764,6 +764,12 @@ class App {
         this.queue.push({ kind: 'user', done: true, final: () => this.userBlock(e.d, false), preview: () => [] });
         this.activity = 'Berpikir';
         break;
+      case 'thinking':
+        this.activity = `Berpikir (${e.words} kata)`;
+        break;
+      case 'toolStart':
+        this.activity = `Menyiapkan ${e.name}`;
+        break;
       case 'text': {
         let last = this.queue[this.queue.length - 1];
         if (!last || last.kind !== 'text' || last.done) this.queue.push((last = this.textItem()));
