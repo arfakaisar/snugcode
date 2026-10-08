@@ -6,11 +6,14 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { SESSIONS_DIR, CLAUDE_DIR, anthropicBaseUrl } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from './github.js';
 import { startRouterProxy } from './proxy.js';
 import { resolveModelEffort } from '../shared/models.js';
+import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(SESSIONS_DIR, 'index.json');
 const OUT_LIMIT = 4000;
 
@@ -24,6 +27,17 @@ You are being driven through the "pocketcode" app, from a phone or from the pock
 - Work inside the current working directory.`;
 
 const isGitPush = (tool, input) => tool === 'Bash' && /\bgit\s+push\b/.test(input?.command || '');
+
+// Path binary Claude untuk query(): `claudeExecutable` di config.json (fallback manual)
+// atau binary dari paket platform SDK. Gagal lebih awal dengan pesan yang jelas.
+function claudeExecutable(cfg) {
+  if (cfg.claudeExecutable) {
+    if (!fs.existsSync(cfg.claudeExecutable)) throw new Error(`claudeExecutable di config.json tidak ditemukan: ${cfg.claudeExecutable}`);
+    return cfg.claudeExecutable;
+  }
+  if (!findNativeBinary(import.meta.url)) throw new Error(missingBinaryMessage(ROOT));
+  return undefined;
+}
 
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
@@ -174,6 +188,7 @@ export class Session extends EventEmitter {
   async run(prompt) {
     const cfg = this.mgr.config;
     const sec = this.mgr.secrets;
+    const claudeExe = claudeExecutable(cfg);
     this.setStatus('running');
     const env = { ...process.env };
     for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
@@ -204,6 +219,7 @@ export class Session extends EventEmitter {
       options: {
         cwd: this.meta.cwd,
         env,
+        ...(claudeExe ? { pathToClaudeCodeExecutable: claudeExe } : {}),
         model: actualModel,
         ...(effort ? { effort } : {}),
         resume: this.meta.claudeSessionId || undefined,
@@ -298,6 +314,14 @@ export class Session extends EventEmitter {
     if (this.query) await this.query.interrupt().catch(() => {});
   }
 
+  // Matikan proses claude(.exe) sepenuhnya (bukan sekadar interrupt), mis. sebelum update.
+  close() {
+    if (this.shellProc) this.shellProc.kill();
+    try {
+      this.query?.close();
+    } catch {}
+  }
+
   // "!perintah" -> jalankan langsung di worktree (seperti ! di Claude Code).
   shell(cmd) {
     if (!cmd) return;
@@ -357,6 +381,18 @@ export class SessionManager {
 
   close() {
     this.proxy?.close();
+  }
+
+  // Di Windows claude.exe yang masih jalan mengunci file-nya sehingga npm gagal
+  // menimpanya (dan diam-diam melewati paket binary). Tutup semua sesi dulu.
+  async stopAll({ wait = 1500 } = {}) {
+    const active = [...this.sessions.values()].filter((s) => s.query || s.shellProc);
+    for (const s of active) {
+      s.emitEvent({ k: 'note', d: '◆ dihentikan untuk memasang pembaruan' });
+      s.close();
+    }
+    if (active.length) await new Promise((r) => setTimeout(r, wait));
+    return active.length;
   }
 
   saveIndex() {

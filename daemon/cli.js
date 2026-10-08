@@ -470,13 +470,31 @@ async function cliUpdate() {
     return;
   }
   console.log(c.y('Ada pembaruan: ') + `${c.b(st.latestCommit)}${st.latestMessage ? ' — ' + st.latestMessage : ''}`);
+  // Hentikan daemon dulu (beserta claude.exe di sesinya) agar file tidak terkunci saat npm memasang.
+  const wasRunning = await stopAndWait();
+  if (wasRunning) console.log(c.d('Daemon dihentikan sementara untuk update.'));
   console.log(c.d('Memasang pembaruan…'));
-  const r = await performUpdate(cfg, sec);
-  console.log(c.g(`✓ Pembaruan berhasil dipasang (${r.commit}).`));
-  if (runningPid()) {
-    console.log(c.d('Me-restart daemon…'));
-    await cliRestart();
+  try {
+    const r = await performUpdate(cfg, sec);
+    console.log(c.g(`✓ Pembaruan berhasil dipasang (${r.commit}).`));
+  } finally {
+    if (wasRunning) console.log(c.g(`✓ Daemon dijalankan lagi (pid ${spawnDetached()}).`));
   }
+}
+
+async function stopAndWait() {
+  const pid = runningPid();
+  if (!pid) return false;
+  // Windows: matikan juga claude.exe anak daemon (/T), tanpa menyentuh claude.exe lain.
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  try {
+    process.kill(pid);
+  } catch {}
+  for (let i = 0; i < 50 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
+  fs.rmSync(PID_FILE, { force: true });
+  // Proses claude.exe anak daemon bisa tertinggal sebentar setelah daemon mati.
+  await new Promise((r) => setTimeout(r, 1500));
+  return true;
 }
 
 function help() {
