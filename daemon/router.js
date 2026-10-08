@@ -1,4 +1,6 @@
 // Akses 9router: daftar model (dengan cache) dan uji cepat sebuah model.
+import { resolveModelEffort } from '../shared/models.js';
+
 const TTL = 5 * 60 * 1000;
 let cache = null;
 
@@ -27,13 +29,14 @@ const DEAD_RE = /\b(no longer available|is not available|has been (deprecated|di
 
 // Kirim satu pesan kecil lewat endpoint Anthropic (jalur yang sama dengan Claude Code).
 export async function probeModel(cfg, key, model) {
+  const { actualModel } = resolveModelEffort(model);
   const t0 = Date.now();
   let r;
   try {
     r = await fetch(base(cfg) + '/messages', {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model, max_tokens: 1024, stream: true, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
+      body: JSON.stringify({ model: actualModel, max_tokens: 1024, stream: true, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
       signal: AbortSignal.timeout(45000),
     });
   } catch (e) {

@@ -47,6 +47,7 @@ export class Daemon {
   stop() {
     this.stopped = true;
     this.keepAwake?.stop();
+    this.sessions?.close();
     clearInterval(this.ping);
     this.ws?.close();
     this.ipc?.close();
