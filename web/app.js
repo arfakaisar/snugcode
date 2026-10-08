@@ -928,6 +928,8 @@ async function updateMachineSheet() {
     );
   } catch (e) {
     if (isOldDaemon(e)) {
+      const isWin = info?.platform === 'win32';
+      const upCmd = isWin ? 'cmd /c "npm i -g github:arfakaisar/pocketcode && pocketcode restart"' : 'npm i -g github:arfakaisar/pocketcode && pocketcode restart';
       body.replaceChildren(
         h(
           'div',
@@ -950,7 +952,7 @@ async function updateMachineSheet() {
                   if (!target) {
                     target = await conn.call('create', { local: true });
                   }
-                  await conn.call('send', { id: target.id, text: '!npm i -g github:arfakaisar/pocketcode && pocketcode restart' });
+                  await conn.call('send', { id: target.id, text: '!' + upCmd });
                   toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
                   ui.closeSheet();
                 } catch (err) {
@@ -965,7 +967,7 @@ async function updateMachineSheet() {
             'Atau ketik langsung di chat sesi:',
           ),
           h('pre', { style: 'margin-top:4px;padding:8px;background:var(--bg2);border-radius:6px;user-select:all;font-size:12px;word-break:break-all' },
-            '!npm i -g github:arfakaisar/pocketcode && pocketcode restart'
+            '!' + upCmd
           ),
         ),
       );
