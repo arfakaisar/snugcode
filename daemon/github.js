@@ -30,7 +30,7 @@ const postJson = (url, body) =>
 // Device flow dipecah dua: mulai (dapat kode untuk pengguna) dan tunggu (token).
 // Token OAuth App tidak kedaluwarsa; hanya berhenti bila dicabut.
 export async function deviceFlowStart(clientId) {
-  const start = await postJson('https://github.com/login/device/code', { client_id: clientId, scope: 'repo read:user' });
+  const start = await postJson('https://github.com/login/device/code', { client_id: clientId, scope: 'repo read:user workflow' });
   if (!start.device_code) throw new Error(start.error_description || 'Device flow gagal dimulai');
   return start;
 }

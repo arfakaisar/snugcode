@@ -131,7 +131,7 @@ async function setup() {
     githubMode = opts[(+(await ask('Pilihan', sec.githubToken ? String(opts.length) : '1')) || 1) - 1]?.[1] || 'skip';
   }
   if (githubMode === 'token') sec.githubToken = flags['github-token'];
-  else if (githubMode === 'pat') sec.githubToken = await ask('Token (scope: repo)', '', { hidden: true });
+  else if (githubMode === 'pat') sec.githubToken = await ask('Token (scope: repo, workflow)', '', { hidden: true });
   else if (githubMode === 'cred') {
     sec.githubToken = await gitCredentialToken();
     if (!sec.githubToken) console.log(c.r('✗ Tidak ada kredensial GitHub tersimpan di git.'));

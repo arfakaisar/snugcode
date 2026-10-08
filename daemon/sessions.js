@@ -26,7 +26,14 @@ You are being driven through the "pocketcode" app, from a phone or from the pock
 - The repository is on the user's computer. Do NOT run \`git push\` yourself; the user pushes from the app (/push in the terminal). Committing is fine when asked.
 - Work inside the current working directory.`;
 
-const isGitPush = (tool, input) => tool === 'Bash' && /\bgit\s+push\b/.test(input?.command || '');
+// Perintah yang menulis ke remote selalu meminta izin, termasuk saat auto-izin aktif.
+// Opsi global git di depan subcommand ikut dikenali: `git -C dir push`, `git -c k=v push`.
+const GIT_PUSH_RE = /\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|--?[\w-]+(?:=(?:"[^"]*"|'[^']*'|\S+))?))*\s+push\b/i;
+const GH_WRITE_RE = /\bgh(?:\.exe)?\s+(?:pr\s+(?:create|merge)|release\s+create|repo\s+(?:create|delete|fork))\b/i;
+export const isRemoteWrite = (tool, input) => tool === 'Bash' && (GIT_PUSH_RE.test(input?.command || '') || GH_WRITE_RE.test(input?.command || ''));
+
+// Event riwayat yang disimpan di memori per sesi; yang lebih lama tetap ada di file .jsonl.
+const MEM_EVENTS = 3000;
 
 // Path binary Claude untuk query(): `claudeExecutable` di config.json (fallback manual)
 // atau binary dari paket platform SDK. Gagal lebih awal dengan pesan yang jelas.
@@ -101,32 +108,51 @@ export class Session extends EventEmitter {
     super();
     this.meta = meta;
     this.mgr = manager;
-    this.events = [];
-    this.seq = 0;
+    this._history = null; // dimuat dari .jsonl saat pertama dibutuhkan
+    this.trimmed = false;
+    this._lastSeq = 0;
     this.status = 'idle';
     this.query = null;
     this.perms = new Map(); // pid -> { resolve, tool, input }
-    this.alwaysAllow = new Set();
+    // "Selalu izinkan" disimpan di meta agar tetap berlaku setelah daemon restart.
+    this.alwaysAllow = new Set(meta.alwaysAllow || []);
     this.textBuf = '';
     this.textTimer = null;
     this.logFile = path.join(SESSIONS_DIR, meta.id + '.jsonl');
-    this.load();
   }
 
   get id() {
     return this.meta.id;
   }
 
+  get events() {
+    if (!this._history) this.load();
+    return this._history;
+  }
+
+  get seq() {
+    if (!this._history) this.load();
+    return this._lastSeq;
+  }
+
   load() {
+    this._history = [];
     if (!fs.existsSync(this.logFile)) return;
     for (const line of fs.readFileSync(this.logFile, 'utf8').split('\n')) {
       if (!line) continue;
       try {
         const e = JSON.parse(line);
-        this.events.push(e);
-        this.seq = e.seq;
+        this._history.push(e);
+        this._lastSeq = e.seq;
       } catch {}
     }
+    this.trim();
+  }
+
+  trim() {
+    if (this._history.length <= MEM_EVENTS) return;
+    this._history.splice(0, this._history.length - MEM_EVENTS);
+    this.trimmed = true;
   }
 
   summary() {
@@ -138,9 +164,11 @@ export class Session extends EventEmitter {
 
   emitEvent(e, { persist = true } = {}) {
     if (e.k !== 'text') this.flushText();
-    e.seq = ++this.seq;
+    const events = this.events;
+    e.seq = ++this._lastSeq;
     e.ts = Date.now();
-    this.events.push(e);
+    events.push(e);
+    if (events.length > MEM_EVENTS + 500) this.trim();
     if (persist) fs.appendFileSync(this.logFile, JSON.stringify(e) + '\n');
     this.emit('event', e);
   }
@@ -170,8 +198,13 @@ export class Session extends EventEmitter {
     return this.events.filter((e) => e.seq > seq);
   }
 
+  // true bila event setelah `seq` sebagian sudah dibuang dari memori.
+  missingSince(seq) {
+    return this.trimmed && (this.events[0]?.seq ?? 0) > seq + 1;
+  }
+
   pendingPerms() {
-    return [...this.perms.entries()].map(([pid, p]) => ({ pid, tool: p.tool, summary: toolSummary(p.tool, p.input, this.meta.cwd), title: p.title, push: isGitPush(p.tool, p.input) }));
+    return [...this.perms.entries()].map(([pid, p]) => ({ pid, tool: p.tool, summary: toolSummary(p.tool, p.input, this.meta.cwd), title: p.title, push: isRemoteWrite(p.tool, p.input), x: toolDetail(p.tool, p.input) }));
   }
 
   async send(text) {
@@ -224,7 +257,9 @@ export class Session extends EventEmitter {
         ...(effort ? { effort } : {}),
         resume: this.meta.claudeSessionId || undefined,
         includePartialMessages: true,
-        permissionMode: 'acceptEdits',
+        // 'default': Write/Edit ikut lewat canUseTool sehingga bisa disetujui dari HP
+        // (dengan cuplikan diff); auto-izin & "Selalu" tetap meloloskannya tanpa bertanya.
+        permissionMode: 'default',
         settingSources: ['project'],
         disallowedTools: ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode'],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: MOBILE_NOTE },
@@ -283,14 +318,14 @@ export class Session extends EventEmitter {
   }
 
   askPermission(tool, input, opts) {
-    const isPush = isGitPush(tool, input);
+    const isPush = isRemoteWrite(tool, input);
     if (!isPush && (SAFE_TOOLS.has(tool) || this.meta.auto || this.alwaysAllow.has(tool))) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
     const pid = randomBytes(6).toString('hex');
     return new Promise((resolve) => {
       this.perms.set(pid, { resolve, tool, input, title: opts?.title });
-      this.emitEvent({ k: 'perm', pid, tool, s: toolSummary(tool, input, this.meta.cwd), title: opts?.title, push: isPush }, { persist: false });
+      this.emitEvent({ k: 'perm', pid, tool, s: toolSummary(tool, input, this.meta.cwd), title: opts?.title, push: isPush, x: toolDetail(tool, input) }, { persist: false });
       this.mgr.notify(this, `Butuh izin: ${tool}`);
       opts?.signal?.addEventListener('abort', () => {
         if (this.perms.delete(pid)) resolve({ behavior: 'deny', message: 'dibatalkan' });
@@ -302,7 +337,12 @@ export class Session extends EventEmitter {
     const p = this.perms.get(pid);
     if (!p) return false;
     this.perms.delete(pid);
-    if (decision === 'always') this.alwaysAllow.add(p.tool);
+    // Push tidak pernah bisa "selalu diizinkan".
+    if (decision === 'always' && !isRemoteWrite(p.tool, p.input)) {
+      this.alwaysAllow.add(p.tool);
+      this.meta.alwaysAllow = [...this.alwaysAllow];
+      this.mgr.saveIndex();
+    }
     const allow = decision === 'allow' || decision === 'always';
     this.emitEvent({ k: 'permAnswer', pid, allow, tool: p.tool, s: toolSummary(p.tool, p.input, this.meta.cwd) });
     p.resolve(allow ? { behavior: 'allow', updatedInput: p.input } : { behavior: 'deny', message: 'Pengguna menolak aksi ini dari HP.' });
@@ -367,7 +407,7 @@ export class SessionManager {
     this.notify = notify || (() => {});
     this.sessions = new Map();
     try {
-      this.proxy = startRouterProxy(config.routerUrl, secrets.routerKey);
+      this.proxy = startRouterProxy(config.routerUrl);
     } catch (e) {
       this.log?.('! gagal memulai loopback proxy: ' + e.message);
     }

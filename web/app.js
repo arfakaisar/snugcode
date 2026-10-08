@@ -1889,12 +1889,9 @@ class Renderer {
     let add = 0;
     let del = 0;
     if (e.x) {
-      const mini = h('div', { class: 'diffmini' });
-      for (const ed of e.x.edits || [e.x]) {
-        if (ed.old) for (const l of ed.old.split('\n')) (del++, mini.append(h('span', { class: 'del' }, '- ' + l)));
-        if (ed.new) for (const l of ed.new.split('\n')) (add++, mini.append(h('span', { class: 'add' }, '+ ' + l)));
-      }
-      body.append(h('pre', { class: 'tout', style: 'max-height:none;padding-bottom:0' }, e.s || ''), mini);
+      const d = miniDiff(e.x);
+      ({ add, del } = d);
+      body.append(h('pre', { class: 'tout', style: 'max-height:none;padding-bottom:0' }, e.s || ''), d.el);
     }
     this.tools.set(e.id, { el, stat, body, name: e.name, add, del });
     this.append(el);
@@ -1972,12 +1969,24 @@ class Renderer {
         h('div', { class: 'q' }, ic('alert'), e.push ? 'Agen ingin PUSH ke GitHub' : `Izinkan ${e.tool}?`),
         e.title ? h('div', { class: 'pt' }, e.title) : null,
         h('pre', {}, e.summary || e.s || ''),
+        e.x ? miniDiff(e.x).el : null,
         buttons,
         this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} permintaan lagi`) : null,
       ),
     );
     requestAnimationFrame(() => this.keepBottom());
   }
+}
+// Cuplikan perubahan Edit/MultiEdit/Write ({ old?, new? } atau { edits: [...] }).
+function miniDiff(x) {
+  const el = h('div', { class: 'diffmini' });
+  let add = 0;
+  let del = 0;
+  for (const ed of x.edits || [x]) {
+    if (ed.old) for (const l of ed.old.split('\n')) (del++, el.append(h('span', { class: 'del' }, '- ' + l)));
+    if (ed.new) for (const l of ed.new.split('\n')) (add++, el.append(h('span', { class: 'add' }, '+ ' + l)));
+  }
+  return { el, add, del };
 }
 const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 
