@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PACKAGE_SPEC } from './defaults.js';
 import { loadConfig, saveConfig, HOME } from './config.js';
@@ -26,18 +26,25 @@ export function getInstallInfo(cfg = loadConfig()) {
 
   if (isGit) {
     try {
-      const gitDir = path.join(ROOT, '.git');
-      // Bila worktree, baca gitdir asli
-      let headPath = path.join(gitDir, 'HEAD');
-      if (fs.existsSync(gitDir) && fs.statSync(gitDir).isFile()) {
-        const gd = fs.readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim();
-        headPath = path.resolve(ROOT, gd, 'HEAD');
-      }
-      if (fs.existsSync(headPath)) {
-        const head = fs.readFileSync(headPath, 'utf8').trim();
-        commit = head.startsWith('ref: ') ? head.slice(16, 23) : head.slice(0, 7);
-      }
-    } catch {}
+      commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
+    } catch {
+      try {
+        const gitDir = path.join(ROOT, '.git');
+        let headPath = path.join(gitDir, 'HEAD');
+        if (fs.existsSync(gitDir) && fs.statSync(gitDir).isFile()) {
+          const gd = fs.readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim();
+          headPath = path.resolve(ROOT, gd, 'HEAD');
+        }
+        if (fs.existsSync(headPath)) {
+          const head = fs.readFileSync(headPath, 'utf8').trim();
+          if (!head.startsWith('ref: ')) commit = head.slice(0, 7);
+          else {
+            const refPath = path.resolve(path.dirname(headPath), head.slice(5));
+            if (fs.existsSync(refPath)) commit = fs.readFileSync(refPath, 'utf8').trim().slice(0, 7);
+          }
+        }
+      } catch {}
+    }
   }
 
   return {
@@ -131,7 +138,7 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
       throw new Error('Ada perubahan lokal di direktori git. Commit atau buang perubahan terlebih dahulu.');
     }
     await execFileAsync('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: ROOT, timeout: 60000 });
-    await execFileAsync(npmCmd, ['install', '--omit=dev'], { cwd: ROOT, timeout: 120000 }).catch(() => {});
+    await execFileAsync(npmCmd, ['install', '--omit=dev'], { cwd: ROOT, timeout: 120000, shell: process.platform === 'win32' }).catch(() => {});
     const { stdout: newHead } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT });
     const commit = newHead.trim();
     cfg.installedCommit = commit;
@@ -140,7 +147,7 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
   }
 
   // Pemasangan npm global
-  await execFileAsync(npmCmd, ['install', '-g', PACKAGE_SPEC], { timeout: 180000 });
+  await execFileAsync(npmCmd, ['install', '-g', PACKAGE_SPEC], { timeout: 180000, shell: process.platform === 'win32' });
   let commit = 'terbaru';
   try {
     const res = await fetch('https://api.github.com/repos/arfakaisar/pocketcode/commits/main', { headers: { 'user-agent': 'pocketcode' }, signal: AbortSignal.timeout(10000) });
