@@ -66,3 +66,25 @@ test('groupModels: varian effort ag/ digabung jadi slider', async () => {
   assert.equal(M.modelLabel('ag/gemini-3.5-flash-extra-low'), 'gemini-3.5-flash · x-low');
   assert.equal(M.ctxLabel(1048576), '1M');
 });
+
+test('updater: deteksi tipe instalasi dan versi paket', async () => {
+  const { getInstallInfo, checkUpdate } = await import('../daemon/updater.js');
+  const info = getInstallInfo();
+  assert.equal(info.version, '0.1.0');
+  assert.ok(['git', 'npm'].includes(info.installType));
+  assert.ok(info.commit);
+
+  const st = await checkUpdate();
+  assert.equal(typeof st.updateAvailable, 'boolean');
+  assert.ok(st.currentCommit);
+  assert.ok(['git', 'npm'].includes(st.installType));
+});
+
+test('keepawake: inisialisasi dan penghentian bersih', async () => {
+  const { startKeepAwake } = await import('../daemon/keepawake.js');
+  const ka = startKeepAwake();
+  assert.equal(typeof ka.stop, 'function');
+  assert.equal(typeof ka.active, 'function');
+  ka.stop();
+});
+

@@ -852,12 +852,86 @@ function showMachineMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'github', t1: ghBad() ? 'Login GitHub (perlu)' : 'Login ulang GitHub', t2: info.github && !ghBad() ? '@' + info.github + ' · tersambung' : 'push, PR, dan daftar repo', onclick: () => githubLoginSheet() }),
     ),
+    h('div', { class: 'label' }, 'Sistem & Pembaruan'),
+    h('div', { class: 'group' },
+      menuItem({
+        icon: 'spark',
+        t1: 'Perbarui pocketcode di PC',
+        t2: info.commit ? `Versi: ${info.commit}${info.version ? ' (' + info.version + ')' : ''}` : 'Periksa & pasang pembaruan jarak jauh',
+        onclick: () => updateMachineSheet(),
+      }),
+      menuItem({
+        icon: 'refresh',
+        t1: 'Restart daemon PC',
+        t2: info.preventSleep ? 'Cegah PC sleep: aktif' : 'Mulai ulang koneksi daemon',
+        onclick: async () => {
+          if (!confirm('Restart daemon pocketcode di PC sekarang? Sesi akan otomatis tersambung lagi setelah beberapa detik.')) return;
+          try {
+            const r = await conn.call('restart');
+            toast(r.message || 'Daemon me-restart…');
+            ui.closeSheet();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        },
+      }),
+    ),
     h('div', { class: 'label' }, 'Perangkat'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: () => Notification?.requestPermission().then((p) => toast('Notifikasi: ' + p)) }),
       menuItem({ icon: 'unlink', t1: 'Lupakan pairing HP ini', t2: 'Perlu PIN lagi untuk tersambung', danger: true, chev: false, onclick: () => (store.set('dev.' + current.m.id, null), ui.closeSheet(), openMachine(current.m)) }),
     ),
   );
+}
+
+async function updateMachineSheet() {
+  const body = h('div', {}, loading('Memeriksa pembaruan di PC…'));
+  ui.sheet(ui.head('Pembaruan PC', { sub: current.m.name }), body);
+  try {
+    const st = await conn.call('updateStatus');
+    const hasUpdate = st.updateAvailable;
+    const currentTxt = st.currentCommit ? `Commit saat ini: ${st.currentCommit}` : '';
+    const latestTxt = st.latestCommit ? `Versi terbaru: ${st.latestCommit}` : '';
+    const msgTxt = st.latestMessage ? `"${st.latestMessage}"` : '';
+
+    const btn = h(
+      'button',
+      {
+        class: 'btn primary',
+        style: 'margin-top:14px',
+        onclick: async (e) => {
+          const done = busyButton(e.currentTarget, 'Memperbarui di PC…');
+          try {
+            const res = await conn.call('update');
+            haptic(25);
+            toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 6000);
+            ui.closeSheet();
+          } catch (err) {
+            done();
+            toast('Pembaruan gagal: ' + err.message, true, 6000);
+          }
+        },
+      },
+      hasUpdate ? 'Perbarui Sekarang' : 'Paksa Perbarui Ulang',
+    );
+
+    body.replaceChildren(
+      h(
+        'div',
+        { class: 'empty', style: 'padding:16px 0' },
+        h('div', { class: 'big', style: hasUpdate ? 'color:var(--yellow)' : 'color:var(--green)' }, hasUpdate ? '⬆' : '✓'),
+        h('b', {}, hasUpdate ? 'Pembaruan Tersedia!' : 'pocketcode Sudah Versi Terbaru'),
+        hasUpdate && msgTxt ? h('div', { style: 'color:var(--fg);margin-top:4px;font-size:14px;word-break:break-word' }, msgTxt) : null,
+        h('div', { class: 'dim small', style: 'margin-top:8px' }, `${currentTxt} · ${latestTxt}`),
+      ),
+      btn,
+    );
+  } catch (e) {
+    body.replaceChildren(
+      h('div', { class: 'err' }, 'Gagal memeriksa pembaruan: ' + e.message),
+      h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => updateMachineSheet() }, 'Coba Lagi'),
+    );
+  }
 }
 
 // ---------- Pemilih model + slider effort ----------

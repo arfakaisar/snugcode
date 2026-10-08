@@ -384,6 +384,8 @@ const COMMANDS = [
   ['/pr', 'buat Pull Request [judul]'],
   ['/auto', 'nyalakan/matikan auto-izin'],
   ['/login', 'login ulang GitHub (push, PR, repo)'],
+  ['/update', 'periksa & pasang pembaruan jarak jauh'],
+  ['/restart', 'restart daemon di PC'],
   ['/clear', 'bersihkan layar'],
   ['/delete', 'hapus sesi ini'],
   ['/exit', 'keluar (sesi tetap jalan di PC)'],
@@ -1310,6 +1312,42 @@ class App {
           this.session = null;
           this.setFlash('Sesi dihapus');
           return this.pickSession();
+        }
+        case '/update': {
+          this.busyText = 'Memeriksa pembaruan…';
+          this.scheduleRender();
+          try {
+            const st = await this.cl.call('updateStatus');
+            this.busyText = null;
+            if (!st.updateAvailable && arg !== '--force') {
+              return this.setFlash(`✓ pocketcode sudah versi terbaru (${st.currentCommit})`);
+            }
+            this.print([
+              '',
+              bold(c.yellow('⬆ Pembaruan tersedia: ')) + c.yellow(st.latestCommit) + (st.latestMessage ? c.soft(' — ' + st.latestMessage) : ''),
+              dim(`  Komit saat ini: ${st.currentCommit}`),
+            ]);
+            if (!(await this.confirm('Update pocketcode', 'Pasang pembaruan dan restart daemon sekarang?'))) return;
+            this.busyText = 'Memasang pembaruan…';
+            this.scheduleRender();
+            const res = await this.cl.call('update');
+            this.busyText = null;
+            this.print(['', c.green('✓ ') + bold(res.message || 'Pembaruan selesai, daemon sedang me-restart.')]);
+          } catch (e) {
+            this.busyText = null;
+            return this.setFlash('Update gagal: ' + e.message, true);
+          }
+          return;
+        }
+        case '/restart': {
+          if (!(await this.confirm('Restart daemon', 'Restart daemon pocketcode sekarang?'))) return;
+          try {
+            await this.cl.call('restart');
+            this.print(['', c.green('● ') + bold('Daemon sedang me-restart…')]);
+          } catch (e) {
+            this.setFlash(e.message, true);
+          }
+          return;
         }
         default:
           return this.setFlash(`Perintah tidak dikenal: ${cmd} — /help`, true);

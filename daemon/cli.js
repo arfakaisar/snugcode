@@ -18,9 +18,10 @@ import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME } fr
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
+import { checkUpdate, performUpdate } from './updater.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
+const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: pocketcode "jelaskan repo ini".
@@ -436,6 +437,41 @@ async function tui() {
   await runTui({ prompt, pick: !!flags.pick || !!flags.sessions });
 }
 
+async function cliRestart() {
+  const pid = runningPid();
+  if (!pid) {
+    console.log(c.y('Daemon tidak sedang berjalan. Menjalankan daemon baru…'));
+    const newPid = spawnDetached();
+    return console.log(c.g(`✓ Daemon dijalankan (pid ${newPid}).`));
+  }
+  try {
+    process.kill(pid);
+  } catch {}
+  fs.rmSync(PID_FILE, { force: true });
+  for (let i = 0; i < 40 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
+  const newPid = spawnDetached();
+  console.log(c.g(`✓ Daemon di-restart (pid ${newPid}).`));
+}
+
+async function cliUpdate() {
+  const cfg = loadConfig();
+  const sec = loadSecrets();
+  console.log(c.b('Memeriksa pembaruan pocketcode…'));
+  const st = await checkUpdate(cfg, sec);
+  if (!st.updateAvailable && !flags.force) {
+    console.log(c.g('✓ pocketcode sudah versi terbaru') + c.d(` (${st.currentCommit})`));
+    return;
+  }
+  console.log(c.y('Ada pembaruan: ') + `${c.b(st.latestCommit)}${st.latestMessage ? ' — ' + st.latestMessage : ''}`);
+  console.log(c.d('Memasang pembaruan…'));
+  const r = await performUpdate(cfg, sec);
+  console.log(c.g(`✓ Pembaruan berhasil dipasang (${r.commit}).`));
+  if (runningPid()) {
+    console.log(c.d('Me-restart daemon…'));
+    await cliRestart();
+  }
+}
+
 function help() {
   console.log(`${c.b('pocketcode')} — coding agent di PC-mu, dari terminal & HP
 
@@ -447,12 +483,14 @@ function help() {
   pocketcode login            login ulang GitHub (token dicabut/kedaluwarsa)
   pocketcode autostart on     jalankan daemon di latar belakang + saat login
   pocketcode start | stop     jalankan / hentikan daemon
+  pocketcode restart          restart daemon di latar belakang
+  pocketcode update           periksa & pasang pembaruan jarak jauh
   pocketcode pin              ganti PIN / buka kunci
   pocketcode devices          HP yang terpasang;  pocketcode revoke <id|all>
   pocketcode status           ringkasan konfigurasi`);
 }
 
-const commands = { tui, help, setup, login, start, stop, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+const commands = { tui, help, setup, login, start, stop, restart: cliRestart, update: cliUpdate, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);

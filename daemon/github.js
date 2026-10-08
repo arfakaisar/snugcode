@@ -136,6 +136,14 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
     const head = (await git(baseDir, ['rev-parse', 'HEAD'])).trim();
     await git(baseDir, ['update-ref', '--no-deref', 'HEAD', head]);
   }
+  const lockFile = path.join(baseDir, '.git', 'index.lock');
+  try {
+    if (fs.existsSync(lockFile)) {
+      const stat = fs.statSync(lockFile);
+      if (Date.now() - stat.mtimeMs > 30000) fs.rmSync(lockFile, { force: true });
+    }
+  } catch {}
+  await git(baseDir, ['worktree', 'prune']).catch(() => {});
   await git(baseDir, ['fetch', '--prune', 'origin'], token);
   if (!base) base = (await git(baseDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], token).catch(() => 'origin/main')).trim().replace(/^origin\//, '');
 

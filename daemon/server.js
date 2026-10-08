@@ -9,6 +9,8 @@ import { SessionManager } from './sessions.js';
 import { listModels, probeModel } from './router.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, TOKEN_INVALID } from './github.js';
 import { GithubAuth } from './ghauth.js';
+import { getInstallInfo, checkUpdate, performUpdate, restartDaemon } from './updater.js';
+import { startKeepAwake } from './keepawake.js';
 
 const MAX_PIN_FAILS = 5;
 
@@ -17,6 +19,8 @@ export class Daemon {
     this.config = config;
     this.secrets = loadSecrets();
     this.log = log;
+    this.updaterMeta = getInstallInfo(config);
+    this.keepAwake = startKeepAwake({ log: (m) => this.log(m) });
     this.conns = new Map();
     this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => process.env.POCKETCODE_DEBUG && log(m), notify: (s, msg) => this.notify(s, msg) });
     this.backoff = 1000;
@@ -42,6 +46,7 @@ export class Daemon {
 
   stop() {
     this.stopped = true;
+    this.keepAwake?.stop();
     clearInterval(this.ping);
     this.ws?.close();
     this.ipc?.close();
@@ -149,7 +154,18 @@ class RpcConn {
 
   info() {
     const c = this.d.config;
-    return { name: c.machineName, model: c.model, smallModel: c.smallModel, router: c.routerUrl, github: c.githubLogin || null, githubState: this.d.github.state, platform: process.platform };
+    return {
+      name: c.machineName,
+      model: c.model,
+      smallModel: c.smallModel,
+      router: c.routerUrl,
+      github: c.githubLogin || null,
+      githubState: this.d.github.state,
+      platform: process.platform,
+      version: this.d.updaterMeta?.version || '0.1.0',
+      commit: this.d.updaterMeta?.commit || 'main',
+      preventSleep: this.d.keepAwake?.active?.() ?? false,
+    };
   }
 
   unsubscribe() {
@@ -164,6 +180,17 @@ class RpcConn {
     switch (m) {
       case 'info':
         return this.info();
+      case 'updateStatus':
+        return checkUpdate(d.config, sec);
+      case 'update': {
+        const res = await performUpdate(d.config, sec);
+        restartDaemon(d, { delay: 1200 });
+        return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };
+      }
+      case 'restart': {
+        restartDaemon(d, { delay: 1000 });
+        return { ok: true, message: 'Daemon sedang me-restart...' };
+      }
       case 'githubStatus':
         return p.check ? d.github.check() : d.github.status();
       case 'githubLogin':
