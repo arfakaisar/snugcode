@@ -66,6 +66,10 @@ Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master
   - Berjalan berkala setiap 30 menit saat daemon aktif.
   - Perintah CLI `pocketcode clean`, slash command `/clean` di TUI, dan tombol "Bersihkan folder tak terpakai" di menu Sistem & Pembaruan pada HP (PWA).
 
+### Autostart Tangguh Lintas Platform (`daemon/autostart.js`, `daemon/cli.js`, `daemon/updater.js`)
+- **Sinkronisasi Otomatis Jalur Eksekusi**: file startup sistem (Windows `pocketcode.vbs`, macOS launchd plist, Linux systemd service) kini otomatis disinkronkan ke lokasi binary aktif setiap kali daemon dinyalakan (`pocketcode start`) dan setiap kali pembaruan dipasang (`performUpdate`).
+- **Mencegah Eksekusi Versi Usang**: jika pengguna pernah mengaktifkan autostart dari folder repositori lokal lama lalu memperbarui pocketcode lewat npm global atau PWA di HP, entri autostart otomatis diperbarui agar saat PC di-restart, sistem dijamin selalu menjalankan pocketcode versi paling baru.
+
 ### Lainnya
 - **Identitas & Pengetahuan Sistem Pocketcode (`daemon/prompt.js`)**: System prompt terpadu
   disuntikkan ke Claude Agent SDK. Model kini sepenuhnya sadar bahwa ia adalah agen coding dari
