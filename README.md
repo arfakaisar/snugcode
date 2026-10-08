@@ -60,7 +60,7 @@ pocketcode --pick              # pilih sesi lain (termasuk sesi dari HP)
 | `enter` | kirim; saat agen bekerja, pesan masuk antrean |
 | `\` + `enter` / `alt+enter` | baris baru |
 | `!` | mode shell (perintah langsung di folder sesi) |
-| `/` | perintah: `/model` `/sessions` `/new` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/help` … |
+| `/` | perintah: `/model` `/sessions` `/new` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/update` `/restart` `/help` … |
 | `esc` | hentikan agen |
 | `ctrl+o` | output lengkap tool terakhir |
 | `ctrl+c` ×2 | keluar (sesi tetap berjalan di PC) |
@@ -80,6 +80,7 @@ Cara pakai:
 - **⚡ auto-izin**: semua perintah dijalankan tanpa bertanya, kecuali push.
 - **⎇ git**: status, diff berwarna, commit, push, dan Pull Request.
 - **■**: hentikan agen yang sedang berjalan.
+- **⋯ menu PC**: perbarui pocketcode di PC secara jarak jauh, restart daemon, ganti model default, atau login ulang GitHub.
 - **◆ model**: pilih model 9router, di menu `⋯` (default untuk sesi baru dan model kecil), saat membuat sesi, atau di tengah sesi (berlaku mulai pesan berikutnya).
   - Varian effort yang di 9router berupa ID terpisah (misal `ag/gemini-3.8-flash-low` / `-medium` / `-high`) digabung jadi **satu model dengan slider effort**. Kalau ada versi tanpa akhiran, ia muncul sebagai pilihan **auto** (bawaan router). Model yang hanya punya satu tingkat (misal `ag/gemini-3.1-pro-low`) ditampilkan dengan label tetap.
   - Model yang dipilih **diuji otomatis** dengan satu pesan kecil. Ini penting karena sebagian model yang sudah dihentikan tetap membalas "sukses" dengan teks seperti *"…is no longer available"*, dan hal itu tidak terlihat dari daftar model.
@@ -92,8 +93,10 @@ Cara pakai:
 | `pocketcode` | UI terminal (alias: `pocket`) |
 | `pocketcode setup` | Setup / ubah konfigurasi |
 | `pocketcode start` | Jalankan daemon di terminal ini |
-| `pocketcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
 | `pocketcode stop` | Hentikan daemon latar belakang |
+| `pocketcode restart` | Restart daemon di latar belakang |
+| `pocketcode update` | Periksa dan pasang pembaruan jarak jauh |
+| `pocketcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
 | `pocketcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali |
 | `pocketcode devices` | Daftar HP yang sudah dipasangkan |
 | `pocketcode revoke <id\|all>` | Cabut akses HP |
@@ -142,7 +145,7 @@ node test/worktree.it.mjs                  # skenario branch/worktree (butuh int
 
 ## TODO / ide berikutnya
 
-- Integrasi keychain OS untuk `secrets.json`, dan opsi "cegah sleep" selama sesi aktif.
+- Integrasi keychain OS untuk `secrets.json`.
 - Web Push notification (saat ini notifikasi hanya muncul ketika PWA terbuka).
 - Pane shell interaktif (PTY) dan upload gambar/screenshot ke agen.
 - Dukungan model Claude asli (bagian kedua rencana): cukup tambahkan pilihan provider per sesi di `daemon/sessions.js`.
