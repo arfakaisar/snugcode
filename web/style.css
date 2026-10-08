@@ -555,6 +555,41 @@ input[type=range]:disabled { opacity: .3; }
 .probe { font-size: 12px; min-height: 20px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; word-break: break-word; }
 .probe .ok { color: var(--green); }
 
+/* ---------- pembaruan PC ---------- */
+.card.update-banner {
+  border-color: #1e5e3a;
+  background: linear-gradient(180deg, #0e2a1a, var(--surface));
+  align-items: center;
+  margin-bottom: 12px;
+}
+.card.update-banner .name {
+  color: #7ee787;
+  white-space: normal;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.card.update-banner .avatar.up-avatar {
+  background: #134e2c;
+  color: var(--green);
+}
+.btn-up-now {
+  padding: 8px 14px;
+  background: var(--green);
+  color: #07090d;
+  font-weight: 700;
+  font-size: 13px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  flex: none;
+  cursor: pointer;
+  transition: opacity .15s, transform .1s;
+}
+.btn-up-now:active {
+  transform: scale(.95);
+  opacity: .9;
+}
+
 /* ---------- login GitHub ---------- */
 .card.ghwarn { border-color: #6e2a2f; background: linear-gradient(180deg, #2a1416, var(--surface)); align-items: center; }
 .card.ghwarn .name { color: #ffb3b3; white-space: normal; }

@@ -520,7 +520,11 @@ function showLogin() {
 // ---------- Layar: daftar PC ----------
 // Posisi terakhir (PC + sesi) disimpan agar saat PWA dibuka ulang — mis. iOS
 // mematikannya di latar belakang — pengguna langsung kembali ke sesi yang sama.
-const goMachines = () => (store.set('last', null), showMachines());
+const goMachines = () => {
+  clearInterval(current?.updateTimer);
+  store.set('last', null);
+  showMachines();
+};
 
 async function showMachines({ resume = false } = {}) {
   conn?.close();
@@ -608,12 +612,16 @@ function openMachine(m, { sid } = {}) {
     const first = !current.ready;
     current.ready = true;
     current.info = info;
+    clearInterval(current.updateTimer);
+    current.updateTimer = setInterval(() => checkUpdateStatus(true), 90000);
+    checkUpdateStatus(false);
     if (first) showSessions();
     else if (current.session) (reattach(), ui.sub(sessionSub(current.session)));
     else showSessionsMeta();
   });
   conn.on('events', (msg) => current?.onEvents?.(msg));
   conn.on('github', (msg) => onGithubStatus(msg));
+  conn.on('update', (st) => onUpdateStatus(st, true));
   conn.on('notice', (msg) => {
     if (current?.session?.id === msg.sid && document.visibilityState === 'visible') return;
     toast(`${msg.title}: ${msg.msg}`);
@@ -691,11 +699,13 @@ async function showSessions() {
   clearInterval(current.workTimer);
   ui.set(current.m.name, { back: goMachines, dot: 'on', actions: [{ icon: 'dots', label: 'Pengaturan PC', onclick: showMachineMenu }] });
   showSessionsMeta();
+  setTimeout(renderUpdateBanner);
   setTimeout(renderGhBanner);
+  checkUpdateStatus(false);
   const list = h('div', {}, skeletons(3));
   ui.view(
     h('div', { class: 'session' },
-      scrollCol(h('div', { id: 'ghBanner' }), list, h('div', { style: 'height:80px' })),
+      scrollCol(h('div', { id: 'updateBanner' }), h('div', { id: 'ghBanner' }), list, h('div', { style: 'height:80px' })),
       h('button', { class: 'fab', onclick: () => (haptic(), showNewSession()) }, ic('plus'), 'Sesi baru'),
     ),
   );
@@ -740,7 +750,82 @@ function sessionCard(s, i) {
 function showSessionsMeta() {
   const info = current?.info;
   if (!info || current.session) return;
-  ui.sub(`◆ ${M.modelLabel(info.model)}${info.github ? ' · @' + info.github : ' · GitHub belum login'}`);
+  const up = current?.updateStatus?.updateAvailable ? ' · ⬆ update tersedia' : '';
+  ui.sub(`◆ ${M.modelLabel(info.model)}${up}${info.github ? ' · @' + info.github : ' · GitHub belum login'}`);
+}
+
+// ---------- Pembaruan PC Otomatis (dari HP) ----------
+function renderUpdateBanner() {
+  const el = document.getElementById('updateBanner');
+  if (!el) return;
+  const st = current?.updateStatus;
+  if (!st?.updateAvailable) return el.replaceChildren();
+
+  const sha = st.latestCommit ? st.latestCommit.slice(0, 7) : 'terbaru';
+  const behind = st.commitsBehind > 1 ? `${st.commitsBehind} commit tertinggal` : 'Pembaruan baru tersedia';
+  const msg = st.latestMessage ? `"${st.latestMessage}"` : behind;
+
+  const upBtn = h(
+    'button',
+    {
+      class: 'btn-up-now',
+      onclick: async (e) => {
+        e.stopPropagation();
+        const done = busyButton(e.currentTarget, 'Memperbarui…');
+        try {
+          haptic(20);
+          const res = await conn.call('update');
+          haptic(25);
+          toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 7000);
+          current.updateStatus = null;
+          renderUpdateBanner();
+          showSessionsMeta();
+        } catch (err) {
+          done();
+          toast('Pembaruan gagal: ' + err.message, true, 6000);
+        }
+      },
+    },
+    'Perbarui PC',
+  );
+
+  el.replaceChildren(
+    h(
+      'button',
+      {
+        class: 'card update-banner',
+        onclick: () => updateMachineSheet(),
+      },
+      h('span', { class: 'avatar up-avatar' }, ic('spark')),
+      h(
+        'span',
+        { class: 'grow' },
+        h('div', { class: 'name' }, `Pembaruan PC Tersedia (${sha})`),
+        h('div', { class: 'sub', style: 'white-space:normal' }, `${msg} · Ketuk untuk rincian`),
+      ),
+      upBtn,
+    ),
+  );
+}
+
+function onUpdateStatus(st, notify = false) {
+  if (!current) return;
+  const was = current.updateStatus?.updateAvailable;
+  current.updateStatus = st;
+  renderUpdateBanner();
+  showSessionsMeta();
+  if (st.updateAvailable && !was && notify) {
+    haptic(15);
+    toast(`Pembaruan pocketcode tersedia (${st.latestCommit})! Ketuk banner untuk perbarui.`, false, 6000);
+  }
+}
+
+async function checkUpdateStatus(notify = false) {
+  if (!conn || !current?.ready) return;
+  try {
+    const st = await conn.call('updateStatus');
+    onUpdateStatus(st, notify);
+  } catch {}
 }
 
 // ---------- Login GitHub PC (dari HP) ----------
