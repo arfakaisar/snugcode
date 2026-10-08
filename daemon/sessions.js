@@ -13,6 +13,7 @@ import { startRouterProxy } from './proxy.js';
 import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
+import { cleanupWorkspaces, safeRm } from './cleaner.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(SESSIONS_DIR, 'index.json');
@@ -444,10 +445,24 @@ export class SessionManager {
       index = JSON.parse(fs.readFileSync(INDEX, 'utf8'));
     } catch {}
     for (const meta of index) if (fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
+    // Pindai dan bersihkan folder yatim secara otomatis di latar belakang
+    setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500);
+    this.cleanupTimer = setInterval(() => this.cleanupOrphans().catch(() => {}), 30 * 60 * 1000);
   }
 
   close() {
     this.proxy?.close();
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+  }
+
+  async cleanupOrphans(opts) {
+    if (this.cleaning) return { removedWorktrees: [], removedRepos: [], removedLogs: [] };
+    this.cleaning = true;
+    try {
+      return await cleanupWorkspaces(this.sessions, opts);
+    } finally {
+      this.cleaning = false;
+    }
   }
 
   // Di Windows claude.exe yang masih jalan mengunci file-nya sehingga npm gagal
@@ -503,11 +518,18 @@ export class SessionManager {
 
   async remove(id) {
     const s = this.get(id);
-    await s.interrupt();
+    s.close();
+    await new Promise((r) => setTimeout(r, 150));
     this.sessions.delete(id);
     this.saveIndex();
-    fs.rmSync(s.logFile, { force: true });
+    try {
+      safeRm(s.logFile);
+    } catch {}
     // Folder lokal milik pengguna tidak pernah dihapus; hanya riwayat sesinya.
-    if (!s.meta.local) await removeWorktree(s.meta.cwd);
+    if (!s.meta.local) {
+      await removeWorktree(s.meta.cwd).catch(() => {});
+    }
+    // Bersihkan repositori atau folder yatim yang sudah tidak terpakai
+    await this.cleanupOrphans({ minAgeMs: 0 }).catch(() => {});
   }
 }

@@ -295,6 +295,8 @@ class RpcConn {
       case 'delete':
         await S.remove(p.id);
         return true;
+      case 'cleanup':
+        return S.cleanupOrphans({ minAgeMs: 0 });
       case 'status':
         return gitStatus(S.get(p.id).meta.cwd);
       case 'diff':

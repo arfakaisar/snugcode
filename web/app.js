@@ -946,6 +946,26 @@ function showMachineMenu() {
         onclick: () => updateMachineSheet(),
       }),
       menuItem({
+        icon: 'trash',
+        t1: 'Bersihkan folder tak terpakai',
+        t2: 'Hapus worktree & repo yatim di PC',
+        onclick: async () => {
+          try {
+            toast('Memindai folder…');
+            const r = await conn.call('cleanup');
+            const wtCount = r.removedWorktrees?.length || 0;
+            const repoCount = r.removedRepos?.length || 0;
+            if (wtCount === 0 && repoCount === 0) {
+              toast('Workspace PC sudah bersih.');
+            } else {
+              toast(`Dibersihkan: ${wtCount} worktree, ${repoCount} repo`);
+            }
+          } catch (e) {
+            toast(e.message, true);
+          }
+        },
+      }),
+      menuItem({
         icon: 'refresh',
         t1: 'Restart daemon PC',
         t2: info.preventSleep ? 'Cegah PC sleep: aktif' : 'Mulai ulang koneksi daemon',

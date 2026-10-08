@@ -14,7 +14,7 @@ import util from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME } from './config.js';
+import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR } from './config.js';
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
@@ -22,7 +22,7 @@ import { fastModelVariant } from '../shared/models.js';
 import { checkUpdate, performUpdate } from './updater.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
+const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: pocketcode "jelaskan repo ini".
@@ -499,6 +499,27 @@ async function stopAndWait() {
   return true;
 }
 
+async function cliClean() {
+  const { cleanupWorkspaces } = await import('./cleaner.js');
+  const indexFile = path.join(SESSIONS_DIR, 'index.json');
+  let sessions = [];
+  try {
+    sessions = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+  } catch {}
+  console.log(c.b('Memindai workspaces PC untuk folder yatim…'));
+  const r = await cleanupWorkspaces(sessions, { minAgeMs: 0 });
+  const wtCount = r.removedWorktrees.length;
+  const repoCount = r.removedRepos.length;
+  const logCount = r.removedLogs.length;
+  if (wtCount === 0 && repoCount === 0 && logCount === 0) {
+    console.log(c.g('✓ Workspace bersih. Tidak ada folder atau repositori yatim.'));
+  } else {
+    if (wtCount > 0) console.log(c.g(`✓ Dihapus ${wtCount} worktree yatim:`), r.removedWorktrees.map((w) => path.basename(w)).join(', '));
+    if (repoCount > 0) console.log(c.g(`✓ Dihapus ${repoCount} repositori tak terpakai:`), r.removedRepos.map((r) => path.basename(r)).join(', '));
+    if (logCount > 0) console.log(c.g(`✓ Dihapus ${logCount} file log basi:`), r.removedLogs.join(', '));
+  }
+}
+
 function help() {
   console.log(`${c.b('pocketcode')} — coding agent di PC-mu, dari terminal & HP
 
@@ -512,12 +533,13 @@ function help() {
   pocketcode start | stop     jalankan / hentikan daemon
   pocketcode restart          restart daemon di latar belakang
   pocketcode update           periksa & pasang pembaruan jarak jauh
+  pocketcode clean            pindai & bersihkan worktree / repo yatim
   pocketcode pin              ganti PIN / buka kunci
   pocketcode devices          HP yang terpasang;  pocketcode revoke <id|all>
   pocketcode status           ringkasan konfigurasi`);
 }
 
-const commands = { tui, help, setup, login, start, stop, restart: cliRestart, update: cliUpdate, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+const commands = { tui, help, setup, login, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);

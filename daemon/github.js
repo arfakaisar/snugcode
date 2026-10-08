@@ -3,6 +3,7 @@ import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSPACES } from './config.js';
+import { safeRm } from './cleaner.js';
 
 const API = 'https://api.github.com';
 export const TOKEN_INVALID = 'Login GitHub di PC ini sudah tidak berlaku (token dicabut). Login ulang: tombol "Login GitHub" di aplikasi HP, /login di terminal, atau `pocketcode login`.';
@@ -203,8 +204,13 @@ export function currentBranch(cwd) {
 
 export async function removeWorktree(cwd) {
   const baseDir = path.join(path.dirname(cwd), '_base');
-  await git(baseDir, ['worktree', 'remove', '--force', cwd]).catch(() => fs.rmSync(cwd, { recursive: true, force: true }));
-  await git(baseDir, ['worktree', 'prune']).catch(() => {});
+  try {
+    if (fs.existsSync(baseDir)) {
+      await git(baseDir, ['worktree', 'remove', '--force', cwd]).catch(() => {});
+      await git(baseDir, ['worktree', 'prune']).catch(() => {});
+    }
+  } catch {}
+  safeRm(cwd);
 }
 
 export async function gitStatus(cwd, token) {
