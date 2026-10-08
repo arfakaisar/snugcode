@@ -12,6 +12,7 @@ import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from
 import { startRouterProxy } from './proxy.js';
 import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
+import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(SESSIONS_DIR, 'index.json');
@@ -19,12 +20,6 @@ const OUT_LIMIT = 4000;
 
 // Tool yang tidak pernah butuh izin di sesi ini.
 const SAFE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'TodoWrite', 'Task', 'Agent', 'WebSearch', 'WebFetch', 'NotebookRead', 'ToolSearch']);
-
-const MOBILE_NOTE = `
-You are being driven through the "pocketcode" app, from a phone or from the pocketcode terminal UI (the same session can be continued on either).
-- The user may read your output on a small screen: keep messages concise, prefer short paragraphs and lists.
-- The repository is on the user's computer. Do NOT run \`git push\` yourself; the user pushes from the app (/push in the terminal). Committing is fine when asked.
-- Work inside the current working directory.`;
 
 // Perintah yang menulis ke remote selalu meminta izin, termasuk saat auto-izin aktif.
 // Opsi global git di depan subcommand ikut dikenali: `git -C dir push`, `git -c k=v push`.
@@ -283,7 +278,7 @@ export class Session extends EventEmitter {
         permissionMode: 'default',
         settingSources: ['project'],
         disallowedTools: ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode'],
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: MOBILE_NOTE },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: POCKETCODE_SYSTEM_PROMPT },
         canUseTool: (tool, input, opts) => this.askPermission(tool, input, opts),
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
       },
