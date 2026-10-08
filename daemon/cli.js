@@ -447,8 +447,15 @@ async function cliRestart() {
   try {
     process.kill(pid);
   } catch {}
+  for (let i = 0; i < 40; i++) {
+    try {
+      process.kill(pid, 0);
+      await new Promise((r) => setTimeout(r, 100));
+    } catch {
+      break;
+    }
+  }
   fs.rmSync(PID_FILE, { force: true });
-  for (let i = 0; i < 40 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
   const newPid = spawnDetached();
   console.log(c.g(`✓ Daemon di-restart (pid ${newPid}).`));
 }

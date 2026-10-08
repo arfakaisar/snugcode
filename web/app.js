@@ -927,6 +927,50 @@ async function updateMachineSheet() {
       btn,
     );
   } catch (e) {
+    if (isOldDaemon(e)) {
+      body.replaceChildren(
+        h(
+          'div',
+          { class: 'empty', style: 'padding:16px 0' },
+          h('div', { class: 'big', style: 'color:var(--yellow)' }, '⬆'),
+          h('b', {}, 'Daemon PC Perlu Pembaruan Awal'),
+          h('div', { class: 'dim small', style: 'margin-top:8px;line-height:1.5' },
+            'Daemon di PC masih versi lama sebelum ada fitur pembaruan otomatis jarak jauh. Klik tombol di bawah untuk memasang pembaruan ke PC lewat sesi aktif:'
+          ),
+          h(
+            'button',
+            {
+              class: 'btn primary',
+              style: 'margin-top:14px',
+              onclick: async (btnEv) => {
+                const done = busyButton(btnEv.currentTarget, 'Mengirim perintah update…');
+                try {
+                  const list = await conn.call('sessions');
+                  let target = list[0];
+                  if (!target) {
+                    target = await conn.call('create', { local: true });
+                  }
+                  await conn.call('send', { id: target.id, text: '!npm i -g github:arfakaisar/pocketcode && pocketcode restart' });
+                  toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
+                  ui.closeSheet();
+                } catch (err) {
+                  done();
+                  toast('Gagal: ' + err.message, true);
+                }
+              },
+            },
+            'Perbarui PC Sekarang (via Sesi)',
+          ),
+          h('div', { class: 'dim small', style: 'margin-top:14px;font-size:12px' },
+            'Atau ketik langsung di chat sesi:',
+          ),
+          h('pre', { style: 'margin-top:4px;padding:8px;background:var(--bg2);border-radius:6px;user-select:all;font-size:12px;word-break:break-all' },
+            '!npm i -g github:arfakaisar/pocketcode && pocketcode restart'
+          ),
+        ),
+      );
+      return;
+    }
     body.replaceChildren(
       h('div', { class: 'err' }, 'Gagal memeriksa pembaruan: ' + e.message),
       h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => updateMachineSheet() }, 'Coba Lagi'),
