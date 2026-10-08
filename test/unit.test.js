@@ -134,44 +134,115 @@ test('groupModels: cc/claude-opus-5-5 menghasilkan virtual slider effort', async
   assert.equal(resolvedAuto.effort, null);
 });
 
-test('loopback proxy: sanitasi header dan penghentian bersih', async () => {
+// Upstream tiruan: handler(req, res) menentukan cara membalas.
+async function withProxy(handler, fn) {
   const http = await import('node:http');
-  const { startRouterProxy, stripIdeToolSuffix } = await import('../daemon/proxy.js');
+  const { startRouterProxy } = await import('../daemon/proxy.js');
+  const up = http.createServer(handler);
+  await new Promise((r) => up.listen(0, '127.0.0.1', r));
+  const proxy = startRouterProxy(`http://127.0.0.1:${up.address().port}/v1`);
+  try {
+    return await fn(await proxy.ready());
+  } finally {
+    proxy.close();
+    up.closeAllConnections?.();
+    up.close();
+  }
+}
 
+test('loopback proxy: sanitasi header, tanpa menyuntikkan API key', async () => {
+  const { stripIdeToolSuffix } = await import('../daemon/proxy.js');
   assert.equal(stripIdeToolSuffix('{"name":"Bash_ide"}'), '{"name":"Bash"}');
   assert.equal(stripIdeToolSuffix('{"name": "Read_ide"}'), '{"name":"Read"}');
   assert.equal(stripIdeToolSuffix('{"name":"normal_tool"}'), '{"name":"normal_tool"}');
 
-  let interceptedHeaders = null;
-  const mockUpstream = http.createServer((req, res) => {
-    interceptedHeaders = req.headers;
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.write('event: content_block_start\ndata: {"content_block":{"name":"Bash_ide"}}\n\n');
-    res.end();
-  });
-
-  await new Promise((resolve) => mockUpstream.listen(0, '127.0.0.1', resolve));
-  const upstreamPort = mockUpstream.address().port;
-
-  const proxy = startRouterProxy(`http://127.0.0.1:${upstreamPort}`, 'test-key');
-  await new Promise((resolve) => proxy.server.once('listening', resolve));
-
-  const res = await fetch(proxy.url + '/v1/messages', {
-    headers: {
-      'user-agent': 'claude-cli/1.0.0',
-      'x-app': 'cli',
-      'other': 'keep',
+  let seen = null;
+  const text = await withProxy(
+    (req, res) => {
+      seen = req.headers;
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end('event: content_block_start\ndata: {"content_block":{"name":"Bash_ide"}}\n\n');
     },
-  });
-  const text = await res.text();
-  assert.ok(text.includes('"name":"Bash"'));
-  assert.ok(!text.includes('Bash_ide'));
-  assert.equal(interceptedHeaders['user-agent'], 'pocketcode/0.1');
-  assert.equal(interceptedHeaders['x-app'], undefined);
-  assert.equal(interceptedHeaders['other'], 'keep');
-  assert.equal(interceptedHeaders['x-api-key'], 'test-key');
-
-  proxy.close();
-  mockUpstream.close();
+    (url) => fetch(url + '/v1/messages', { headers: { 'user-agent': 'claude-cli/1.0.0', 'x-app': 'cli', other: 'keep' } }).then((r) => r.text()),
+  );
+  assert.ok(text.includes('"name":"Bash"') && !text.includes('Bash_ide'));
+  assert.equal(seen['user-agent'], 'pocketcode/0.1');
+  assert.equal(seen['x-app'], undefined);
+  assert.equal(seen.other, 'keep');
+  // Request tanpa kredensial (mis. dari program lain di PC) tidak boleh mendapat key 9router.
+  assert.equal(seen['x-api-key'], undefined);
+  assert.equal(seen.authorization, undefined);
 });
 
+test('loopback proxy: _ide terbelah di batas chunk & UTF-8 multi-byte tetap utuh', async () => {
+  const event = 'data: {"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash_ide","input":{}}}\n\n';
+  const payload = Buffer.from('x'.repeat(100) + '\n' + event + 'data: {"text":"✓ selesai — ok"}\n\n');
+  // Potong di setiap posisi di dalam "Bash_ide" dan di tengah karakter ✓ (3 byte).
+  const nameAt = payload.indexOf('Bash_ide');
+  const checkAt = payload.indexOf(Buffer.from('✓'));
+  const cuts = [...Array(10).keys()].map((i) => nameAt - 1 + i).concat([checkAt + 1, checkAt + 2]);
+  for (const cut of cuts) {
+    const text = await withProxy(
+      (req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(payload.subarray(0, cut));
+        setTimeout(() => res.end(payload.subarray(cut)), 20);
+      },
+      (url) => fetch(url + '/v1/messages').then((r) => r.text()),
+    );
+    assert.ok(!text.includes('Bash_ide'), 'potongan di byte ' + cut);
+    assert.ok(text.includes('"name":"Bash"'), 'potongan di byte ' + cut);
+    assert.ok(text.includes('✓ selesai — ok'), 'UTF-8 rusak di byte ' + cut);
+  }
+});
+
+test('loopback proxy: koneksi router putus di tengah stream -> klien tidak menggantung', async () => {
+  const outcome = await withProxy(
+    (req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('data: {"type":"message_start"}\n\n');
+      setTimeout(() => req.socket.destroy(), 30);
+    },
+    (url) =>
+      fetch(url + '/v1/messages', { signal: AbortSignal.timeout(4000) })
+        .then((r) => r.text())
+        .then(() => 'selesai', (e) => (e.name === 'TimeoutError' ? 'menggantung' : 'error')),
+  );
+  assert.equal(outcome, 'error');
+});
+
+test('loopback proxy: router tidak bisa dihubungi -> 502 berformat error Anthropic', async () => {
+  const net = await import('node:net');
+  const { startRouterProxy } = await import('../daemon/proxy.js');
+  const srv = net.createServer();
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  await new Promise((r) => srv.close(r)); // port kosong
+  const proxy = startRouterProxy(`http://127.0.0.1:${port}`);
+  const res = await fetch((await proxy.ready()) + '/v1/messages', { method: 'POST', body: '{}' });
+  proxy.close();
+  assert.equal(res.status, 502);
+  const j = await res.json();
+  assert.equal(j.type, 'error');
+  assert.match(j.error.message, /Router proxy error/);
+});
+
+test('effort: model claude di provider non-cc tidak diberi slider virtual', async () => {
+  const M = await import('../shared/models.js');
+  const [g] = M.groupModels(['ag/claude-opus-4-6-thinking']);
+  assert.equal(g.slider, false);
+  assert.deepEqual(g.levels, []);
+  assert.deepEqual(M.resolveModelEffort('ag/claude-opus-4-6-thinking'), { actualModel: 'ag/claude-opus-4-6-thinking', effort: null });
+  // Varian effort asli dari router (ID terpisah) tetap diteruskan apa adanya.
+  assert.deepEqual(M.resolveModelEffort('ag/gemini-3.8-flash-high'), { actualModel: 'ag/gemini-3.8-flash-high', effort: null });
+  assert.deepEqual(M.resolveModelEffort('claude-sonnet-5-5-max'), { actualModel: 'claude-sonnet-5-5', effort: 'max' });
+});
+
+test('izin: push & penulisan ke remote selalu dikenali', async () => {
+  const { isRemoteWrite } = await import('../daemon/sessions.js');
+  const yes = ['git push', 'git push -u origin HEAD', 'cd x && git push --force', 'git -C ../repo push', 'git -c http.extraheader=x push origin main', 'git --no-pager push', 'git.exe push', 'gh pr create --fill', 'gh pr merge 3', 'gh release create v1'];
+  const no = ['git status', 'git log --grep push', 'echo pushing', 'git commit -m "push later"', 'gh pr list', 'npm run push-docs'];
+  for (const cmd of yes) assert.ok(isRemoteWrite('Bash', { command: cmd }), cmd);
+  for (const cmd of no) assert.ok(!isRemoteWrite('Bash', { command: cmd }), cmd);
+  assert.ok(!isRemoteWrite('Read', { command: 'git push' }));
+});

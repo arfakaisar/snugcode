@@ -76,7 +76,7 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 Cara pakai:
 - **+ Sesi baru**: pilih repo, lalu branch baru (default `pocket/<id>`) atau lanjutkan branch yang sudah ada. Setiap sesi memakai git worktree sendiri.
 - Ketik permintaan seperti biasa. Awali dengan `!` untuk menjalankan perintah shell langsung, misal `!npm test`.
-- **Prompt izin**: perintah yang mengubah sesuatu meminta *Izinkan / Selalu / Tolak*. `git push` dari agen selalu meminta izin.
+- **Prompt izin**: perintah shell dan perubahan file (Write/Edit, lengkap dengan cuplikan diff) meminta *Izinkan / Selalu / Tolak*. `git push` dan `gh pr create|merge` dari agen selalu meminta izin.
 - **⚡ auto-izin**: semua perintah dijalankan tanpa bertanya, kecuali push.
 - **⎇ git**: status, diff berwarna, commit, push, dan Pull Request.
 - **■**: hentikan agen yang sedang berjalan.
@@ -112,7 +112,8 @@ Data disimpan di `~/.pocketcode` (bisa diganti dengan env `POCKETCODE_HOME`):
 
 - Relay tidak pernah melihat PIN, isi percakapan, kode, key 9router, atau token GitHub.
 - Token GitHub disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen.
-- Agen bekerja di worktree repo. Perintah shell non-read-only meminta izin dari HP, kecuali auto-izin dinyalakan.
+- Agen bekerja di worktree repo. Perintah shell dan perubahan file meminta izin dari HP, kecuali auto-izin dinyalakan.
+- Loopback proxy lokal (`127.0.0.1`) tidak menambahkan key 9router ke request, jadi program lain di PC tidak bisa memakainya lewat proxy.
 - `settingSources: ['project']` berarti `CLAUDE.md` dan `.claude/settings.json` dari repo ikut dimuat, termasuk hook di dalamnya. Pakai hanya untuk repo yang kamu percaya.
 - `secrets.json` saat ini berupa file biasa (izin 600 di macOS/Linux). Integrasi keychain OS ada di daftar TODO.
 

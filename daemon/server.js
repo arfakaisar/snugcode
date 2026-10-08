@@ -265,14 +265,15 @@ class RpcConn {
         s.on('event', listener);
         this.sub = { session: s, listener };
         // Frame relay dibatasi ~1MB: kirim riwayat terbaru saja bila terlalu besar.
-        const all = s.since(p.since || 0);
+        const since = p.since || 0;
+        const all = s.since(since);
         const events = [];
         let size = 0;
         for (let i = all.length - 1; i >= 0 && size < 500_000; i--) {
           size += JSON.stringify(all[i]).length;
           events.unshift(all[i]);
         }
-        return { session: s.summary(), events, truncated: events.length < all.length, perms: s.pendingPerms() };
+        return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms() };
       }
       case 'detach':
         this.unsubscribe();

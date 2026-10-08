@@ -14,6 +14,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'daemon', 'cli.js');
 const PID_FILE = path.join(HOME, 'daemon.pid');
 
+const UPSTREAM_API = 'https://api.github.com/repos/arfakaisar/pocketcode';
+
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 export function getInstallInfo(cfg = loadConfig()) {
@@ -58,6 +60,14 @@ export function getInstallInfo(cfg = loadConfig()) {
   };
 }
 
+async function githubApi(p, sec = {}) {
+  const headers = { 'user-agent': 'pocketcode', accept: 'application/vnd.github+json' };
+  if (sec.githubToken) headers.authorization = 'Bearer ' + sec.githubToken;
+  const res = await fetch(UPSTREAM_API + p, { headers, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error('GitHub API ' + res.status);
+  return res.json();
+}
+
 export async function checkUpdate(cfg = loadConfig(), sec = {}) {
   const info = getInstallInfo(cfg);
   if (info.installType === 'git') {
@@ -95,27 +105,38 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
 
   // Pemasangan npm global
   try {
-    const headers = { 'user-agent': 'pocketcode' };
-    if (sec.githubToken) headers.authorization = 'Bearer ' + sec.githubToken;
-    const res = await fetch('https://api.github.com/repos/arfakaisar/pocketcode/commits/main', { headers, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error('GitHub API ' + res.status);
-    const data = await res.json();
+    const data = await githubApi('/commits/main', sec);
     const remoteSha = data.sha ? data.sha.slice(0, 7) : 'main';
     const latestMessage = data.commit?.message?.split('\n')[0] || '';
 
     let currentCommit = cfg.installedCommit;
     if (!currentCommit) {
-      cfg.installedCommit = remoteSha;
+      // npm tidak mencatat commit yang terpasang. Bandingkan waktu commit terbaru dengan
+      // waktu pemasangan paket: commit yang lebih baru berarti memang ada pembaruan.
+      const committed = Date.parse(data.commit?.committer?.date || '') || 0;
+      let installed = 0;
+      try {
+        installed = fs.statSync(path.join(ROOT, 'package.json')).mtimeMs;
+      } catch {}
+      if (committed && installed && committed > installed) {
+        return { updateAvailable: true, currentCommit: 'tidak diketahui', latestCommit: remoteSha, commitsBehind: null, latestMessage, installType: 'npm' };
+      }
+      cfg.installedCommit = currentCommit = remoteSha;
       saveConfig(cfg);
-      currentCommit = remoteSha;
     }
 
     const updateAvailable = currentCommit !== remoteSha;
+    let commitsBehind = 0;
+    if (updateAvailable) {
+      commitsBehind = await githubApi(`/compare/${currentCommit}...main`, sec)
+        .then((c) => c.ahead_by ?? null)
+        .catch(() => null);
+    }
     return {
       updateAvailable,
       currentCommit,
       latestCommit: remoteSha,
-      commitsBehind: updateAvailable ? 1 : 0,
+      commitsBehind,
       latestMessage,
       installType: 'npm',
     };
@@ -172,21 +193,18 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
     return { ok: true, commit, installType: 'git' };
   }
 
-  // Pemasangan npm global
+  // Pemasangan npm global. Commit dibaca sebelum install supaya push yang masuk
+  // selama npm berjalan tetap terdeteksi sebagai pembaruan berikutnya.
+  const commit = await githubApi('/commits/main', sec)
+    .then((d) => d.sha?.slice(0, 7))
+    .catch(() => null);
   await npmInstall(['install', '-g', PACKAGE_SPEC, '--include=optional']);
   verifyNativeBinary(await globalPackageRoot());
-  let commit = 'terbaru';
-  try {
-    const res = await fetch('https://api.github.com/repos/arfakaisar/pocketcode/commits/main', { headers: { 'user-agent': 'pocketcode' }, signal: AbortSignal.timeout(10000) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.sha) commit = data.sha.slice(0, 7);
-    }
-  } catch {}
 
-  cfg.installedCommit = commit;
+  if (commit) cfg.installedCommit = commit;
+  else delete cfg.installedCommit; // dideteksi ulang dari waktu pemasangan
   saveConfig(cfg);
-  return { ok: true, commit, installType: 'npm' };
+  return { ok: true, commit: commit || 'terbaru', installType: 'npm' };
 }
 
 export function restartDaemon(daemon, { delay = 1000 } = {}) {

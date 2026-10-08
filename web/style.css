@@ -391,6 +391,7 @@ button.card:active, .card.tap:active { transform: scale(.985); border-color: var
 .perm .q svg { width: 18px; height: 18px; }
 .perm .pt { color: var(--fg-2); font-size: 12px; margin: 4px 0 0; }
 .perm pre { margin: 10px 0 12px; padding: 10px 12px; background: #05070acc; border: 1px solid var(--line); border-radius: var(--r-sm); white-space: pre-wrap; word-break: break-word; font-size: 12.5px; max-height: 22vh; overflow: auto; }
+.perm .diffmini { font-size: 12px; max-height: 26vh; overflow: auto; overscroll-behavior: contain; margin: -4px 0 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: #05070acc; padding: 6px 0; }
 .perm .btnrow .btn { min-height: 46px; }
 .perm .more { color: var(--dim); font-size: 11px; margin-top: 8px; text-align: center; }
 

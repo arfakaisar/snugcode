@@ -46,7 +46,6 @@ export async function probeModel(cfg, key, model) {
   if (!r.ok) return { ok: false, ms: Date.now() - t0, err: cleanErr(raw) || 'HTTP ' + r.status };
   let text = '';
   let err = null;
-  let first = null;
   for (const line of raw.split('\n')) {
     if (!line.startsWith('data:')) continue;
     let e;

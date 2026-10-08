@@ -597,6 +597,15 @@ class App {
       const body = [];
       if (p.title) body.push(c.soft(p.title), '');
       for (const l of String(p.summary || p.s || '').split('\n').slice(0, 12)) body.push(c.fg(l));
+      if (p.x) {
+        const diff = [];
+        for (const ed of p.x.edits || [p.x]) {
+          if (ed.old) for (const l of ed.old.split('\n')) diff.push(c.red('- ' + l));
+          if (ed.new) for (const l of ed.new.split('\n')) diff.push(c.green('+ ' + l));
+        }
+        body.push('', ...diff.slice(0, 16));
+        if (diff.length > 16) body.push(dim(`… ${diff.length - 16} baris lagi`));
+      }
       body.push('');
       opts.forEach((t, i) => body.push(i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`)));
       if (this.perms.length > 1) body.push('', dim(`+${this.perms.length - 1} permintaan lagi`));

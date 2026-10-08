@@ -21,13 +21,20 @@ export function parseModelId(id) {
   return m ? { provider, base: m[1], effort: m[2] } : { provider, base: rest, effort: null };
 }
 
-// Untuk model Claude (cc/ atau claude-*), pisahkan ID asli router dengan virtual effort.
+// Model yang effort-nya diatur lewat parameter native Claude Code (bukan ID varian router):
+// provider cc/, atau ID claude-* tanpa provider. Model claude-* di provider lain (mis.
+// ag/claude-opus-4-6-thinking) diteruskan apa adanya karena router-nya tidak mengenal effort.
+export const nativeEffortModel = (provider, base) => provider === 'cc' || (provider === '' && base.startsWith('claude-'));
+
+// Effort native yang ditawarkan slider (semuanya diterima opsi `effort` Agent SDK).
+const NATIVE_EFFORTS = ['low', 'medium', 'high', 'max'];
+
+// Untuk model Claude native, pisahkan ID asli router dengan virtual effort.
 // Contoh: "cc/claude-opus-5-5-high" -> { actualModel: "cc/claude-opus-5-5", effort: "high" }.
 export function resolveModelEffort(id) {
   if (!id) return { actualModel: '', effort: null };
   const p = parseModelId(id);
-  const isVirtual = p.provider === 'cc' || (p.provider === '' && p.base.startsWith('claude-'));
-  if (isVirtual && p.effort) {
+  if (nativeEffortModel(p.provider, p.base) && p.effort && NATIVE_EFFORTS.includes(p.effort)) {
     return {
       actualModel: (p.provider ? p.provider + '/' : '') + p.base,
       effort: p.effort,
@@ -51,12 +58,11 @@ export function groupModels(list) {
     g.variants.push({ effort: p.effort, id: m.id });
   }
   for (const g of groups.values()) {
-    // Model Claude native (cc/ atau claude-*):
+    // Model Claude native (cc/ atau claude-* tanpa provider):
     // 9router tidak membagi model Claude per ID varian karena Claude memakai
-    // adaptive thinking & parameter output_config.effort native.
-    if (g.provider === 'cc' || (g.name.startsWith('claude-') && g.variants.length === 1 && g.variants[0].effort === null)) {
-      const nativeLevels = ['low', 'medium', 'high', 'max'];
-      for (const lev of nativeLevels) {
+    // adaptive thinking & parameter effort native.
+    if (nativeEffortModel(g.provider, g.name)) {
+      for (const lev of NATIVE_EFFORTS) {
         if (!g.variants.some((v) => v.effort === lev)) {
           g.variants.push({ effort: lev, id: `${g.key}-${lev}`, virtual: true });
         }
