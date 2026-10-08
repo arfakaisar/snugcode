@@ -113,13 +113,18 @@ test('groupModels: cc/claude-opus-5-5 menghasilkan virtual slider effort', async
 
 test('loopback proxy: sanitasi header dan penghentian bersih', async () => {
   const http = await import('node:http');
-  const { startRouterProxy } = await import('../daemon/proxy.js');
+  const { startRouterProxy, stripIdeToolSuffix } = await import('../daemon/proxy.js');
+
+  assert.equal(stripIdeToolSuffix('{"name":"Bash_ide"}'), '{"name":"Bash"}');
+  assert.equal(stripIdeToolSuffix('{"name": "Read_ide"}'), '{"name":"Read"}');
+  assert.equal(stripIdeToolSuffix('{"name":"normal_tool"}'), '{"name":"normal_tool"}');
 
   let interceptedHeaders = null;
   const mockUpstream = http.createServer((req, res) => {
     interceptedHeaders = req.headers;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('event: content_block_start\ndata: {"content_block":{"name":"Bash_ide"}}\n\n');
+    res.end();
   });
 
   await new Promise((resolve) => mockUpstream.listen(0, '127.0.0.1', resolve));
@@ -135,8 +140,9 @@ test('loopback proxy: sanitasi header dan penghentian bersih', async () => {
       'other': 'keep',
     },
   });
-  const json = await res.json();
-  assert.deepEqual(json, { ok: true });
+  const text = await res.text();
+  assert.ok(text.includes('"name":"Bash"'));
+  assert.ok(!text.includes('Bash_ide'));
   assert.equal(interceptedHeaders['user-agent'], 'pocketcode/0.1');
   assert.equal(interceptedHeaders['x-app'], undefined);
   assert.equal(interceptedHeaders['other'], 'keep');
