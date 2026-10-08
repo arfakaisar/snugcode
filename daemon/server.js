@@ -207,6 +207,8 @@ class RpcConn {
       case 'updateStatus':
         return checkUpdate(d.config, sec);
       case 'update': {
+        // claude.exe yang masih jalan mengunci file-nya → npm gagal memasang binary baru.
+        await S.stopAll();
         const res = await performUpdate(d.config, sec);
         restartDaemon(d, { delay: 1200 });
         return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };

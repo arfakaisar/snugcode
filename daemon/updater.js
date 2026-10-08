@@ -6,8 +6,10 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PACKAGE_SPEC } from './defaults.js';
 import { loadConfig, saveConfig, HOME } from './config.js';
+import { nativeBinaryInstalled, missingBinaryMessage } from './nativebin.js';
 
 const execFileAsync = promisify(execFile);
+const NPM_TIMEOUT = 10 * 60 * 1000;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'daemon', 'cli.js');
 const PID_FILE = path.join(HOME, 'daemon.pid');
@@ -130,6 +132,29 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
   }
 }
 
+// claude.exe berukuran ratusan MB: beri waktu cukup dan jangan telan error npm.
+async function npmInstall(args, opts = {}) {
+  try {
+    await execFileAsync(npmCmd, args, { timeout: NPM_TIMEOUT, maxBuffer: 16 * 1024 * 1024, shell: process.platform === 'win32', ...opts });
+  } catch (e) {
+    const detail = String(e.stderr || e.message || e).trim().split('\n').slice(-8).join('\n');
+    throw new Error(`npm ${args.join(' ')} gagal${e.killed ? ' (timeout)' : ''}:\n${detail}`);
+  }
+}
+
+async function globalPackageRoot() {
+  try {
+    const { stdout } = await execFileAsync(npmCmd, ['root', '-g'], { timeout: 20000, shell: process.platform === 'win32' });
+    if (stdout.trim()) return path.join(stdout.trim(), 'pocketcode');
+  } catch {}
+  return ROOT;
+}
+
+// npm melewati optionalDependencies yang gagal dipasang tanpa error; pastikan binary ada.
+function verifyNativeBinary(root) {
+  if (!nativeBinaryInstalled(root)) throw new Error('Pembaruan terpasang tapi ' + missingBinaryMessage(root));
+}
+
 export async function performUpdate(cfg = loadConfig(), sec = {}) {
   const info = getInstallInfo(cfg);
   if (info.installType === 'git') {
@@ -138,7 +163,8 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
       throw new Error('Ada perubahan lokal di direktori git. Commit atau buang perubahan terlebih dahulu.');
     }
     await execFileAsync('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: ROOT, timeout: 60000 });
-    await execFileAsync(npmCmd, ['install', '--omit=dev'], { cwd: ROOT, timeout: 120000, shell: process.platform === 'win32' }).catch(() => {});
+    await npmInstall(['install', '--omit=dev', '--include=optional'], { cwd: ROOT });
+    verifyNativeBinary(ROOT);
     const { stdout: newHead } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT });
     const commit = newHead.trim();
     cfg.installedCommit = commit;
@@ -147,7 +173,8 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
   }
 
   // Pemasangan npm global
-  await execFileAsync(npmCmd, ['install', '-g', PACKAGE_SPEC], { timeout: 180000, shell: process.platform === 'win32' });
+  await npmInstall(['install', '-g', PACKAGE_SPEC, '--include=optional']);
+  verifyNativeBinary(await globalPackageRoot());
   let commit = 'terbaru';
   try {
     const res = await fetch('https://api.github.com/repos/arfakaisar/pocketcode/commits/main', { headers: { 'user-agent': 'pocketcode' }, signal: AbortSignal.timeout(10000) });

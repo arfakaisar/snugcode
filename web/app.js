@@ -1014,7 +1014,12 @@ async function updateMachineSheet() {
   } catch (e) {
     if (isOldDaemon(e)) {
       const isWin = info?.platform === 'win32';
-      const upCmd = isWin ? 'cmd /c "npm i -g github:arfakaisar/pocketcode && pocketcode restart"' : 'npm i -g github:arfakaisar/pocketcode && pocketcode restart';
+      // Windows: claude.exe milik daemon yang masih jalan mengunci file → npm diam-diam
+      // melewati binary. Jalankan sebagai proses terpisah (lepas dari sesi ini) yang
+      // menghentikan daemon dulu, baru memasang, lalu menyalakan daemon lagi.
+      const upCmd = isWin
+        ? `Start-Process cmd -WindowStyle Hidden -ArgumentList '/c pocketcode stop & ping -n 4 127.0.0.1 >nul & npm i -g github:arfakaisar/pocketcode --include=optional > "%USERPROFILE%\\.pocketcode\\update.log" 2>&1 & pocketcode restart'`
+        : 'npm i -g github:arfakaisar/pocketcode --include=optional && pocketcode restart';
       body.replaceChildren(
         h(
           'div',

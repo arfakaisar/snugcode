@@ -80,6 +80,29 @@ test('updater: deteksi tipe instalasi dan versi paket', async () => {
   assert.ok(['git', 'npm'].includes(st.installType));
 });
 
+test('nativebin: nama paket binary per platform + deteksi di disk', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { platformBinaryPackage, platformBinaryPackages, nativeBinaryInstalled, missingBinaryMessage } = await import('../daemon/nativebin.js');
+  assert.equal(platformBinaryPackage({ platform: 'win32', arch: 'x64' }), 'claude-agent-sdk-win32-x64');
+  assert.equal(platformBinaryPackage({ platform: 'darwin', arch: 'arm64' }), 'claude-agent-sdk-darwin-arm64');
+  assert.deepEqual(platformBinaryPackages({ platform: 'linux', arch: 'x64', musl: false }), ['claude-agent-sdk-linux-x64', 'claude-agent-sdk-linux-x64-musl']);
+  assert.deepEqual(platformBinaryPackages({ platform: 'linux', arch: 'arm64', musl: true }), ['claude-agent-sdk-linux-arm64-musl', 'claude-agent-sdk-linux-arm64']);
+  assert.match(missingBinaryMessage('/x'), /--include=optional/);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-bin-'));
+  try {
+    assert.equal(nativeBinaryInstalled(root), false);
+    const dir = path.join(root, 'node_modules', '@anthropic-ai', platformBinaryPackage());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude'), '');
+    assert.equal(nativeBinaryInstalled(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('keepawake: inisialisasi dan penghentian bersih', async () => {
   const { startKeepAwake } = await import('../daemon/keepawake.js');
   const ka = startKeepAwake();
