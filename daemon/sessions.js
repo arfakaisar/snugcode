@@ -13,7 +13,8 @@ import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
-import { ProcManager, shellSpawn } from './procs.js';
+import { ProcManager } from './procs.js';
+import { shellSpawn, toolchainEnv } from './toolchain.js';
 import { openTunnel } from './tunnel.js';
 import { snapshot, rewind } from './checkpoint.js';
 import { restoreEnv, detectProject } from './project.js';
@@ -391,6 +392,8 @@ export class Session extends EventEmitter {
       GCM_INTERACTIVE: 'never',
     });
     if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
+    // pnpm/yarn tetap ada untuk Bash agen walau tidak terpasang global (bila shim sudah disiapkan).
+    Object.assign(env, await toolchainEnv('', env));
 
     const streamed = new Set();
     let currentMsgId = null;
@@ -559,14 +562,19 @@ export class Session extends EventEmitter {
   }
 
   // "!perintah" -> jalankan langsung di worktree (seperti ! di Claude Code).
-  shell(cmd) {
+  async shell(cmd) {
     if (!cmd) return;
     this.emitEvent({ k: 'sh', d: cmd });
     this.setStatus('running');
-    const p = shellSpawn(cmd, {
-      cwd: this.meta.cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-    });
+    let env;
+    try {
+      env = await toolchainEnv(cmd, { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+    } catch (e) {
+      this.emitEvent({ k: 'error', d: e.message });
+      this.emitEvent({ k: 'shDone', code: 1 });
+      return this.setStatus('idle');
+    }
+    const p = shellSpawn(cmd, { cwd: this.meta.cwd, env });
     this.shellProc = p;
     let buf = '';
     let total = 0;
