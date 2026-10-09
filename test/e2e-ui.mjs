@@ -12,7 +12,9 @@ import { chromium } from 'playwright-core';
 import { findBrowser } from '../daemon/browser.js';
 import { setup, ok, RELAY, routerLog } from './e2e-harness.mjs';
 
-const { name: PCNAME, HOME, repo, cleanEnv, mem, cleanup } = await setup();
+const { name: PCNAME, HOME, repo, cleanEnv, mem, conn, s: sess, cleanup } = await setup();
+// Dok izin Write diuji lewat mode tinjau edit (bawaannya edit di worktree langsung diterapkan).
+await conn.call('edits', { id: sess.id, on: true });
 const SHOTS = process.env.SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const exe = process.env.CHROME || findBrowser();

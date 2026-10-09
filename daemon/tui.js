@@ -230,6 +230,7 @@ const COMMANDS = [
   ['/push', 'push branch ke GitHub'],
   ['/pr', 'buat Pull Request [judul]'],
   ['/auto', 'nyalakan/matikan auto-izin'],
+  ['/edits', 'tinjau setiap edit file sebelum diterapkan (on/off)'],
   ['/login', 'login ulang GitHub (push, PR, repo)'],
   ['/update', 'periksa & pasang pembaruan jarak jauh'],
   ['/clean', 'pindai & bersihkan worktree / repo yatim'],
@@ -464,7 +465,7 @@ class App {
     }
     if (o.type === 'perm') {
       const p = o.perm;
-      const opts = p.push ? ['Ya, izinkan push', 'Tidak (esc)'] : ['Ya', `Ya, dan jangan tanya lagi untuk ${p.tool} di sesi ini`, 'Tidak (esc)'];
+      const opts = p.push ? ['Ya, izinkan push', 'Tidak (esc)'] : ['Ya', `Ya, dan jangan tanya lagi untuk ${p.always || p.tool} di sesi ini`, 'Tidak (esc)'];
       const body = [];
       if (p.title) body.push(c.soft(p.title), '');
       for (const l of String(p.summary || p.s || '').split('\n').slice(0, 12)) body.push(c.fg(l));
@@ -1189,6 +1190,12 @@ class App {
           if (on && !(await this.confirm('Auto-izin', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push). Lanjut?'))) return;
           this.session = await this.cl.call('auto', { id: s.id, on });
           return this.setFlash(on ? '⚡ auto-izin ON' : 'auto-izin off', on);
+        }
+        case '/edits': {
+          need();
+          const on = !s.askEdits;
+          this.session = await this.cl.call('edits', { id: s.id, on });
+          return this.setFlash(on ? 'tinjau edit ON: setiap Write/Edit minta izin' : 'tinjau edit off: edit di worktree langsung diterapkan (bisa /rewind)');
         }
         case '/run': {
           need();

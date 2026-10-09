@@ -298,7 +298,10 @@ export function showMachineMenu() {
     h('div', { class: 'label', style: 'margin-top:4px' }, 'Model'),
     h('div', { class: 'group' },
       modelItem('Default untuk sesi baru', info.model, () => pick('Model default', 'model')),
-      modelItem('Model kecil (tugas ringan)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
+      // Model ringan subagen dipilih otomatis oleh daemon (Claude Haiku 5.5 / Gemini 3.8 Flash).
+      info.lightModel
+        ? menuItem({ icon: 'bolt', t1: 'Model ringan (subagen) · otomatis', t2: M.modelLabel(info.lightModel), chev: false, onclick: () => toast('Dipilih otomatis: Haiku 5.5 untuk model Claude, Gemini 3.8 Flash untuk model lain') })
+        : modelItem('Model kecil (tugas ringan)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
     ),
     h('div', { class: 'label' }, 'GitHub'),
     h('div', { class: 'group' },

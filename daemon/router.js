@@ -3,6 +3,7 @@ import { resolveModelEffort } from '../shared/models.js';
 
 const TTL = 5 * 60 * 1000;
 let cache = null;
+let refreshing = null;
 
 const base = (cfg) => cfg.routerUrl.replace(/\/+$/, '');
 
@@ -21,6 +22,16 @@ export async function listModels(cfg, key, { fresh = false } = {}) {
     }));
   cache = { url: cfg.routerUrl, at: Date.now(), list };
   return list;
+}
+
+// ID model terakhir yang diketahui (boleh basi) tanpa menunggu jaringan: dipakai saat memilih
+// model ringan subagen, supaya prompt tidak tertahan request /models. Cache yang basi atau
+// kosong disegarkan di latar belakang. null = belum pernah berhasil diambil.
+/** @returns {string[] | null} */
+export function knownModelIds(cfg, key) {
+  const fresh = cache && cache.url === cfg.routerUrl && Date.now() - cache.at < TTL;
+  if (!fresh && key && !refreshing) refreshing = listModels(cfg, key, { fresh: true }).catch(() => {}).finally(() => (refreshing = null));
+  return cache && cache.url === cfg.routerUrl ? cache.list.map((m) => m.id) : null;
 }
 
 // Beberapa model yang sudah dihentikan tetap membalas "sukses" dengan teks

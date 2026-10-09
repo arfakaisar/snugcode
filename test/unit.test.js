@@ -261,25 +261,47 @@ test('izin: push & penulisan ke remote selalu dikenali', async () => {
   assert.ok(!isRemoteWrite('Read', { command: 'git push' }));
 });
 
-test('fastModelVariant: varian effort tinggi diturunkan ke low untuk smallModel/subagent', async () => {
-  const { fastModelVariant } = await import('../shared/models.js');
-  assert.equal(fastModelVariant('ag/gemini-3.8-flash-high'), 'ag/gemini-3.8-flash-low');
-  assert.equal(fastModelVariant('ag/gemini-3.8-flash-medium'), 'ag/gemini-3.8-flash-low');
-  assert.equal(fastModelVariant('ag/gemini-3.8-flash-low'), 'ag/gemini-3.8-flash-low');
-  assert.equal(fastModelVariant('cc/claude-opus-5-5-high'), 'cc/claude-opus-5-5-low');
-  assert.equal(fastModelVariant('ag/gemini-3.1-pro-low'), 'ag/gemini-3.1-pro-low');
-  assert.equal(fastModelVariant('cc/claude-opus-5-5'), 'cc/claude-opus-5-5');
-  assert.equal(fastModelVariant(null), null);
+test('lightModel: subagen hanya Claude Haiku 5.5 / Gemini 3.8 Flash, urutan sesuai provider model utama', async () => {
+  const { lightModel } = await import('../shared/models.js');
+  const ids = ['cc/claude-opus-5-5', 'cc/claude-sonnet-5-5', 'cc/claude-haiku-5-5', 'ag/gemini-3.8-flash-high', 'ag/gemini-3.8-flash-low', 'ag/gemini-3.8-flash-medium', 'ag/gemini-3.1-pro-high', 'gemini/gemini-3.8-flash'];
+  // cc/: Haiku prioritas 1 (ID polos; effort diatur per subagen), Flash prioritas 2.
+  assert.deepEqual(lightModel('cc/claude-opus-5-5-high', ids), { id: 'cc/claude-haiku-5-5', kind: 'haiku' });
+  assert.deepEqual(lightModel('cc/claude-sonnet-5-5', ids), { id: 'cc/claude-haiku-5-5', kind: 'haiku' });
+  assert.deepEqual(lightModel('cc/claude-opus-5-5', ids.filter((i) => !i.includes('haiku'))), { id: 'ag/gemini-3.8-flash-low', kind: 'flash' });
+  // ag/: Flash prioritas 1 (varian low), Haiku prioritas 2.
+  assert.deepEqual(lightModel('ag/gemini-3.1-pro-high', ids), { id: 'ag/gemini-3.8-flash-low', kind: 'flash' });
+  assert.deepEqual(lightModel('ag/gemini-3.1-pro-high', ['cc/claude-haiku-5-5', 'ag/gemini-3.1-pro-high']), { id: 'cc/claude-haiku-5-5', kind: 'haiku' });
+  // Provider gemini/: Flash dari provider yang sama didahulukan.
+  assert.deepEqual(lightModel('gemini/gemini-3.8-pro', ids), { id: 'gemini/gemini-3.8-flash', kind: 'flash' });
+  // Keduanya tidak ada di router: tetap jalan dengan model utama (tanpa effort virtual).
+  assert.deepEqual(lightModel('cc/claude-opus-5-5-high', ['cc/claude-opus-5-5']), { id: 'cc/claude-opus-5-5', kind: 'main' });
+  // Daftar model belum diketahui: tebakan default per provider.
+  assert.deepEqual(lightModel('cc/claude-opus-5-5', null), { id: 'cc/claude-haiku-5-5', kind: 'haiku' });
+  assert.deepEqual(lightModel('ag/gemini-3.1-pro-high', null), { id: 'ag/gemini-3.8-flash-low', kind: 'flash' });
 });
 
-test('pocketcode prompt: mencakup identitas, arsitektur E2EE/daemon/worktree, dan aturan push', async () => {
+test('pocketcode prompt: ringkas, hanya aturan yang mengubah perilaku agen', async () => {
   const { POCKETCODE_SYSTEM_PROMPT } = await import('../daemon/prompt.js');
-  assert.ok(typeof POCKETCODE_SYSTEM_PROMPT === 'string' && POCKETCODE_SYSTEM_PROMPT.length > 500);
+  // Dikirim di setiap request model: jaga tetap kecil.
+  assert.ok(POCKETCODE_SYSTEM_PROMPT.length < 2600, 'prompt ' + POCKETCODE_SYSTEM_PROMPT.length + ' karakter');
   assert.match(POCKETCODE_SYSTEM_PROMPT, /pocketcode/i);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /E2EE|End-to-End Encrypted/);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /CPace|XChaCha20-Poly1305/);
   assert.match(POCKETCODE_SYSTEM_PROMPT, /worktree/i);
   assert.match(POCKETCODE_SYSTEM_PROMPT, /git push/i);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /dev_start/);
+  assert.match(POCKETCODE_SYSTEM_PROMPT, /Grep\/Glob/);
+  assert.doesNotMatch(POCKETCODE_SYSTEM_PROMPT, /CPace|XChaCha20|Cloudflare/);
+});
+
+test('agen: daftar tool ramping & subagen bawaan ditimpa dengan effort rendah', async () => {
+  const { AGENT_TOOLS } = await import('../daemon/sessions.js');
+  const { subagents } = await import('../daemon/agents.js');
+  for (const t of ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'AskUserQuestion', 'ExitPlanMode']) assert.ok(AGENT_TOOLS.includes(t), t);
+  for (const t of ['CronCreate', 'ScheduleWakeup', 'SendMessage', 'Workflow', 'EnterWorktree', 'EnterPlanMode']) assert.ok(!AGENT_TOOLS.includes(t), t);
+  const a = subagents();
+  assert.deepEqual(Object.keys(a).sort(), ['Explore', 'Plan', 'claude', 'general-purpose']);
+  assert.equal(a.Explore.effort, 'low');
+  for (const name of ['Explore', 'Plan']) assert.ok(!a[name].tools.some((t) => ['Edit', 'Write'].includes(t)), name + ' read-only');
+  for (const d of Object.values(a)) assert.ok(!('model' in d), 'model subagen diatur lewat CLAUDE_CODE_SUBAGENT_MODEL');
 });
 
 test('cleaner: hapus orphan worktree, repo tak terpakai, dan log basi', async () => {
@@ -631,8 +653,70 @@ test('izin: path sensitif & tool baca di luar worktree', async () => {
     assert.equal(await settled(s.askPermission('Bash', { command: 'cat ~/.pocketcode/secrets.json' })), 'menunggu');
     // Izin yang tertunda: "Selalu" tidak berlaku untuk perintah yang menyentuh kredensial.
     const pending = [...s.perms.entries()].find(([, p]) => p.tool === 'Bash');
+    assert.equal(s.permEvent(pending[0], pending[1]).always, undefined);
     s.answerPermission(pending[0], 'always');
     assert.ok(!s.alwaysAllow.has('Bash'));
+    assert.equal(s.allowRules.size, 0);
+  } finally {
+    s.endTurn();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('izin: edit di worktree langsung diterapkan, "Selalu" Bash memakai aturan per perintah', async () => {
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const { Session, suggestedRules } = await import('../daemon/sessions.js');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-edit-'));
+  let saved = 0;
+  const mgr = { config: {}, secrets: {}, log() {}, notify() {}, saveIndex: () => saved++, trimAgents() {} };
+  const s = new Session({ id: 'tedit', cwd, repo: 'a/b', model: 'm' }, mgr);
+  const settled = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r('menunggu'), 50))]);
+  try {
+    // Bawaan: Write/Edit di dalam worktree tidak bertanya (checkpoint + rewind melindungi).
+    assert.equal((await s.askPermission('Write', { file_path: path.join(cwd, 'a.txt'), content: 'x' })).behavior, 'allow');
+    assert.equal((await s.askPermission('Edit', { file_path: 'src/b.js', old_string: 'a', new_string: 'b' })).behavior, 'allow');
+    // Di luar worktree tetap bertanya.
+    assert.equal(await settled(s.askPermission('Write', { file_path: path.join(os.tmpdir(), 'luar.txt'), content: 'x' })), 'menunggu');
+    // Mode tinjau edit & mode rencana: bertanya lagi.
+    s.setAskEdits(true);
+    assert.equal(await settled(s.askPermission('Edit', { file_path: path.join(cwd, 'a.txt') })), 'menunggu');
+    s.setAskEdits(false);
+    s.meta.plan = true;
+    assert.equal(await settled(s.askPermission('Write', { file_path: path.join(cwd, 'a.txt'), content: 'x' })), 'menunggu');
+    s.meta.plan = false;
+    s.endTurn();
+
+    // "Selalu" untuk Bash memakai saran aturan Claude Code, bukan semua Bash.
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }], behavior: 'allow', destination: 'localSettings' }, { type: 'setMode', mode: 'acceptEdits', destination: 'session' }];
+    assert.deepEqual(suggestedRules('Bash', suggestions), [{ toolName: 'Bash', ruleContent: 'npm test *' }]);
+    const res = s.askPermission('Bash', { command: 'npm test' }, { suggestions });
+    const [pid, p] = [...s.perms.entries()][0];
+    assert.equal(s.permEvent(pid, p).always, 'npm test *');
+    s.answerPermission(pid, 'always');
+    const r = await res;
+    assert.equal(r.behavior, 'allow');
+    assert.deepEqual(r.updatedPermissions, [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }], behavior: 'allow', destination: 'session' }]);
+    assert.ok(!s.alwaysAllow.has('Bash'));
+    assert.deepEqual(s.meta.allowRules, ['Bash(npm test *)']);
+    assert.ok(saved > 0);
+    // Tanpa saran aturan: "Selalu" berlaku untuk tool itu (perilaku lama).
+    const res2 = s.askPermission('mcp__pocketcode__dev_start', { command: 'npm run dev' });
+    const [pid2] = [...s.perms.keys()];
+    s.answerPermission(pid2, 'always');
+    assert.equal((await res2).updatedPermissions, undefined);
+    assert.ok(s.alwaysAllow.has('mcp__pocketcode__dev_start'));
+
+    // Hook PreToolUse: menunggu checkpoint, dan push/kredensial tetap bertanya walau cocok aturan "Selalu".
+    let release;
+    s.cpReady = new Promise((r) => (release = r));
+    const h = s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    assert.equal(await settled(h), 'menunggu');
+    release();
+    assert.deepEqual(await h, {});
+    assert.equal((await s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git -C . push origin x' } })).hookSpecificOutput.permissionDecision, 'ask');
+    assert.equal((await s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node -e "x" ~/.pocketcode/secrets.json' } })).hookSpecificOutput.permissionDecision, 'ask');
   } finally {
     s.endTurn();
     fs.rmSync(cwd, { recursive: true, force: true });
@@ -687,6 +771,13 @@ test('model event bersama: rencana, aktivitas, ringkasan selesai, penyaring dupl
   assert.equal(E.toolActivity({ k: 'tool', name: 'Bash', s: 'npm test\nlagi' }), 'Menjalankan npm test');
   assert.equal(E.toolActivity({ k: 'tool', name: 'alat_baru', s: 'x' }), 'alat_baru x');
   assert.deepEqual(E.doneParts({ k: 'done', turns: 3, ms: 4200, usage: { in: 12345, out: 800 }, ctx: 40, cost: 0.0123 }), ['3 langkah', '4.2s', '12k→800 tok', 'konteks 40%', '$0.012']);
+  // Porsi cache ditampilkan bila daemon mengirimnya (0% terus = router tidak meng-cache).
+  assert.deepEqual(E.doneParts({ k: 'done', turns: 1, ms: 1000, usage: { in: 20000, out: 100, cr: 17000, cw: 2000 } }), ['1 langkah', '1.0s', '20k→100 tok', 'cache 85%']);
+  assert.deepEqual(E.doneParts({ k: 'done', turns: 1, ms: 1000, usage: { in: 20000, out: 100, cr: 0, cw: 0 } }).at(-1), 'cache 0%');
+  // Potongan teks streaming digabung untuk attach; event lain & seq terakhir dipertahankan.
+  const ev = [{ k: 'user', d: 'hai', seq: 1 }, { k: 'text', d: 'Ha', seq: 2, ts: 1 }, { k: 'text', d: 'lo', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }];
+  assert.deepEqual(E.mergeText(ev), [{ k: 'user', d: 'hai', seq: 1 }, { k: 'text', d: 'Halo', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }]);
+  assert.equal(ev[1].d, 'Ha', 'riwayat asli tidak diubah');
   assert.equal(E.fmtDuration(95_000), '1m 35s');
   const cur = new E.EventCursor();
   assert.deepEqual([{ seq: 1 }, { seq: 2 }, { seq: 2 }, { k: 'proc' }, { seq: 1 }, { seq: 3 }].map((e) => cur.accept(/** @type {any} */ (e))), [true, true, false, true, false, true]);

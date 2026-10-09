@@ -19,6 +19,8 @@ const claudePids = () => {
     return [];
   }
 };
+// Mode tinjau edit: Write menunggu izin dari HP (dengan cuplikan diff).
+await conn.call('edits', { id: s.id, on: true });
 let t0 = Date.now();
 await conn.call('send', { id: s.id, text: 'tolong WRITE file' });
 const perm = await waitFor((e) => e.k === 'perm');
@@ -44,6 +46,15 @@ assert.ok(done2.ok);
 const pids2 = claudePids();
 assert.deepEqual(pids2, pids1, 'proses claude sama');
 ok(`prompt 2 memakai proses claude yang sama (${t2} ms vs ${t1} ms)`);
+
+// Bawaan (tinjau edit mati): Write di worktree langsung diterapkan tanpa prompt izin
+await conn.call('edits', { id: s.id, on: false });
+events.length = 0;
+await conn.call('send', { id: s.id, text: 'tolong WRITE2 file' });
+assert.ok((await waitFor((e) => e.k === 'done')).ok);
+assert.ok(!events.some((e) => e.k === 'perm'), 'tidak ada prompt izin');
+assert.equal(fs.readFileSync(path.join(repo, 'hasil2.txt'), 'utf8'), 'langsung\n');
+ok('tinjau edit mati: Write di worktree langsung diterapkan (checkpoint tetap dibuat)');
 
 // Key 9router asli hanya dilihat router (lewat proxy), bukan proses claude
 assert.ok(routerLog.length && routerLog.every((l) => l.auth === 'Bearer ROUTER-KEY-ASLI' && !l.key), JSON.stringify(routerLog.slice(0, 3)));
@@ -71,7 +82,7 @@ const diff = await conn.call('diff', { id: s.id });
 assert.ok(diff.diff.length > 1_400_000, 'diff ' + diff.diff.length);
 ok(`diff ${(diff.diff.length / 1e6).toFixed(2)} MB diterima utuh lewat kanal biner (dulu dipotong 400KB)`);
 
-// Ganti model -> proses baru dengan resume
+// Ganti model -> diterapkan ke proses claude yang sama (tanpa spawn + resume)
 await waitFor((e) => e.k === 'status' && e.s === 'idle');
 await conn.call('setSessionModel', { id: s.id, model: 'claude-mock-2' });
 events.length = 0;
@@ -80,9 +91,9 @@ const done4 = await waitFor((e) => e.k === 'done');
 assert.ok(done4.ok);
 await sleep(300);
 const pids4 = claudePids();
-assert.equal(pids4.length, 1, 'proses lama ditutup: ' + pids4);
-assert.notDeepEqual(pids4, pids2);
-ok('ganti model: proses lama ditutup, proses baru melanjutkan percakapan');
+assert.deepEqual(pids4, pids2, 'proses claude tetap sama');
+assert.equal(routerLog.filter((l) => l.url.includes('/messages') && l.model).at(-1).model, 'claude-mock-2');
+ok('ganti model: proses claude yang sama langsung memakai model baru');
 
 // Stop di tengah jawaban: agen berhenti cepat, proses tetap bisa dipakai prompt berikutnya
 await waitFor((e) => e.k === 'status' && e.s === 'idle');
@@ -120,6 +131,7 @@ const hist = await conn.call('attach', { id: s.id, since: 0 });
 const u1 = hist.events.find((e) => e.k === 'user' && /WRITE/.test(e.d));
 const nRw = await conn.call('rewind', { id: s.id, seq: u1.seq });
 assert.ok(!fs.existsSync(path.join(repo, 'hasil.txt')));
+assert.ok(!fs.existsSync(path.join(repo, 'hasil2.txt')));
 ok(`rewind: ${nRw} file dikembalikan, hasil.txt hilang`);
 
 // Index atomik & daftar sesi

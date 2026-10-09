@@ -1,6 +1,6 @@
 // Service worker: membuat PWA bisa di-install, membuka shell aplikasi saat offline,
 // dan menampilkan Web Push dari PC saat aplikasi ditutup. API & WebSocket tidak pernah di-cache.
-const CACHE = 'pocketcode-v7';
+const CACHE = 'pocketcode-v8';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));

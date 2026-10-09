@@ -333,6 +333,20 @@ export function sessionMenu() {
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
       menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
       menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => (ui.closeSheet(), $('.chip.model')?.click()) }),
+      // Bawaan: edit di worktree langsung diterapkan (bisa di-rewind); nyalakan untuk menyetujui tiap diff.
+      'askEdits' in s ? menuItem({
+        icon: 'diff', t1: s.askEdits ? 'Tinjau edit file: ON' : 'Tinjau setiap edit file', chev: false,
+        t2: s.askEdits ? 'setiap Write/Edit menunggu persetujuanmu' : 'mati: edit langsung diterapkan, bisa di-rewind (↺)',
+        onclick: async () => {
+          try {
+            Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on: !s.askEdits }));
+            toast(app.current.session.askEdits ? 'Tinjau edit ON' : 'Tinjau edit mati');
+            sessionMenu();
+          } catch (e) {
+            toast(isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk fitur ini' : e.message, true);
+          }
+        },
+      }) : null,
       s.local ? null : menuItem({
         icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',
         onclick: async () => {

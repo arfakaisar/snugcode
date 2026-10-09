@@ -16,7 +16,7 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- mock 9router (Anthropic Messages API, streaming) ----------
 // Prompt berisi WRITE -> tool_use Write; SLOW -> jawaban lambat; READSECRET -> Read secrets.json;
-// MARKDOWN -> jawaban markdown panjang; TODOS -> TodoWrite.
+// MARKDOWN -> jawaban markdown panjang; TODOS -> TodoWrite; WRITE2 -> tool_use Write ke hasil2.txt.
 export const routerLog = [];
 // Markdown panjang (judul, kode berbaris kosong, list) untuk menguji render bertahap.
 const MD = Array.from({ length: 12 }, (_, i) => `## Bagian ${i + 1}\n\nParagraf **tebal** dan \`kode\` nomor ${i + 1}.\n\n\`\`\`js\nconst x${i} = 1;\n\nconsole.log(x${i});\n\`\`\`\n\n- item a${i}\n- item b${i}`).join('\n\n');
@@ -53,13 +53,14 @@ function startMockRouter(cwdRef) {
     let body = '';
     req.on('data', (d) => (body += d));
     req.on('end', () => {
-      routerLog.push({ url: req.url, auth: req.headers.authorization, key: req.headers['x-api-key'] });
-      if (!req.url.includes('/messages') || req.url.includes('count_tokens')) {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ input_tokens: 10, data: [] }));
-      }
       let j = {};
       try { j = JSON.parse(body); } catch {}
+      routerLog.push({ url: req.url, auth: req.headers.authorization, key: req.headers['x-api-key'], model: j.model });
+      if (!req.url.includes('/messages') || req.url.includes('count_tokens')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        // /models: model ringan (Haiku 5.5) tersedia, jadi subagen tidak ikut berganti saat model utama diganti.
+        return res.end(JSON.stringify({ input_tokens: 10, data: ['claude-mock-1', 'claude-mock-2', 'cc/claude-haiku-5-5'].map((id) => ({ id })) }));
+      }
       const model = j.model || 'x';
       const msgs = j.messages || [];
       const last = msgs.at(-1) || {};
@@ -85,6 +86,7 @@ function startMockRouter(cwdRef) {
       if (/MARKDOWN/.test(lastText)) return sse(res, textMsg(model, MD));
       if (/TODOS/.test(lastText)) return sse(res, toolMsg(model, 'TodoWrite', { todos: [{ content: 'Baca kode', status: 'completed', activeForm: 'Membaca kode' }, { content: 'Ubah tombol', status: 'in_progress', activeForm: 'Mengubah tombol' }, { content: 'Uji', status: 'pending', activeForm: 'Menguji' }] }));
       if (/READSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Read', { file_path: cwdRef.secrets }));
+      if (/WRITE2/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil2.txt', content: 'langsung\n' }));
       if (/WRITE/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil.txt', content: 'dibuat agen\n' }));
       return sse(res, textMsg(model, 'Halo dari mock router.'));
     });
