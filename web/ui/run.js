@@ -57,7 +57,7 @@ export function showRun() {
     }
     const logBtn = h('button', { class: 'btn' }, ic('term'), 'Log');
     logBtn.onclick = () => showLogs(p.name);
-    const stop = h('button', { class: 'btn danger' }, run ? 'Stop' : 'Hapus');
+    const stop = h('button', { class: 'btn ghost danger' }, run ? ic('stop') : ic('trash'), run ? 'Stop' : 'Hapus');
     stop.onclick = act(stop, async () => {
       await app.conn.call('procStop', { id: s.id, name: p.name });
       if (!run) app.current.procs.delete(p.name), app.current.syncRun();
@@ -76,7 +76,7 @@ export function showRun() {
   const render = () => {
     const ps = [...app.current.procs.values()].sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.startedAt - a.startedAt);
     body.replaceChildren(
-      ps.length ? h('div', {}, ...ps.map(procCard)) : h('div', { class: 'dim small' }, 'Belum ada proses. Dev server berjalan di PC, lalu bisa dibuka di HP lewat tunnel terenkripsi khusus untukmu.'),
+      ps.length ? h('div', {}, ...ps.map(procCard)) : h('div', { class: 'empty', style: 'padding:18px 8px 6px' }, h('div', { class: 'emptyart' }, ic('play')), h('b', {}, 'Belum ada proses'), 'Dev server berjalan di PC, lalu bisa dibuka di HP lewat tunnel terenkripsi khusus untukmu.'),
       h('div', { class: 'label' }, 'Jalankan'),
       cmdIn,
       detected ? h('div', { class: 'dim small', style: 'margin:8px 2px 0' }, detected.dev ? `Otomatis: ${detected.setup ? detected.setup + ' → ' : ''}${detected.dev}` : 'Perintah dev tidak terdeteksi — isi manual.') : null,

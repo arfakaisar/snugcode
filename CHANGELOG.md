@@ -3,6 +3,36 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — PWA dirombak: gaya aplikasi chat, navigasi lebih ringkas, banyak animasi ringan
+
+### Tampilan
+- Palet hangat dengan aksen *clay*, **tema Sistem / Terang / Gelap** (menu akun), teks jawaban agen
+  memakai serif (Source Serif 4), kode tetap JetBrains Mono. `theme-color` mengikuti tema.
+- Pesan pengguna berupa gelembung di kanan dengan tombol salin & ↺ rewind di bawahnya; jawaban agen
+  tanpa gelembung, ringkasan selesai punya tombol salin jawaban.
+- Langkah tool berurutan menyatu jadi satu kartu, nama tool berkilau selama berjalan.
+- Kartu rencana memakai lingkaran centang + progres beranimasi; kartu izin melayang di atas composer.
+- Logo "spark" beranimasi: tumbuh saat muncul, berdenyut bergelombang saat agen bekerja.
+
+### Navigasi & QOL
+- **Drawer samping** (☰ atau geser dari tepi kiri): sesi baru, beranda, sesi terbaru, ganti PC,
+  akun, pengaturan PC. Tombol kembali di layar sesi diganti drawer.
+- **Beranda PC**: sapaan, chip model/GitHub, daftar sesi, tombol "Mulai sesi baru…" bergaya
+  composer, tarik-untuk-muat-ulang, tekan lama sesi untuk buka/hapus.
+- **Composer**: 9 kontrol menjadi 3 (**+**, model, kirim). Tombol **+** menggabungkan kamera,
+  galeri, run, git, sakelar mode rencana / shell / auto-izin / tinjau edit, aksi cepat, dan perintah
+  shell cepat. Mode aktif tampil sebagai pil yang bisa diketuk untuk dimatikan.
+- Git (badge jumlah perubahan) dan Run (titik hidup saat preview aktif) pindah ke header; judul
+  sesi membuka menu sesi. Sesi kosong menampilkan kartu saran.
+- Semua `confirm()` bawaan browser diganti sheet konfirmasi; sheet bisa ditarik turun dari judul
+  atau isinya yang sudah di paling atas, dan isi sheet bergeser saat berpindah halaman.
+
+### Performa
+- Animasi hanya transform/opacity (CSS + Web Animations API), tanpa library; animasi berulang
+  hanya berjalan saat dibutuhkan, dan semuanya mati bila `prefers-reduced-motion`.
+- Isi drawer dibuat saat dibuka dan dibuang saat ditutup; daftar sesinya hanya dirender ulang bila
+  berubah. Tanpa dependensi baru: `app.js` 51 → 57 KB, `style.css` 10 → 14 KB (gzip).
+
 ## 2026-10-09 — Agen hemat token & lebih cepat: tool ramping, subagen ringan, izin lebih cerdas
 
 Diukur dengan Agent SDK asli terhadap mock router (env bersih). Sebelumnya setiap langkah agen

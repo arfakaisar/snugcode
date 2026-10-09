@@ -2,7 +2,7 @@
 import { stableCut } from '../md.js';
 import { doneParts, todoItems, toolActivity } from '../../shared/events.js';
 import { app } from './state.js';
-import { copyText, h, haptic, ic, md, toast } from './dom.js';
+import { anim, copyText, h, haptic, ic, md, spark, toast, ui } from './dom.js';
 import { localNotify } from './push.js';
 
 // ---------- Renderer event agen ----------
@@ -32,6 +32,11 @@ export class Renderer {
     this.quiet = false;
     /** @type {(unread: number) => void} */
     this.onUnread = () => {};
+    /** Saran di layar sambutan sesi kosong (diisi session.js). */
+    /** @type {{ icon: string, t1: string, t2: string, text: string }[]} */
+    this.suggest = [];
+    /** @type {(text: string) => void} */
+    this.onQuick = () => {};
     term.addEventListener('scroll', () => {
       const near = term.scrollHeight - term.scrollTop - term.clientHeight < 90;
       if (near !== this.stick || (near && this.unread)) {
@@ -94,14 +99,16 @@ export class Renderer {
     return this.append(h('div', { class: 'ln ' + cls }, text));
   }
   welcome(s) {
+    const name = s.repo.split('/')[1] || s.repo;
     this.append(
       h('div', { class: 'welcome' },
-        h('b', {}, s.repo), ` · branch `, h('b', {}, s.branch),
-        h('div', { class: 'tips' },
-          h('div', {}, '❯  tulis permintaan, misal "jelaskan repo ini"'),
-          h('div', {}, '$  ketuk tombol mode untuk perintah shell langsung'),
-          h('div', {}, '✦  aksi cepat · ◆ model & effort · git di chip bawah'),
+        spark('draw xl'),
+        h('h2', { class: 'serif' }, 'Apa yang mau dikerjakan di ', h('span', { class: 'accent-text' }, name), '?'),
+        h('div', { class: 'tags', style: 'justify-content:center' }, h('span', { class: 'tag' }, ic('branch'), s.branch), s.base ? h('span', { class: 'tag' }, 'dari ' + s.base) : null),
+        h('div', { class: 'sugs' },
+          ...this.suggest.slice(0, 4).map((q, i) => h('button', { class: 'sug', style: `--i:${i}`, onclick: () => (haptic(8), this.onQuick(q.text)) }, h('span', { class: 'si' }, ic(q.icon)), h('span', {}, h('b', {}, q.t1), h('span', {}, q.t2)))),
         ),
+        h('div', { class: 'tips' }, 'Ketik ', h('span', { class: 'kbd' }, '!'), ' di awal pesan untuk perintah shell · tombol ', h('span', { class: 'kbd' }, '+'), ' untuk lampiran, mode & aksi cepat'),
       ),
     );
   }
@@ -111,14 +118,17 @@ export class Renderer {
         this.textEl = null;
         this.outEl = null;
         this.activity = 'berpikir…';
-        const undo = h('button', { class: 'rw', 'aria-label': 'Kembalikan file ke sebelum prompt ini', hidden: true, onclick: () => rewindTo(e) }, ic('undo'));
+        this.textBlock = null;
+        this.el.querySelector('.welcome:not(.used)')?.classList.add('used');
+        const undo = h('button', { class: 'rw', 'aria-label': 'Kembalikan file ke sebelum prompt ini', hidden: true, onclick: () => rewindTo(e) }, ic('undo'), 'rewind');
+        const copy = h('button', { class: 'rw', 'aria-label': 'Salin pesan', onclick: (ev) => copyBtn(ev.currentTarget, String(e.d || '')) }, ic('copy'));
         this.users.set(e.seq, undo);
-        return this.append(h('div', { class: 'ln u' }, h('span', { class: 'pr' }, '❯'), h('span', { class: 'grow' }, e.d, e.img ? h('span', { class: 'tag', style: 'margin-left:8px' }, ic('image'), e.img) : null), undo));
+        return this.append(h('div', { class: 'ln u' }, h('div', { class: 'bubble' }, e.d, e.img ? h('span', { class: 'tag' }, ic('image'), e.img) : null), h('div', { class: 'uact' }, copy, undo)));
       }
       case 'cp': {
         // Checkpoint tersedia: tampilkan tombol rewind pada prompt terkait.
         const b = this.users.get(e.of);
-        if (b) b.hidden = false;
+        if (b?.hidden) (b.hidden = false), this.quiet || anim(b, [{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'none' }], 240);
         return;
       }
       case 'shot':
@@ -166,12 +176,19 @@ export class Renderer {
         const txt = e.ok ? ['selesai', ...doneParts(e)].join(' · ') : `berhenti · ${e.err || 'error'}`;
         if (e.ctx >= 80 && !this.quiet) toast(`Konteks ${e.ctx}% penuh — kirim /compact agar agen tetap fokus`, false, 6000);
         this.textEl = null;
-        return this.append(h('div', { class: 'donel' + (e.ok ? '' : ' bad') }, (e.ok ? '✓ ' : '✗ ') + txt));
+        const ans = e.ok && this.textBlock?.src.trim();
+        this.textBlock = null;
+        return this.append(
+          h('div', { class: 'donel' + (e.ok ? '' : ' bad') },
+            h('span', { class: 'dt' }, (e.ok ? '✓ ' : '✗ ') + txt),
+            ans ? h('button', { class: 'rw', 'aria-label': 'Salin jawaban', onclick: (ev) => copyBtn(ev.currentTarget, ans) }, ic('copy')) : null,
+          ),
+        );
       }
       case 'sh':
         this.activity = '$ ' + e.d;
         this.textEl = null;
-        this.append(h('div', { class: 'ln u shell' }, h('span', { class: 'pr' }, '$'), e.d));
+        this.append(h('div', { class: 'ln u shell' }, h('div', { class: 'bubble' }, h('span', { class: 'pr' }, '$'), e.d)));
         this.outEl = null;
         return;
       case 'out':
@@ -209,7 +226,7 @@ export class Renderer {
     this.activity = lowerFirst(toolActivity(e)).slice(0, 80);
     const stat = h('span', { class: 'tstat' }, h('span', { class: 'spinner', style: 'width:14px;height:14px' }));
     const body = h('div', { class: 'tb' });
-    const el = h('div', { class: `tool t-${kind}` },
+    const el = h('div', { class: `tool t-${kind} live` },
       h('button', { class: 'th', 'aria-expanded': 'false' }, h('span', { class: 'ti' }, glyph), h('span', { class: 'tn' }, e.name), h('span', { class: 'ts' }, first), stat),
       body,
     );
@@ -233,6 +250,7 @@ export class Renderer {
     if (!t) return;
     this.activity = 'berpikir…';
     if (t.todo) return;
+    t.el.classList.remove('live');
     const out = String(e.d || '').trim();
     const n = out ? out.split('\n').length : 0;
     t.stat.replaceChildren(
@@ -255,7 +273,7 @@ export class Renderer {
     if (doing) this.activity = '◐ ' + doing.t;
     this.lastTodo?.classList.add('stale');
     const card = h('div', { class: 'todo' },
-      h('div', { class: 'tt' }, h('span', {}, 'Rencana'), h('span', { class: 'bar' }, h('i', { style: `width:${items.length ? (done / items.length) * 100 : 0}%` })), h('span', {}, `${done}/${items.length}`)),
+      h('div', { class: 'tt' }, ic('list'), h('span', {}, 'Rencana'), h('span', { class: 'bar' }, h('i', { style: `width:${items.length ? (done / items.length) * 100 : 0}%` })), h('span', {}, `${done}/${items.length}`)),
       ...items.map((i) => h('div', { class: 'it ' + i.st }, h('span', { class: 'ck' }, i.st === 'done' ? '✓' : i.st === 'doing' ? '◐' : '○'), h('span', {}, i.t))),
     );
     this.lastTodo = card;
@@ -295,14 +313,14 @@ export class Renderer {
     if (e.ask) return this.dock.replaceChildren(askPanel(e, answer, more));
     if (e.plan) return this.dock.replaceChildren(planPanel(e, answer, more));
     buttons.append(
-      h('button', { class: 'btn danger', onclick: () => answer('deny') }, 'Tolak'),
+      h('button', { class: 'btn ghost', onclick: () => answer('deny') }, 'Tolak'),
       e.push ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Selalu'),
-      h('button', { class: 'btn primary', onclick: () => answer('allow') }, 'Izinkan'),
+      h('button', { class: 'btn ' + (e.push ? 'dangerfill' : 'primary'), onclick: () => answer('allow') }, 'Izinkan'),
     );
+    const [kind, glyph] = TOOL_KIND[e.tool] || ['other', '•'];
     this.dock.replaceChildren(
       h('div', { class: 'perm' + (e.push ? ' push' : '') },
-        h('div', { class: 'q' }, ic('alert'), e.push ? 'Agen ingin PUSH ke GitHub' : `Izinkan ${e.tool}?`),
-        e.title ? h('div', { class: 'pt' }, e.title) : null,
+        h('div', { class: 'q' }, h('span', { class: `pi t-${kind}` }, e.push ? ic('push') : glyph), h('span', { class: 'grow' }, e.push ? 'Agen ingin push ke GitHub' : `Izinkan ${e.tool}?`, e.title ? h('span', { class: 'pt' }, e.title) : null)),
         h('pre', {}, e.summary || e.s || ''),
         e.x ? miniDiff(e.x).el : null,
         buttons,
@@ -341,9 +359,9 @@ export function askPanel(e, answer, more) {
   sync();
   ok.onclick = () => answer('allow', { answers: Object.fromEntries(e.ask.map((q, i) => [q.question, [...picks[i], others[i].value.trim()].filter(Boolean).join(', ')])) });
   return h('div', { class: 'perm ask' },
-    h('div', { class: 'q' }, ic('spark'), 'Agen bertanya'),
+    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, '?'), h('span', { class: 'grow' }, 'Agen bertanya')),
     ...qs,
-    h('div', { class: 'btnrow' }, h('button', { class: 'btn danger', onclick: () => answer('deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' }) }, 'Lewati'), ok),
+    h('div', { class: 'btnrow' }, h('button', { class: 'btn ghost', onclick: () => answer('deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' }) }, 'Lewati'), ok),
     more,
   );
 }
@@ -352,7 +370,7 @@ export function askPanel(e, answer, more) {
 export function planPanel(e, answer, more) {
   const note = h('textarea', { class: 'field', rows: 2, placeholder: 'Catatan revisi (opsional)', autocapitalize: 'sentences' });
   return h('div', { class: 'perm ask' },
-    h('div', { class: 'q' }, ic('list'), 'Rencana siap — setujui?'),
+    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, ic('list')), h('span', { class: 'grow' }, 'Rencana siap — setujui?')),
     h('div', { class: 'plan txt', html: md(String(e.summary || e.s || '')) }),
     note,
     h('div', { class: 'btnrow' },
@@ -363,9 +381,18 @@ export function planPanel(e, answer, more) {
   );
 }
 
+// Tombol salin kecil: ikonnya menjadi centang sebentar.
+async function copyBtn(b, text) {
+  if (!(await copyText(text))) return;
+  haptic(10);
+  b.classList.add('done');
+  b.firstChild.replaceWith(ic('check'));
+  setTimeout(() => (b.classList.remove('done'), b.firstChild.replaceWith(ic('copy'))), 1400);
+}
+
 export async function rewindTo(e) {
   const label = String(e.d || 'gambar').slice(0, 60);
-  if (!confirm(`Kembalikan SEMUA file worktree ke kondisi sebelum prompt:\n\n"${label}"\n\nPerubahan setelahnya (oleh agen maupun manual) akan hilang.`)) return;
+  if (!(await ui.confirm({ title: 'Rewind ke sebelum prompt ini?', text: `Semua file worktree dikembalikan ke kondisi sebelum "${label}". Perubahan setelahnya (oleh agen maupun manual) akan hilang.`, ok: 'Rewind', danger: true, icon: 'undo' }))) return;
   try {
     const n = await app.conn.call('rewind', { id: app.current.session.id, seq: e.seq });
     haptic(20);

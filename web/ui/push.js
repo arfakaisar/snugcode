@@ -2,7 +2,7 @@
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { showLogin } from './auth.js';
-import { h, menuItem, toast, ui } from './dom.js';
+import { applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
 
 // ---------- Notifikasi & Web Push ----------
 // Kunci VAPID dibuat di HP lalu dibagikan ke tiap PC lewat kanal E2EE: satu langganan push
@@ -47,9 +47,29 @@ export async function enableNotifications() {
   else toast(/iPhone|iPad/.test(navigator.userAgent) ? 'Tambahkan ke Home Screen dulu agar notifikasi tetap jalan saat aplikasi ditutup' : 'Notifikasi aktif saat aplikasi terbuka', false, 5000);
 }
 
+// Pemilih tema (Sistem / Terang / Gelap) berbentuk segmented control dengan penanda yang bergeser.
+export function themePicker() {
+  const opts = [['system', 'auto', 'Sistem'], ['light', 'sun', 'Terang'], ['dark', 'moon', 'Gelap']];
+  const cur = () => store.get('theme') || 'system';
+  const seg = h('div', { class: 'seg slide', style: `--n:${opts.length}` });
+  const sync = () => {
+    const i = opts.findIndex(([k]) => k === cur());
+    seg.style.setProperty('--at', String(i));
+    [...seg.querySelectorAll('button')].forEach((b, j) => b.classList.toggle('on', j === i));
+  };
+  seg.append(h('i', { class: 'knob' }), ...opts.map(([k, icon, label]) => h('button', { onclick: () => (haptic(8), store.set('theme', k), applyTheme(k), sync()) }, ic(icon), label)));
+  sync();
+  return seg;
+}
+
 export function accountMenu() {
+  const login = app.me?.login;
   ui.sheet(
-    ui.head('Akun', { sub: app.me ? '@' + app.me.login : '' }),
+    ui.head('Akun & tampilan'),
+    login ? h('div', { class: 'profile' }, h('span', { class: 'meav big' }, login[0].toUpperCase()), h('div', {}, h('b', {}, '@' + login), h('div', { class: 'dim small' }, 'login lewat GitHub'))) : null,
+    h('div', { class: 'label' }, 'Tema'),
+    themePicker(),
+    h('div', { class: 'label' }, 'Perangkat ini'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
       menuItem({ icon: 'logout', t1: 'Keluar', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),

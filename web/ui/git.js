@@ -14,7 +14,7 @@ export async function showGit() {
     return body.replaceChildren(h('div', { class: 'err' }, e.message));
   }
   app.current.refreshGit?.();
-  const msg = h('input', { class: 'field', placeholder: 'Pesan commit', autocapitalize: 'sentences', enterkeyhint: 'done' });
+  const msg = h('input', { class: 'field', placeholder: 'Pesan commit…', autocapitalize: 'sentences', enterkeyhint: 'done' });
   const err = h('div', { class: 'err' });
   const act = (content, fn, cls = 'btn') => {
     const b = h('button', { class: cls }, ...content);
@@ -33,35 +33,43 @@ export async function showGit() {
   };
   const stCls = (code) => (code.includes('?') || code.includes('A') ? 'A' : code.includes('D') ? 'D' : code.includes('R') ? 'R' : 'M');
   const stTxt = (code) => (code.includes('?') ? 'A' : code.trim()[0] || 'M');
+  const sync = st.hasUpstream ? (st.ahead || st.behind ? `↑${st.ahead} · ↓${st.behind}` : 'sinkron dengan GitHub') : st.ahead ? `${st.ahead} commit belum di GitHub` : 'belum ada di GitHub';
   body.replaceChildren(
-    h('div', { class: 'gitstat' },
-      h('span', { class: 'tag' }, ic('branch'), st.branch),
-      st.hasUpstream ? h('span', { class: 'tag' + (st.ahead ? ' run' : '') }, `↑${st.ahead} ↓${st.behind}`) : h('span', { class: 'tag' + (st.ahead ? ' run' : '') }, st.ahead ? `${st.ahead} commit belum di GitHub` : 'belum ada di GitHub'),
+    h('div', { class: 'gitsum' },
+      h('span', { class: 'gi' }, ic('branch')),
+      h('span', { class: 'grow' }, h('b', {}, st.branch), h('span', { class: 'dim small' }, sync)),
+      h('span', { class: 'dstat big' }, st.files.length ? `${st.files.length} file` : '✓ bersih'),
     ),
     h('div', { class: 'label' }, 'Perubahan', h('span', { class: 'count' }, st.files.length)),
     st.files.length
-      ? h('div', { class: 'files' }, ...st.files.map((f) => h('div', { class: 'f' }, h('span', { class: 'st ' + stCls(f.st) }, stTxt(f.st)), h('span', { class: 'p' }, '‎' + f.path))))
+      ? h('div', { class: 'files' }, ...st.files.map((f, i) => h('div', { class: 'f', style: `--i:${Math.min(i, 12)}` }, h('span', { class: 'st ' + stCls(f.st) }, stTxt(f.st)), h('span', { class: 'p' }, '‎' + f.path))))
       : h('div', { class: 'dim small' }, 'Tidak ada perubahan yang belum di-commit.'),
     st.files.length ? h('div', { style: 'margin-top:10px' }, act([ic('diff'), 'Lihat diff'], showDiff)) : null,
     st.files.length
-      ? h('div', {}, h('div', { class: 'label' }, 'Commit'), msg, h('div', { style: 'margin-top:10px' }, act([ic('commit'), 'Commit semua'], async () => {
+      ? h('div', {}, h('div', { class: 'label' }, 'Commit'), h('div', { class: 'inline' }, msg, act([ic('commit'), 'Commit'], async () => {
           if (!msg.value.trim()) throw new Error('Isi pesan commit.');
           const c = await app.conn.call('commit', { id: s.id, message: msg.value });
           toast('Commit ' + c);
           haptic(15);
           showGit();
-        })))
+        }, 'btn primary')))
       : null,
     h('div', { class: 'label' }, 'Kirim ke GitHub'),
-    act([ic('push'), `Push ke origin/${st.branch}`], async () => {
-      if (!confirm(`Push branch ${st.branch} ke GitHub?`)) return;
-      await app.conn.call('push', { id: s.id });
-      toast('Push berhasil');
-      haptic(20);
-      showGit();
-    }, 'btn primary'),
-    h('div', { style: 'height:10px' }),
-    act([ic('pr'), 'Buat Pull Request'], () => showPR(st)),
+    h('div', { class: 'btnrow' },
+      act([ic('push'), 'Push'], async () => {
+        if (!(await ui.confirm({ title: 'Push ke GitHub?', text: `Branch ${st.branch} dikirim ke origin.`, ok: 'Push', icon: 'push', stay: true }))) return;
+        ui.sheet(ui.head('Git', { sub: s.repo }), loading('Push ke GitHub…'));
+        try {
+          await app.conn.call('push', { id: s.id });
+          toast('Push berhasil');
+          haptic(20);
+        } catch (x) {
+          toast(x.message, true);
+        }
+        showGit();
+      }, 'btn primary'),
+      act([ic('pr'), 'Pull Request'], () => showPR(st)),
+    ),
     err,
     st.log.length ? h('div', {}, h('div', { class: 'label' }, 'Commit terakhir'), h('div', { class: 'log' }, ...st.log.map((l) => h('div', {}, h('span', { class: 'h' }, l.slice(0, 7)), l.slice(8))))) : null,
   );
@@ -78,7 +86,7 @@ export function showPR(st) {
     try {
       const pr = await app.conn.call('pr', { id: s.id, title: title.value || st.branch, body: desc.value });
       haptic(20);
-      ui.sheet(ui.head('PR dibuat', { sub: `#${pr.number}` }), h('div', { class: 'empty' }, h('div', { class: 'big', style: 'color:var(--green)' }, '✓'), h('b', {}, `Pull Request #${pr.number}`)), h('a', { class: 'btn primary', href: pr.url, target: '_blank', rel: 'noopener' }, ic('github'), 'Buka di GitHub'));
+      ui.sheet(ui.head('PR dibuat', { sub: `#${pr.number}` }), h('div', { class: 'empty' }, h('div', { class: 'emptyart ok' }, ic('pr')), h('b', {}, `Pull Request #${pr.number}`), 'Siap ditinjau di GitHub.'), h('a', { class: 'btn primary', href: pr.url, target: '_blank', rel: 'noopener' }, ic('github'), 'Buka di GitHub'));
     } catch (e) {
       done();
       err.textContent = e.message + (/No commits|not all refs/.test(e.message) ? ' — push dulu.' : '');

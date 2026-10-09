@@ -1,10 +1,10 @@
-// Koneksi ke satu PC: pairing PIN, menu PC, pembaruan jarak jauh, login GitHub PC.
+// Koneksi ke satu PC: pairing PIN, pengaturan PC, pembaruan jarak jauh, login GitHub PC.
 import * as C from '../../shared/crypto.js';
 import * as M from '../../shared/models.js';
 import { Conn, store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
-import { busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, toast, ui } from './dom.js';
+import { anim, busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, spark, toast, ui } from './dom.js';
 import { pickModel } from './model-picker.js';
 import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
@@ -19,7 +19,7 @@ export function openMachine(m, { sid } = {}) {
   store.set('last', { mid: m.id, sid });
   const msg = h('div', { class: 'muted' });
   const showStatus = (title, text, busy = true) =>
-    ui.view(h('div', { class: 'hero' }, h('div', { class: 'lockicon' }, busy ? h('span', { class: 'spinner', style: 'width:26px;height:26px' }) : ic('monitor')), h('h1', {}, title), msg, text ? h('p', { class: 'dim small' }, text) : null));
+    ui.view(h('div', { class: 'hero center' }, busy ? spark('think xl') : h('div', { class: 'lockicon' }, ic('monitor')), h('h1', { class: 'serif' + (busy ? ' shimmer' : '') }, title), msg, text ? h('p', { class: 'dim small' }, text) : null));
   ui.set(m.name, { sub: 'menghubungkan…', back: goMachines, dot: 'busy' });
   msg.textContent = 'Membuka kanal terenkripsi ke PC…';
   showStatus('Menghubungkan');
@@ -76,25 +76,25 @@ export function showPin(m) {
     input.focus();
   };
   const wrap = h('div', { class: 'pinwrap' }, input, eye);
-  const btn = h('button', { class: 'btn primary', style: 'margin-top:14px' }, 'Pasangkan');
+  const lock = h('div', { class: 'lockicon' }, ic('lock'));
+  const btn = h('button', { class: 'btn primary big', style: 'margin-top:14px' }, 'Pasangkan');
+  const shake = () => anim(wrap, [{ transform: 'none' }, { transform: 'translateX(-9px)' }, { transform: 'translateX(8px)' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }], { duration: 420, easing: 'ease-out' });
   const go = async () => {
     const pin = input.value.trim();
     if (!C.PIN_RE.test(pin)) {
       err.textContent = 'PIN 6–12 huruf/angka.';
-      wrap.classList.remove('shake');
-      void wrap.offsetWidth;
-      wrap.classList.add('shake');
+      shake();
       return;
     }
     const done = busyButton(btn, 'Memverifikasi…');
     err.textContent = '';
+    lock.classList.add('busy');
     const r = await app.conn.pair(pin);
+    lock.classList.remove('busy');
     done();
-    if (r.ok) return haptic(20);
+    if (r.ok) return (haptic(20), lock.classList.add('ok'));
     input.value = '';
-    wrap.classList.remove('shake');
-    void wrap.offsetWidth;
-    wrap.classList.add('shake');
+    shake();
     haptic(60);
     err.textContent =
       r.reason === 'pin' ? `PIN salah.${r.left != null ? ` Sisa ${r.left} percobaan.` : ''}`
@@ -109,9 +109,9 @@ export function showPin(m) {
   };
   ui.view(
     h('div', { class: 'scroll' },
-      h('div', { class: 'hero' },
-        h('div', { class: 'lockicon' }, ic('lock')),
-        h('h1', {}, 'Pasangkan HP ini'),
+      h('div', { class: 'hero center' },
+        lock,
+        h('h1', { class: 'serif' }, 'Pasangkan HP ini'),
         h('div', { class: 'muted' }, `Masukkan PIN yang kamu buat saat setup di `, h('b', {}, m.name), '.'),
         h('div', { class: 'dim small', style: 'margin-top:6px' }, 'Cukup sekali per HP. PIN diverifikasi langsung oleh PC — tidak pernah dikirim ke server.'),
         wrap, err, btn,
@@ -122,6 +122,20 @@ export function showPin(m) {
 }
 
 // ---------- Pembaruan PC Otomatis (dari HP) ----------
+async function runUpdate(btn, after) {
+  const done = busyButton(btn, 'Memperbarui…');
+  try {
+    haptic(20);
+    const res = await app.conn.call('update');
+    haptic(25);
+    toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 7000);
+    after?.();
+  } catch (err) {
+    done();
+    toast('Pembaruan gagal: ' + err.message, true, 6000);
+  }
+}
+
 export function renderUpdateBanner() {
   const el = document.getElementById('updateBanner');
   if (!el) return;
@@ -131,45 +145,21 @@ export function renderUpdateBanner() {
   const sha = st.latestCommit ? st.latestCommit.slice(0, 7) : 'terbaru';
   const behind = st.commitsBehind > 1 ? `${st.commitsBehind} commit tertinggal` : 'Pembaruan baru tersedia';
   const msg = st.latestMessage ? `"${st.latestMessage}"` : behind;
-
-  const upBtn = h(
-    'button',
-    {
-      class: 'btn-up-now',
-      onclick: async (e) => {
-        e.stopPropagation();
-        const done = busyButton(e.currentTarget, 'Memperbarui…');
-        try {
-          haptic(20);
-          const res = await app.conn.call('update');
-          haptic(25);
-          toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 7000);
-          app.current.updateStatus = null;
-          renderUpdateBanner();
-          showSessionsMeta();
-        } catch (err) {
-          done();
-          toast('Pembaruan gagal: ' + err.message, true, 6000);
-        }
-      },
+  const upBtn = h('button', {
+    class: 'pillbtn',
+    onclick: (e) => {
+      e.stopPropagation();
+      runUpdate(e.currentTarget, () => {
+        app.current.updateStatus = null;
+        renderUpdateBanner();
+        showSessionsMeta();
+      });
     },
-    'Perbarui PC',
-  );
-
+  }, 'Perbarui');
   el.replaceChildren(
-    h(
-      'button',
-      {
-        class: 'card update-banner',
-        onclick: () => updateMachineSheet(),
-      },
-      h('span', { class: 'avatar up-avatar' }, ic('spark')),
-      h(
-        'span',
-        { class: 'grow' },
-        h('div', { class: 'name' }, `Pembaruan PC Tersedia (${sha})`),
-        h('div', { class: 'sub', style: 'white-space:normal' }, `${msg} · Ketuk untuk rincian`),
-      ),
+    h('button', { class: 'banner up', onclick: () => updateMachineSheet() },
+      h('span', { class: 'bi' }, ic('spark')),
+      h('span', { class: 'grow' }, h('div', { class: 'name' }, `Pembaruan PC tersedia · ${sha}`), h('div', { class: 'sub' }, msg)),
       upBtn,
     ),
   );
@@ -205,11 +195,11 @@ export function renderGhBanner() {
   if (!el) return;
   if (!ghBad()) return el.replaceChildren();
   el.replaceChildren(
-    h('button', { class: 'card ghwarn', onclick: () => githubLoginSheet() },
-      h('span', { class: 'avatar off' }, ic('github')),
+    h('button', { class: 'banner warn', onclick: () => githubLoginSheet() },
+      h('span', { class: 'bi' }, ic('github')),
       h('span', { class: 'grow' },
         h('div', { class: 'name' }, app.current.info.githubState === 'missing' ? 'GitHub belum login di PC ini' : 'Login GitHub di PC ini tidak berlaku'),
-        h('div', { class: 'sub', style: 'white-space:normal' }, 'Push, PR, dan daftar repo tidak bisa dipakai. Ketuk untuk login ulang dari HP.'),
+        h('div', { class: 'sub' }, 'Push, PR, dan daftar repo tidak bisa dipakai. Ketuk untuk login ulang dari HP.'),
       ),
       ic('right', 'chev'),
     ),
@@ -227,6 +217,8 @@ export function onGithubStatus(st) {
   if (st.state === 'invalid' && was !== 'invalid' && !app.current.ghSheet) toast('Login GitHub di PC tidak berlaku — ketuk banner untuk login ulang', true, 5000);
 }
 
+const doneState = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'emptyart ok' }, ic('check')), h('b', {}, title), text);
+
 export async function githubLoginSheet() {
   const body = h('div', {}, loading('Meminta kode login ke GitHub…'));
   ui.sheet(ui.head('Login GitHub', { sub: 'untuk ' + app.current.m.name }), body);
@@ -240,7 +232,7 @@ export async function githubLoginSheet() {
     if (st.state === 'ok' && !st.pending) {
       haptic(25);
       body.replaceChildren(
-        h('div', { class: 'empty' }, h('div', { class: 'big', style: 'color:var(--green)' }, '✓'), h('b', {}, 'GitHub tersambung'), `@${st.login} — push, PR, dan daftar repo bisa dipakai lagi.`),
+        doneState('GitHub tersambung', `@${st.login} — push, PR, dan daftar repo bisa dipakai lagi.`),
         h('button', { class: 'btn primary', onclick: () => (close(), ui.closeSheet()) }, 'Selesai'),
       );
       return;
@@ -258,9 +250,7 @@ export async function githubLoginSheet() {
     body.replaceChildren(
       h('div', { class: 'muted small' }, 'Masukkan kode ini di halaman GitHub, lalu tekan Authorize:'),
       h('div', { class: 'ghcode' }, h('span', {}, p.code), copyBtn),
-      p.error
-        ? h('div', { class: 'err' }, p.error)
-        : h('div', { class: 'loading', style: 'justify-content:center' }, h('span', { class: 'spinner' }), h('span', {}, 'menunggu otorisasi · ', left)),
+      p.error ? h('div', { class: 'err' }, p.error) : h('div', { class: 'loading', style: 'justify-content:center' }, spark('think'), h('span', {}, 'menunggu otorisasi · ', left)),
       h('a', { class: 'btn primary', href: p.uri, target: '_blank', rel: 'noopener', onclick: () => copyText(p.code) }, ic('github'), 'Salin kode & buka GitHub'),
       h('div', { class: 'dim small', style: 'margin-top:12px;text-align:center' }, p.uri.replace(/^https:\/\//, '')),
       p.error ? h('button', { class: 'btn', style: 'margin-top:10px', onclick: () => githubLoginSheet() }, ic('refresh'), 'Minta kode baru') : null,
@@ -294,8 +284,12 @@ export function showMachineMenu() {
       },
     });
   ui.sheet(
-    ui.head(app.current.m.name, { sub: info.github ? 'GitHub @' + info.github : 'GitHub belum login' }),
-    h('div', { class: 'label', style: 'margin-top:4px' }, 'Model'),
+    ui.head('Pengaturan PC', { sub: app.current.m.name }),
+    h('div', { class: 'pchero' },
+      h('span', { class: 'avatar' }, ic('monitor'), h('i', { class: 'live' })),
+      h('div', { class: 'grow' }, h('b', {}, app.current.m.name), h('div', { class: 'dim small' }, [{ win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[info.platform] || info.platform, info.commit ? 'v' + info.commit : null, info.github && !ghBad() ? '@' + info.github : 'GitHub belum login'].filter(Boolean).join(' · '))),
+    ),
+    h('div', { class: 'label' }, 'Model'),
     h('div', { class: 'group' },
       modelItem('Default untuk sesi baru', info.model, () => pick('Model default', 'model')),
       // Model ringan subagen dipilih otomatis oleh daemon (Claude Haiku 5.5 / Gemini 3.8 Flash).
@@ -307,7 +301,7 @@ export function showMachineMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'github', t1: ghBad() ? 'Login GitHub (perlu)' : 'Login ulang GitHub', t2: info.github && !ghBad() ? '@' + info.github + ' · tersambung' : 'push, PR, dan daftar repo', onclick: () => githubLoginSheet() }),
     ),
-    h('div', { class: 'label' }, 'Sistem & Pembaruan'),
+    h('div', { class: 'label' }, 'Sistem & pembaruan'),
     h('div', { class: 'group' },
       menuItem({
         icon: 'spark',
@@ -325,11 +319,7 @@ export function showMachineMenu() {
             const r = await app.conn.call('cleanup');
             const wtCount = r.removedWorktrees?.length || 0;
             const repoCount = r.removedRepos?.length || 0;
-            if (wtCount === 0 && repoCount === 0) {
-              toast('Workspace PC sudah bersih.');
-            } else {
-              toast(`Dibersihkan: ${wtCount} worktree, ${repoCount} repo`);
-            }
+            toast(wtCount || repoCount ? `Dibersihkan: ${wtCount} worktree, ${repoCount} repo` : 'Workspace PC sudah bersih.');
           } catch (e) {
             toast(e.message, true);
           }
@@ -340,11 +330,10 @@ export function showMachineMenu() {
         t1: 'Restart daemon PC',
         t2: info.preventSleep ? 'Cegah PC sleep: aktif' : 'Mulai ulang koneksi daemon',
         onclick: async () => {
-          if (!confirm('Restart daemon pocketcode di PC sekarang? Sesi akan otomatis tersambung lagi setelah beberapa detik.')) return;
+          if (!(await ui.confirm({ title: 'Restart daemon?', text: 'Daemon pocketcode di PC dimulai ulang. Sesi tersambung lagi otomatis setelah beberapa detik.', ok: 'Restart', icon: 'refresh' }))) return;
           try {
             const r = await app.conn.call('restart');
             toast(r.message || 'Daemon me-restart…');
-            ui.closeSheet();
           } catch (e) {
             toast(e.message, true);
           }
@@ -354,6 +343,7 @@ export function showMachineMenu() {
     h('div', { class: 'label' }, 'Perangkat'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
+      menuItem({ icon: 'monitor', t1: 'Ganti PC', t2: 'kembali ke daftar komputer', onclick: () => (ui.closeSheet(), goMachines()) }),
       menuItem({ icon: 'unlink', t1: 'Lupakan pairing HP ini', t2: 'Perlu PIN lagi untuk tersambung', danger: true, chev: false, onclick: () => (store.set('dev.' + app.current.m.id, null), ui.closeSheet(), openMachine(app.current.m)) }),
     ),
   );
@@ -365,39 +355,16 @@ export async function updateMachineSheet() {
   try {
     const st = await app.conn.call('updateStatus');
     const hasUpdate = st.updateAvailable;
-    const currentTxt = st.currentCommit ? `Commit saat ini: ${st.currentCommit}` : '';
-    const latestTxt = st.latestCommit ? `Versi terbaru: ${st.latestCommit}` : '';
-    const msgTxt = st.latestMessage ? `"${st.latestMessage}"` : '';
-
-    const btn = h(
-      'button',
-      {
-        class: 'btn primary',
-        style: 'margin-top:14px',
-        onclick: async (e) => {
-          const done = busyButton(e.currentTarget, 'Memperbarui di PC…');
-          try {
-            const res = await app.conn.call('update');
-            haptic(25);
-            toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 6000);
-            ui.closeSheet();
-          } catch (err) {
-            done();
-            toast('Pembaruan gagal: ' + err.message, true, 6000);
-          }
-        },
-      },
-      hasUpdate ? 'Perbarui Sekarang' : 'Paksa Perbarui Ulang',
-    );
-
+    const btn = h('button', { class: 'btn primary', style: 'margin-top:14px', onclick: (e) => runUpdate(e.currentTarget, () => ui.closeSheet()) }, hasUpdate ? 'Perbarui sekarang' : 'Paksa perbarui ulang');
     body.replaceChildren(
-      h(
-        'div',
-        { class: 'empty', style: 'padding:16px 0' },
-        h('div', { class: 'big', style: hasUpdate ? 'color:var(--yellow)' : 'color:var(--green)' }, hasUpdate ? '⬆' : '✓'),
-        h('b', {}, hasUpdate ? 'Pembaruan Tersedia!' : 'pocketcode Sudah Versi Terbaru'),
-        hasUpdate && msgTxt ? h('div', { style: 'color:var(--fg);margin-top:4px;font-size:14px;word-break:break-word' }, msgTxt) : null,
-        h('div', { class: 'dim small', style: 'margin-top:8px' }, `${currentTxt} · ${latestTxt}`),
+      h('div', { class: 'empty', style: 'padding:16px 0' },
+        h('div', { class: 'emptyart' + (hasUpdate ? ' up' : ' ok') }, ic(hasUpdate ? 'push' : 'check')),
+        h('b', {}, hasUpdate ? 'Pembaruan tersedia' : 'pocketcode sudah versi terbaru'),
+        hasUpdate && st.latestMessage ? h('div', { class: 'quote' }, st.latestMessage) : null,
+        h('div', { class: 'tags', style: 'justify-content:center;margin-top:12px' },
+          st.currentCommit ? h('span', { class: 'tag' }, 'sekarang ' + st.currentCommit) : null,
+          st.latestCommit ? h('span', { class: 'tag' + (hasUpdate ? ' on' : '') }, 'terbaru ' + st.latestCommit) : null,
+        ),
       ),
       btn,
     );
@@ -411,50 +378,40 @@ export async function updateMachineSheet() {
         ? `Start-Process cmd -WindowStyle Hidden -ArgumentList '/c pocketcode stop & ping -n 4 127.0.0.1 >nul & npm i -g github:arfakaisar/pocketcode --include=optional > "%USERPROFILE%\\.pocketcode\\update.log" 2>&1 & pocketcode restart'`
         : 'npm i -g github:arfakaisar/pocketcode --include=optional && pocketcode restart';
       body.replaceChildren(
-        h(
-          'div',
-          { class: 'empty', style: 'padding:16px 0' },
-          h('div', { class: 'big', style: 'color:var(--yellow)' }, '⬆'),
-          h('b', {}, 'Daemon PC Perlu Pembaruan Awal'),
+        h('div', { class: 'empty', style: 'padding:16px 0' },
+          h('div', { class: 'emptyart up' }, ic('push')),
+          h('b', {}, 'Daemon PC perlu pembaruan awal'),
           h('div', { class: 'dim small', style: 'margin-top:8px;line-height:1.5' },
-            'Daemon di PC masih versi lama sebelum ada fitur pembaruan otomatis jarak jauh. Klik tombol di bawah untuk memasang pembaruan ke PC lewat sesi aktif:'
+            'Daemon di PC masih versi lama sebelum ada fitur pembaruan otomatis jarak jauh. Ketuk tombol di bawah untuk memasang pembaruan ke PC lewat sesi aktif:',
           ),
-          h(
-            'button',
-            {
-              class: 'btn primary',
-              style: 'margin-top:14px',
-              onclick: async (btnEv) => {
-                const done = busyButton(btnEv.currentTarget, 'Mengirim perintah update…');
-                try {
-                  // Perintah dijalankan lewat sesi yang sedang tidak sibuk. Daemon lama tidak bisa
-                  // membuat sesi tanpa repo, jadi tanpa sesi pengguna diarahkan ke perintah manual.
-                  const target = (await app.conn.call('sessions')).find((s) => s.status !== 'running');
-                  if (!target) throw new Error('tidak ada sesi yang sedang menganggur. Buat sesi dulu, atau jalankan perintah di bawah langsung di terminal PC.');
-                  await app.conn.call('send', { id: target.id, text: '!' + upCmd });
-                  toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
-                  ui.closeSheet();
-                } catch (err) {
-                  done();
-                  toast('Gagal: ' + err.message, true);
-                }
-              },
+          h('button', {
+            class: 'btn primary',
+            style: 'margin-top:14px',
+            onclick: async (btnEv) => {
+              const done = busyButton(btnEv.currentTarget, 'Mengirim perintah update…');
+              try {
+                // Perintah dijalankan lewat sesi yang sedang tidak sibuk. Daemon lama tidak bisa
+                // membuat sesi tanpa repo, jadi tanpa sesi pengguna diarahkan ke perintah manual.
+                const target = (await app.conn.call('sessions')).find((s) => s.status !== 'running');
+                if (!target) throw new Error('tidak ada sesi yang sedang menganggur. Buat sesi dulu, atau jalankan perintah di bawah langsung di terminal PC.');
+                await app.conn.call('send', { id: target.id, text: '!' + upCmd });
+                toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
+                ui.closeSheet();
+              } catch (err) {
+                done();
+                toast('Gagal: ' + err.message, true);
+              }
             },
-            'Perbarui PC Sekarang (via Sesi)',
-          ),
-          h('div', { class: 'dim small', style: 'margin-top:14px;font-size:12px' },
-            'Atau ketik langsung di chat sesi:',
-          ),
-          h('pre', { style: 'margin-top:4px;padding:8px;background:var(--bg2);border-radius:6px;user-select:all;font-size:12px;word-break:break-all' },
-            '!' + upCmd
-          ),
+          }, 'Perbarui PC sekarang (via sesi)'),
+          h('div', { class: 'dim small', style: 'margin-top:14px' }, 'Atau ketik langsung di chat sesi:'),
+          h('pre', { class: 'shout', style: 'user-select:all;text-align:left;word-break:break-all' }, '!' + upCmd),
         ),
       );
       return;
     }
     body.replaceChildren(
       h('div', { class: 'err' }, 'Gagal memeriksa pembaruan: ' + e.message),
-      h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => updateMachineSheet() }, 'Coba Lagi'),
+      h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => updateMachineSheet() }, 'Coba lagi'),
     );
   }
 }
