@@ -13,10 +13,11 @@ const SDK = 'claude-agent-sdk';
 function isMusl() {
   if (process.platform !== 'linux') return false;
   const r = typeof process.report?.getReport === 'function' ? process.report.getReport() : null;
-  return r != null && r.header?.glibcVersionRuntime === undefined;
+  return r != null && /** @type {any} */ (r).header?.glibcVersionRuntime === undefined;
 }
 
 // Nama paket kandidat sesuai urutan yang dicoba SDK, mis. "claude-agent-sdk-win32-x64".
+/** @param {{ platform?: string, arch?: string, musl?: boolean }} [target] */
 export function platformBinaryPackages({ platform = process.platform, arch = process.arch, musl } = {}) {
   musl ??= platform === 'linux' && isMusl();
   const base = `${SDK}-${platform === 'android' ? 'linux' : platform}-${arch}`;

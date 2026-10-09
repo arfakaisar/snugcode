@@ -675,3 +675,24 @@ test('index sesi rusak: sesi dipulihkan dari worktree & tidak ada yang dihapus',
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('model event bersama: rencana, aktivitas, ringkasan selesai, penyaring duplikat', async () => {
+  const E = await import('../shared/events.js');
+  const todos = E.todosFromInput([{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }]);
+  assert.deepEqual(todos, [{ st: 'done', t: 'a' }, { st: 'doing', t: 'b' }, { st: 'todo', t: 'c' }]);
+  // Daemon baru mengirim `todos`; daemon lama hanya teks berglyph — hasilnya sama.
+  assert.deepEqual(E.todoItems({ k: 'tool', name: 'TodoWrite', todos }), todos);
+  assert.deepEqual(E.todoItems({ k: 'tool', name: 'TodoWrite', s: E.todoText(todos) }), todos);
+  assert.equal(E.toolActivity({ k: 'tool', name: 'TodoWrite', todos }), 'b');
+  assert.equal(E.toolActivity({ k: 'tool', name: 'Bash', s: 'npm test\nlagi' }), 'Menjalankan npm test');
+  assert.equal(E.toolActivity({ k: 'tool', name: 'alat_baru', s: 'x' }), 'alat_baru x');
+  assert.deepEqual(E.doneParts({ k: 'done', turns: 3, ms: 4200, usage: { in: 12345, out: 800 }, ctx: 40, cost: 0.0123 }), ['3 langkah', '4.2s', '12k→800 tok', 'konteks 40%', '$0.012']);
+  assert.equal(E.fmtDuration(95_000), '1m 35s');
+  const cur = new E.EventCursor();
+  assert.deepEqual([{ seq: 1 }, { seq: 2 }, { seq: 2 }, { k: 'proc' }, { seq: 1 }, { seq: 3 }].map((e) => cur.accept(/** @type {any} */ (e))), [true, true, false, true, false, true]);
+  assert.equal(cur.lastSeq, 3);
+
+  // Daemon menyertakan `todos` terstruktur pada event TodoWrite.
+  const { toolSummary } = await import('../daemon/sessions.js');
+  assert.equal(toolSummary('TodoWrite', { todos: [{ content: 'a', status: 'completed' }] }), '☑ a');
+});

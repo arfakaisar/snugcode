@@ -374,8 +374,10 @@ POCKETCODE_HOME=/tmp/pc node daemon/cli.js setup --relay http://127.0.0.1:8787 \
 POCKETCODE_HOME=/tmp/pc node daemon/cli.js start
 
 npm test                                   # unit test
+npm run typecheck                          # tsc --checkJs: daemon, shared, PWA, relay
 node test/e2e-phone.mjs                    # simulasi HP: pairing → sesi → agen → git
 npm run test:e2e                           # HP → relay dev → daemon → Agent SDK → mock 9router (tanpa key asli)
+npm run test:ui                            # PWA hasil build di Chrome + TUI di pseudo-terminal (setelah build:web)
 node test/worktree.it.mjs                  # skenario branch/worktree (butuh internet)
 ```
 

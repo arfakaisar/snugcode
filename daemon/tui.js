@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { loadSecrets, HOME, IPC_PATH } from './config.js';
 import * as M from '../shared/models.js';
+import { EventCursor, doneParts, todoItems, toolActivity } from '../shared/events.js';
 import { PAL, c, bold, dim, under, strike, userBg, gradient, cw, width, cols, rowsN, hardWrap, wrapWords, pad, trunc, renderMd } from './term.js';
 
 const out = process.stdout;
@@ -190,7 +191,6 @@ export async function loginViaDaemon({ openBrowser = true } = {}) {
 
 // ---------- utilitas tampilan ----------
 const SPIN = ['✶', '✸', '✹', '✺', '✹', '✸'];
-const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 const fmtDur = (ms) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
@@ -208,7 +208,6 @@ function modelLabel(id) {
   const p = M.parseModelId(id);
   return p.base + (p.effort ? ' · ' + (M.EFFORT_LABEL[p.effort] || p.effort) : '');
 }
-const ACTIVITY = { Bash: 'Menjalankan', dev_start: 'Menyalakan', dev_logs: 'Membaca log', preview_screenshot: 'Melihat halaman', Read: 'Membaca', Edit: 'Mengedit', MultiEdit: 'Mengedit', Write: 'Menulis', Grep: 'Mencari', Glob: 'Mencari', LS: 'Melihat', WebFetch: 'Membuka', WebSearch: 'Mencari di web', Task: 'Subagen', Agent: 'Subagen', TodoWrite: 'Merencanakan', AskUserQuestion: 'Bertanya', ExitPlanMode: 'Menyusun rencana' };
 
 const PLAN_REVISE = 'Pengguna ingin merevisi rencana. Berhenti sekarang dan tunggu arahan revisinya.';
 
@@ -249,6 +248,9 @@ class App {
     this.session = null;
     this.input = '';
     this.cursor = 0;
+    this.evCursor = new EventCursor(); // seq event sesi terakhir yang sudah ditampilkan
+    /** @type {Set<string> | null} */
+    this.procPorts = null; // proses yang port-nya sudah diumumkan
     this.mode = 'chat'; // chat | shell
     this.history = [];
     this.histIdx = -1;
@@ -282,6 +284,7 @@ class App {
     return s;
   }
   // Cetak ke scrollback di atas area hidup.
+  /** @param {string | string[]} [text] */
   print(text = '') {
     const lines = Array.isArray(text) ? text : String(text).split('\n');
     out.write('\x1b[?25l' + this.clearLive() + lines.join('\n') + '\n');
@@ -570,8 +573,7 @@ class App {
     const outText = String(result?.d || '').replace(/\s+$/, '');
     const n = outText ? outText.split('\n').length : 0;
     if (e.name === 'TodoWrite') {
-      const items = String(e.s || '').split('\n').filter(Boolean);
-      L.push(...branch(items.map((l) => (l[0] === '☑' ? c.green('☒ ') + dim(strike(l.slice(2))) : l[0] === '◐' ? c.yellow('◐ ') + bold(l.slice(2)) : c.soft('☐ ') + l.slice(2)))));
+      L.push(...branch(todoItems(e).map((i) => (i.st === 'done' ? c.green('☒ ') + dim(strike(i.t)) : i.st === 'doing' ? c.yellow('◐ ') + bold(i.t) : c.soft('☐ ') + i.t))));
       return L;
     }
     if (e.x && ok) {
@@ -651,13 +653,8 @@ class App {
         const it = this.toolItem(e);
         this.tools.set(e.id, it);
         this.queue.push(it);
-        const first = String(e.s || '').split('\n')[0];
-        this.activity = `${ACTIVITY[e.name] || e.name} ${e.name === 'TodoWrite' ? '' : first}`.trim();
-        if (e.name === 'TodoWrite') {
-          it.done = true;
-          const doing = String(e.s || '').split('\n').find((l) => l[0] === '◐');
-          if (doing) this.activity = doing.slice(2);
-        }
+        this.activity = toolActivity(e);
+        if (e.name === 'TodoWrite') it.done = true;
         break;
       }
       case 'result': {
@@ -687,7 +684,7 @@ class App {
       case 'done': {
         for (const it of this.queue) it.done = true;
         const t = e.ok
-          ? `${c.green('✻')} ${dim(`Selesai · ${e.turns} langkah · ${fmtDur(e.ms)}${e.usage ? ` · ${fmtTok(e.usage.in)}↑ ${fmtTok(e.usage.out)}↓ token` : ''}`)}`
+          ? `${c.green('✻')} ${dim(['Selesai', ...doneParts(e)].join(' · '))}`
           : `${c.red('✻')} ${c.red('Berhenti: ' + (e.err || 'error'))}`;
         this.queue.push({ kind: 'note', done: true, final: () => ['', t], preview: () => [] });
         this.activity = '';
@@ -796,6 +793,8 @@ class App {
       this.printHeader();
       if (all.length > keep.length || res.truncated) this.print(dim(`  … ${all.length - keep.length + (res.truncated ? 1 : 0)}+ event sebelumnya tidak ditampilkan`));
     }
+    this.evCursor = new EventCursor();
+    for (const e of all) this.evCursor.accept(e);
     for (const e of keep) this.onEvent(e, true);
     for (const it of this.queue) it.done = true;
     this.flushQueue();
@@ -1043,6 +1042,7 @@ class App {
   confirm(title, text) {
     return this.overlayPrompt({ type: 'confirm', title, text, idx: 0 });
   }
+  /** @param {{ title: string, items?: any[], filterable?: boolean, placeholder?: string, foot?: string, note?: string, idx?: number, onArrow?: (it: any, d: number) => void, load?: (o: any) => Promise<any[]> }} opts */
   select({ title, items, filterable = true, placeholder, foot, note, idx = 0, onArrow, load }) {
     const o = {
       type: 'select',
@@ -1541,7 +1541,7 @@ export async function runTui({ prompt = '', pick = false } = {}) {
   const app = new App(conn.client, conn.info, { prompt });
 
   // Timeout Esc pendek: default 500ms membuat "Esc lalu ketik B" terbaca sebagai Alt+B.
-  readline.emitKeypressEvents(process.stdin, { escapeCodeTimeout: 50 });
+  readline.emitKeypressEvents(process.stdin, /** @type {any} */ ({ escapeCodeTimeout: 50 }));
   process.stdin.setRawMode(true);
   process.stdin.resume();
   out.write('\x1b[?2004h'); // bracketed paste
@@ -1565,7 +1565,7 @@ export async function runTui({ prompt = '', pick = false } = {}) {
 
   app.cl.on('events', (m) => {
     if (m.sid !== app.session?.id) return;
-    for (const e of m.es) app.onEvent(e);
+    for (const e of m.es) if (app.evCursor.accept(e)) app.onEvent(e);
   });
   app.cl.on('github', (m) => app.onGithub(m));
   app.cl.on('notice', (m) => {

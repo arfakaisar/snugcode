@@ -10,6 +10,7 @@ import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, anthropicBas
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startRouterProxy } from './proxy.js';
 import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
+import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
@@ -160,7 +161,7 @@ function toolSummaryRaw(name, input = {}) {
     case 'Agent':
       return input.description || input.prompt;
     case 'TodoWrite':
-      return (input.todos || []).map((t) => `${t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '◐' : '☐'} ${t.content}`).join('\n');
+      return todoText(todosFromInput(input.todos));
     default:
       return cut(input, 400);
   }
@@ -616,7 +617,7 @@ export class Session extends EventEmitter {
       if (m.parent_tool_use_id) return; // isi subagent tidak ditampilkan rinci
       for (const b of m.message.content || []) {
         if (b.type === 'text' && !agent.streamed.has(m.message.id) && b.text) this.emitEvent({ k: 'text', d: b.text });
-        if (b.type === 'tool_use') this.emitEvent({ k: 'tool', id: b.id, name: shortName(b.name), s: toolSummary(b.name, b.input, this.meta.cwd), x: toolDetail(b.name, b.input) });
+        if (b.type === 'tool_use') this.emitEvent({ k: 'tool', id: b.id, name: shortName(b.name), s: toolSummary(b.name, b.input, this.meta.cwd), x: toolDetail(b.name, b.input), todos: b.name === 'TodoWrite' ? todosFromInput(b.input?.todos) : undefined });
       }
     } else if (m.type === 'user' && !m.parent_tool_use_id) {
       const content = m.message?.content;
@@ -733,6 +734,7 @@ export class Session extends EventEmitter {
 
   // decision: 'allow' | 'always' | 'deny'. `answers` (AskUserQuestion: pertanyaan → jawaban)
   // dan `message` (alasan tolak / revisi rencana) opsional.
+  /** @param {string} pid @param {'allow' | 'always' | 'deny'} decision @param {{ answers?: Record<string, string>, message?: string }} [extra] */
   answerPermission(pid, decision, { answers, message } = {}) {
     const p = this.perms.get(pid);
     if (!p) return false;

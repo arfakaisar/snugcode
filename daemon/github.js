@@ -36,6 +36,7 @@ export async function deviceFlowStart(clientId) {
   return start;
 }
 
+/** @param {string} clientId @param {any} start @param {{ signal?: AbortSignal }} [opts] */
 export async function deviceFlowWait(clientId, start, { signal } = {}) {
   let interval = (start.interval || 5) * 1000;
   const deadline = Date.now() + (start.expires_in || 900) * 1000;
@@ -101,6 +102,7 @@ const slim = (r) => ({ full: r.full_name, private: r.private, branch: r.default_
 export function gitEnv(token) {
   // Jangan pernah memunculkan dialog login (Git Credential Manager) di desktop:
   // daemon sering dipakai dari jauh dan dialog itu akan menggantung proses.
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
   if (token) {
     env.GIT_CONFIG_COUNT = '1';

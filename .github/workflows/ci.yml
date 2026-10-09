@@ -23,7 +23,41 @@ jobs:
       - run: npm ci
       - name: Cek sintaks semua modul
         shell: bash
-        run: for f in daemon/*.js shared/*.js web/*.js relay/src/*.js scripts/*.mjs; do node --check "$f"; done
+        run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js relay/src/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done
+      - name: Type check (tsc --checkJs, termasuk relay)
+        if: runner.os == 'Linux'
+        run: npm ci --prefix relay && npm run typecheck
       - run: npm test
       - name: Bundle PWA
         run: npm run build:web
+
+  # Ujung ke ujung: relay dev (wrangler) + daemon asli + Claude Agent SDK + mock 9router,
+  # klien HP (web/conn.js), PWA di Chrome, dan TUI di pseudo-terminal. Tanpa key/akun asli.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm ci --prefix relay
+      - run: npm run build:web
+      - name: Jalankan relay dev
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && exit 0; sleep 1; done
+          cat wrangler.log; exit 1
+      - run: npm run test:e2e
+      - run: npm run test:ui
+        env:
+          SHOTS: ${{ runner.temp }}/shots
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostik
+          path: |
+            wrangler.log
+            ${{ runner.temp }}/shots

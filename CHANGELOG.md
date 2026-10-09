@@ -3,6 +3,31 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — Refactor PWA per layar, model event bersama, type checking, e2e UI
+
+### Bug yang ditemukan uji browser
+- **Potongan teks terakhir jawaban agen bisa tidak tampil di PWA** bila tiba di frame yang sama
+  dengan `done`/tool berikutnya (render dijadwalkan ke frame berikutnya, tapi blok teksnya sudah
+  ditutup sehingga render dibatalkan; pola ini sudah ada sebelum optimasi). Status render kini
+  melekat pada blok teksnya sendiri, jadi setiap blok selalu dirender sampai potongan terakhir.
+
+### Struktur
+- `web/app.js` (2.200 baris) dipecah menjadi `web/ui/*.js` per layar. Pemecahan memakai resolusi
+  simbol TypeScript (bukan potong-tempel), jadi setiap import/export dihitung dari referensi nyata.
+  Variabel global yang ditulis lintas layar (`conn`, `current`, `me`) kini objek `app` di
+  `web/ui/state.js`. `web/app.js` tinggal titik masuk (±35 baris).
+- **`shared/events.js`**: model event sesi bersama daemon/PWA/TUI — tipe event (JSDoc), rencana
+  TodoWrite terstruktur (`todos`; dulu teks berglyph yang di-parse ulang di dua klien, tetap
+  dikirim untuk klien lama), label aktivitas, ringkasan "selesai", dan `EventCursor` (penyaring
+  event duplikat, kini juga dipakai TUI).
+
+### Kualitas
+- **Type checking**: `tsc --checkJs` untuk seluruh daemon, shared, PWA, dan relay (tipe Worker dari
+  `wrangler types`); 98 error awal dibereskan dengan JSDoc. `npm run typecheck`, dijalankan CI.
+- **Uji e2e di CI** (Linux): relay dev + daemon asli + Agent SDK + mock 9router (`npm run test:e2e`),
+  dan PWA hasil build di Chrome + TUI di pseudo-terminal (`npm run test:ui`, memakai
+  `playwright-core` tanpa unduhan browser). Setup bersama di `test/e2e-harness.mjs`.
+
 ## 2026-10-09 — Optimasi menyeluruh: keamanan data, latensi agen, protokol biner
 
 ### Keamanan data & kredensial

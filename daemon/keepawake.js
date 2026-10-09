@@ -1,6 +1,7 @@
 // pocketcode — Mencegah PC tertidur selama daemon berjalan.
 import { spawn } from 'node:child_process';
 
+/** @param {{ log?: (msg: string) => void }} [opts] */
 export function startKeepAwake({ log = () => {} } = {}) {
   let proc = null;
   const platform = process.platform;

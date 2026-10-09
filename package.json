@@ -20,6 +20,8 @@
     "build:web": "node scripts/build-web.mjs",
     "test": "node --test test/unit.test.js",
     "test:e2e": "node test/e2e-agent.mjs",
+    "test:ui": "node test/e2e-ui.mjs",
+    "typecheck": "tsc -p . && npm --prefix relay run typecheck",
     "dev:relay": "npm run build:web && cd relay && npx wrangler dev --var DEV_AUTH:1",
     "deploy": "npm run build:web && cd relay && npx wrangler deploy"
   },
@@ -32,6 +34,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.56.1",
+    "typescript": "~6.0.2"
   }
 }
