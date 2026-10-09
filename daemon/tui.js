@@ -262,6 +262,27 @@ function runningPid() {
   }
 }
 
+// Hentikan daemon dengan rapi lewat kanal lokal (dev server & tunnel sesi ikut dimatikan),
+// fallback ke process.kill untuk daemon versi lama. Menunggu sampai prosesnya benar-benar keluar.
+export async function stopDaemon(pid = runningPid()) {
+  if (!pid) return false;
+  let graceful = false;
+  try {
+    const { client } = await tryConnect(loadSecrets().localToken);
+    graceful = await client.call('shutdown');
+  } catch {}
+  if (!graceful)
+    try {
+      process.kill(pid);
+    } catch {}
+  for (let i = 0; i < 60 && runningPid() === pid; i++) await new Promise((r) => setTimeout(r, 100));
+  if (runningPid() === pid)
+    try {
+      process.kill(pid);
+    } catch {}
+  return true;
+}
+
 // Sambung ke daemon; nyalakan (atau ganti versi lama tanpa kanal lokal) bila perlu.
 async function connectDaemon(onStatus) {
   const token = () => loadSecrets().localToken;
@@ -271,10 +292,7 @@ async function connectDaemon(onStatus) {
   const old = runningPid();
   if (old) {
     onStatus('memperbarui daemon…');
-    try {
-      process.kill(old);
-    } catch {}
-    for (let i = 0; i < 30 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
+    await stopDaemon(old);
   } else onStatus('menyalakan daemon…');
   const p = spawn(process.execPath, [CLI, 'start', '--log'], { detached: true, stdio: 'ignore', windowsHide: true });
   p.unref();
@@ -369,7 +387,9 @@ function modelLabel(id) {
   const p = M.parseModelId(id);
   return p.base + (p.effort ? ' · ' + (M.EFFORT_LABEL[p.effort] || p.effort) : '');
 }
-const ACTIVITY = { Bash: 'Menjalankan', Read: 'Membaca', Edit: 'Mengedit', MultiEdit: 'Mengedit', Write: 'Menulis', Grep: 'Mencari', Glob: 'Mencari', LS: 'Melihat', WebFetch: 'Membuka', WebSearch: 'Mencari di web', Task: 'Subagen', Agent: 'Subagen', TodoWrite: 'Merencanakan' };
+const ACTIVITY = { Bash: 'Menjalankan', dev_start: 'Menyalakan', dev_logs: 'Membaca log', preview_screenshot: 'Melihat halaman', Read: 'Membaca', Edit: 'Mengedit', MultiEdit: 'Mengedit', Write: 'Menulis', Grep: 'Mencari', Glob: 'Mencari', LS: 'Melihat', WebFetch: 'Membuka', WebSearch: 'Mencari di web', Task: 'Subagen', Agent: 'Subagen', TodoWrite: 'Merencanakan', AskUserQuestion: 'Bertanya', ExitPlanMode: 'Menyusun rencana' };
+
+const PLAN_REVISE = 'Pengguna ingin merevisi rencana. Berhenti sekarang dan tunggu arahan revisinya.';
 
 const COMMANDS = [
   ['/help', 'bantuan & pintasan keyboard'],
@@ -377,6 +397,13 @@ const COMMANDS = [
   ['/default', 'model default untuk sesi baru'],
   ['/sessions', 'pindah sesi (juga sesi dari HP)'],
   ['/new', 'sesi baru dari repo GitHub'],
+  ['/run', 'jalankan dev server di latar belakang [perintah]'],
+  ['/ps', 'daftar proses latar belakang'],
+  ['/logs', 'log proses [nama]'],
+  ['/stop', 'hentikan proses [nama]'],
+  ['/preview', 'link preview untuk HP/laptop lain [nama]'],
+  ['/plan', 'mode rencana: agen menyusun rencana dulu'],
+  ['/rewind', 'kembalikan file ke sebelum prompt terakhir'],
   ['/git', 'status git'],
   ['/diff', 'tampilkan diff'],
   ['/commit', 'commit semua perubahan [pesan]'],
@@ -592,6 +619,25 @@ class App {
       lines.push(col('╰─') + dim(f) + col('─'.repeat(Math.max(0, bw - 3 - width(f))) + '╯'));
       return lines;
     };
+    if (o.type === 'perm' && o.perm.ask) {
+      const q = o.perm.ask[o.qi];
+      const body = [c.fg(q.question), ''];
+      q.options.forEach((op, i) => {
+        const mark = q.multiSelect ? (o.sel[o.qi].has(op.label) ? c.cyan('[x] ') : '[ ] ') : '';
+        const line = `${i + 1}. ${mark}${op.label}`;
+        body.push(i === o.idx ? c.cyan('❯ ') + bold(line) : '  ' + c.soft(line));
+        if (op.description) body.push('     ' + dim(op.description));
+      });
+      const other = q.options.length;
+      body.push(o.idx === other ? c.cyan('❯ ') + bold(`${other + 1}. Jawaban lain: `) + c.fg(o.text[o.qi]) + c.cyan('▏') : c.soft(`  ${other + 1}. Jawaban lain${o.text[o.qi] ? ': ' + o.text[o.qi] : ''}`));
+      const count = o.perm.ask.length > 1 ? dim(` (${o.qi + 1}/${o.perm.ask.length})`) : '';
+      return { lines: box(bold(c.cyan('Agen bertanya')) + (q.header ? ' ' + c.soft(q.header) : '') + count, body, q.multiSelect ? '↑↓ · spasi pilih · enter lanjut · esc lewati' : '↑↓ · enter · 1-5 · esc lewati', c.cyan) };
+    }
+    if (o.type === 'perm' && o.perm.plan) {
+      const body = String(o.perm.summary || o.perm.s || '').split('\n').slice(0, Math.max(6, rowsN() - 14)).map((l) => c.fg(l));
+      body.push('', ...['Setujui & kerjakan', 'Revisi (lalu ketik arahan revisinya)'].map((t, i) => (i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`))));
+      return { lines: box(bold(c.cyan('Rencana siap — setujui?')), body, '↑↓ · enter · 1-2', c.cyan) };
+    }
     if (o.type === 'perm') {
       const p = o.perm;
       const opts = p.push ? ['Ya, izinkan push', 'Tidak (esc)'] : ['Ya', `Ya, dan jangan tanya lagi untuk ${p.tool} di sesi ini`, 'Tidak (esc)'];
@@ -761,6 +807,7 @@ class App {
   onEvent(e, replay = false) {
     switch (e.k) {
       case 'user':
+        this.lastUserSeq = e;
         this.closeText();
         this.queue.push({ kind: 'user', done: true, final: () => this.userBlock(e.d, false), preview: () => [] });
         this.activity = 'Berpikir';
@@ -854,6 +901,19 @@ class App {
       case 'status':
         this.setRunning(e.s === 'running');
         break;
+      case 'mode':
+        if (this.session) this.session.plan = e.plan;
+        break;
+      case 'proc':
+        if (e.port && !this.procPorts?.has(e.name + e.port)) {
+          (this.procPorts ??= new Set()).add(e.name + e.port);
+          this.setFlash(`▶ ${e.name} siap di http://localhost:${e.port} — /preview untuk HP`);
+        } else if (e.status === 'exited' && !e.killed && e.code) this.setFlash(`✗ ${e.name} berhenti (exit ${e.code}) — /logs ${e.name}`, true, 5000);
+        break;
+      case 'shot':
+        this.closeText();
+        this.queue.push({ kind: 'note', done: true, final: () => [dim(`  ◐ screenshot ${e.url} (lihat di HP)`)], preview: () => [] });
+        break;
     }
     if (!replay) this.flushQueue();
   }
@@ -884,7 +944,8 @@ class App {
   showNextPerm() {
     if (this.overlay && this.overlay.type !== 'perm') return;
     const p = this.perms[0];
-    this.overlay = p ? { type: 'perm', perm: p, idx: 0 } : null;
+    if (this.overlay?.perm === p) return this.scheduleRender(); // jangan reset jawaban yang sedang diisi
+    this.overlay = p ? { type: 'perm', perm: p, idx: 0, qi: 0, sel: (p.ask || []).map(() => new Set()), text: (p.ask || []).map(() => '') } : null;
     this.scheduleRender();
   }
 
@@ -1098,8 +1159,16 @@ class App {
     const o = this.overlay;
     const name = key.name;
     if (key.ctrl && name === 'c') {
-      if (o.type === 'perm') return this.answerPerm(o.perm.push ? 1 : 2);
+      if (o.type === 'perm') return o.perm.ask || o.perm.plan ? this.sendPerm(o.perm, 'deny') : this.answerPerm(o.perm.push ? 1 : 2);
       return this.closeOverlay(null);
+    }
+    if (o.type === 'perm' && o.perm.ask) return this.askKey(o, str, key);
+    if (o.type === 'perm' && o.perm.plan) {
+      if (name === 'up' || name === 'down' || name === 'tab') return (o.idx = 1 - o.idx), this.scheduleRender();
+      if (str === '1' || str === '2') o.idx = +str - 1;
+      else if (name === 'escape') o.idx = 1;
+      else if (name !== 'return') return;
+      return o.idx === 0 ? this.sendPerm(o.perm, 'allow') : this.sendPerm(o.perm, 'deny', { message: PLAN_REVISE });
     }
     if (o.type === 'perm') {
       const n = o.perm.push ? 2 : 3;
@@ -1190,16 +1259,50 @@ class App {
     const o = this.overlay;
     if (o?.type !== 'perm') return;
     const p = o.perm;
-    const decision = p.push ? ['allow', 'deny'][idx] : ['allow', 'always', 'deny'][idx];
+    return this.sendPerm(p, p.push ? ['allow', 'deny'][idx] : ['allow', 'always', 'deny'][idx]);
+  }
+  async sendPerm(p, decision, extra = {}) {
     this.overlay = null;
     this.perms = this.perms.filter((x) => x.pid !== p.pid);
     this.scheduleRender();
     try {
-      await this.cl.call('perm', { id: this.session.id, pid: p.pid, decision });
+      await this.cl.call('perm', { id: this.session.id, pid: p.pid, decision, ...extra });
     } catch (e) {
       this.setFlash(e.message, true);
     }
     this.showNextPerm();
+  }
+  // AskUserQuestion: satu pertanyaan per layar; opsi terakhir = jawaban bebas yang diketik.
+  askKey(o, str, key) {
+    const qs = o.perm.ask;
+    const q = qs[o.qi];
+    const n = q.options.length + 1;
+    const typing = o.idx === n - 1;
+    const pick = (i) => {
+      const label = q.options[i].label;
+      if (!q.multiSelect) o.sel[o.qi] = new Set([label]);
+      else o.sel[o.qi].has(label) ? o.sel[o.qi].delete(label) : o.sel[o.qi].add(label);
+    };
+    const next = () => {
+      if (!o.sel[o.qi].size && !o.text[o.qi].trim()) return this.setFlash('Pilih jawaban dulu', true);
+      if (o.qi < qs.length - 1) return (o.qi++, (o.idx = 0), this.scheduleRender());
+      const answers = Object.fromEntries(qs.map((x, i) => [x.question, [...o.sel[i], o.text[i].trim()].filter(Boolean).join(', ')]));
+      return this.sendPerm(o.perm, 'allow', { answers });
+    };
+    if (key.name === 'escape') return this.sendPerm(o.perm, 'deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' });
+    if (key.name === 'up') o.idx = (o.idx + n - 1) % n;
+    else if (key.name === 'down' || key.name === 'tab') o.idx = (o.idx + 1) % n;
+    else if (key.name === 'return') {
+      if (!typing && !q.multiSelect) pick(o.idx);
+      return next();
+    } else if (typing && key.name === 'backspace') o.text[o.qi] = o.text[o.qi].slice(0, -1);
+    else if (typing && str && str >= ' ' && !key.ctrl && !key.meta) o.text[o.qi] += str;
+    else if (!typing && str === ' ' && q.multiSelect) pick(o.idx);
+    else if (/^[1-9]$/.test(str || '') && +str <= n) {
+      o.idx = +str - 1;
+      if (o.idx < n - 1 && !q.multiSelect) return (pick(o.idx), next());
+    }
+    return this.scheduleRender();
   }
 
   // ---- perintah ----
@@ -1265,6 +1368,52 @@ class App {
           if (on && !(await this.confirm('Auto-izin', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push). Lanjut?'))) return;
           this.session = await this.cl.call('auto', { id: s.id, on });
           return this.setFlash(on ? '⚡ auto-izin ON' : 'auto-izin off', on);
+        }
+        case '/run': {
+          need();
+          const r = await this.cl.call('runDev', { id: s.id, cmd: arg || undefined });
+          return this.print(['', c.green('▶ ') + bold(r.dev) + (r.setup ? dim(`  (setelah ${r.setup})`) : '') + dim('  — /ps · /logs · /preview · /stop')]);
+        }
+        case '/ps': {
+          need();
+          const ps = (await this.cl.call('project', { id: s.id })).procs;
+          if (!ps.length) return this.setFlash('Belum ada proses — /run');
+          return this.print(['', ...ps.map((p) => `  ${p.status === 'running' ? c.green('●') : c.gray('○')} ${bold(p.name)} ${dim(p.status === 'running' ? (p.port ? 'port ' + p.port : 'menunggu port') : 'exit ' + p.code)}  ${c.soft(p.cmd)}`)]);
+        }
+        case '/logs':
+        case '/stop':
+        case '/preview': {
+          need();
+          const ps = (await this.cl.call('project', { id: s.id })).procs;
+          const name = arg || ps.find((p) => p.status === 'running')?.name || ps[0]?.name;
+          if (!name) return this.setFlash('Belum ada proses — /run', true);
+          if (cmd === '/stop') {
+            await this.cl.call('procStop', { id: s.id, name });
+            return this.setFlash('■ ' + name + ' dihentikan');
+          }
+          if (cmd === '/logs') {
+            const t = await this.cl.call('procLogs', { id: s.id, name });
+            const ls = t.replace(/\s+$/, '').split('\n');
+            return this.print(['', bold('log ' + name), ...ls.slice(-40).map((l) => c.soft(trunc(l, cols() - 2)))]);
+          }
+          this.busyText = 'Membuka tunnel preview';
+          this.scheduleRender();
+          const pv = await this.cl.call('preview', { id: s.id, name }).finally(() => (this.busyText = null));
+          const copied = copyClipboard(pv.link);
+          return this.print(['', c.green('◆ ') + bold('Preview ' + name) + dim(` (port ${pv.port})`), `  ${under(c.blue(pv.link))}`, dim(`  link berisi token rahasia${copied ? ' · sudah disalin' : ''} — buka di HP/laptop lain; tertutup saat proses berhenti`)]);
+        }
+        case '/plan': {
+          need();
+          this.session = await this.cl.call('plan', { id: s.id, on: !s.plan });
+          return this.setFlash(this.session.plan ? '☰ mode rencana ON — agen menyusun rencana dulu' : 'mode rencana off', this.session.plan);
+        }
+        case '/rewind': {
+          need();
+          const last = this.lastUserSeq;
+          if (!last) return this.setFlash('Belum ada prompt di sesi ini', true);
+          if (!(await this.confirm('Rewind', `Kembalikan semua file ke sebelum prompt "${trunc(last.d || 'gambar', 50)}"?`))) return;
+          const n = await this.cl.call('rewind', { id: s.id, seq: last.seq });
+          return this.setFlash(`↺ ${n} file dikembalikan`);
         }
         case '/git': {
           need();

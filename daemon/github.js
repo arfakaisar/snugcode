@@ -109,7 +109,7 @@ export function gitEnv(token) {
 
 export function git(cwd, args, token, opts = {}) {
   return new Promise((resolve, reject) => {
-    execFile('git', ['-c', 'core.quotepath=off', ...args], { cwd, env: gitEnv(token), maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 10 * 60 * 1000 }, (err, stdout, stderr) => {
+    execFile('git', ['-c', 'core.quotepath=off', ...args], { cwd, env: { ...gitEnv(token), ...opts.env }, maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 10 * 60 * 1000 }, (err, stdout, stderr) => {
       const msg = (stderr || err?.message || '').trim();
       if (err && token && /Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]/i.test(msg)) reject(new Error(TOKEN_INVALID));
       else if (err) reject(new Error(msg));

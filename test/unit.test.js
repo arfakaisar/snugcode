@@ -343,3 +343,122 @@ test('autostart: deteksi path file dan sinkronisasi otomatis', async () => {
 
 
 
+
+// Repo git sementara dengan satu commit; dihapus otomatis setelah fn selesai.
+async function withRepo(fn) {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { git } = await import('../daemon/github.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-repo-'));
+  try {
+    await git(dir, ['init', '-q']);
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n.env\n');
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+    await git(dir, ['add', '-A']);
+    await git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']);
+    await fn(dir, fs, path, git);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('checkpoint: rewind mengembalikan isi, file terhapus, dan menghapus file baru (tanpa menyentuh index/node_modules)', async () => {
+  const { snapshot, rewind } = await import('../daemon/checkpoint.js');
+  await withRepo(async (dir, fs, path, git) => {
+    const p = (f) => path.join(dir, f);
+    fs.writeFileSync(p('draft.txt'), 'belum di-commit');
+    fs.mkdirSync(p('node_modules/x'), { recursive: true });
+    fs.writeFileSync(p('node_modules/x/i.js'), 'v1');
+    const tree = await snapshot(dir);
+    fs.writeFileSync(p('a.txt'), 'diubah agen');
+    fs.rmSync(p('draft.txt'));
+    fs.writeFileSync(p('baru.txt'), 'dibuat agen');
+    fs.writeFileSync(p('node_modules/x/i.js'), 'v2');
+    await git(dir, ['add', 'baru.txt']);
+    assert.equal(await rewind(dir, tree), 3);
+    assert.equal(fs.readFileSync(p('a.txt'), 'utf8'), 'a');
+    assert.equal(fs.readFileSync(p('draft.txt'), 'utf8'), 'belum di-commit');
+    assert.equal(fs.existsSync(p('baru.txt')), false);
+    assert.equal(fs.readFileSync(p('node_modules/x/i.js'), 'utf8'), 'v2', 'node_modules tidak di-snapshot');
+    assert.equal(await rewind(dir, tree), 0);
+  });
+});
+
+test('project: deteksi perintah setup/dev dan simpan/pulihkan template .env', async () => {
+  const { detectProject, saveEnv, restoreEnv } = await import('../daemon/project.js');
+  await withRepo(async (dir, fs, path) => {
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { start: 'node s.js', dev: 'vite' } }));
+    fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+    assert.deepEqual(detectProject(dir), { setup: 'pnpm install', dev: 'pnpm run dev' });
+    fs.writeFileSync(path.join(dir, '.pocketcode.json'), JSON.stringify({ dev: 'pnpm dev --host' }));
+    assert.equal(detectProject(dir).dev, 'pnpm dev --host');
+
+    const repo = 'test/pc-env-' + process.pid;
+    fs.writeFileSync(path.join(dir, '.env'), 'KEY=1');
+    assert.deepEqual(await saveEnv(repo, dir), ['.env']);
+    const wt = fs.mkdtempSync(dir + '-wt');
+    try {
+      assert.deepEqual(restoreEnv(repo, wt), ['.env']);
+      assert.equal(fs.readFileSync(path.join(wt, '.env'), 'utf8'), 'KEY=1');
+      assert.deepEqual(restoreEnv(repo, wt), [], 'file yang sudah ada tidak ditimpa');
+    } finally {
+      fs.rmSync(wt, { recursive: true, force: true });
+      const { HOME } = await import('../daemon/config.js');
+      fs.rmSync(path.join(HOME, 'env', repo.replace('/', '__')), { recursive: true, force: true });
+    }
+  });
+});
+
+test('procs: proses latar belakang, deteksi port dari log, stop', async () => {
+  const { ProcManager, procName } = await import('../daemon/procs.js');
+  assert.equal(procName('npm run dev'), 'dev');
+  assert.equal(procName('pnpm dev --host'), 'dev');
+  assert.equal(procName('npx vite'), 'vite');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-proc-'));
+  // Skrip di file: kutipan `node -e` berbeda antara PowerShell dan bash.
+  fs.writeFileSync(path.join(dir, 'srv.js'), 'console.log("\\x1b[32m  Local:   http://localhost:5199/\\x1b[0m PORT=" + process.env.PORT); setInterval(() => {}, 1000);');
+  const events = [];
+  const pm = new ProcManager({ cwd: dir, onChange: (p) => events.push(p.status), onOut: () => {} });
+  try {
+    await pm.start('node srv.js', 'web');
+    assert.equal(await pm.waitPort('web', 10000), 5199);
+    assert.match(pm.logs('web'), /Local: {3}http:\/\/localhost:5199\/ PORT=\d+/);
+    await assert.rejects(pm.start('node -v', 'web'), /masih berjalan/);
+    await pm.stopAll();
+    assert.equal(pm.list()[0].status, 'exited');
+    assert.equal(pm.list()[0].killed, true);
+    assert.deepEqual([events[0], events.at(-1)], ['running', 'exited']);
+  } finally {
+    await pm.stopAll();
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+});
+
+test('webpush: payload aes128gcm bisa didekripsi penerima (RFC 8291)', async () => {
+  const crypto = await import('node:crypto');
+  const { encrypt, checkPush } = await import('../daemon/webpush.js');
+  const ua = crypto.createECDH('prime256v1');
+  const uaPub = ua.generateKeys();
+  const auth = crypto.randomBytes(16);
+  const sub = { endpoint: 'https://push.example/x', keys: { p256dh: uaPub.toString('base64url'), auth: auth.toString('base64url') } };
+  const msg = JSON.stringify({ title: 'pocketcode ✓', body: 'selesai' });
+  const buf = encrypt(sub, msg);
+  const salt = buf.subarray(0, 16);
+  const asPub = buf.subarray(21, 21 + buf[20]);
+  const ct = buf.subarray(21 + buf[20]);
+  const ikm = crypto.hkdfSync('sha256', ua.computeSecret(asPub), auth, Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, asPub]), 32);
+  const key = crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12);
+  const d = crypto.createDecipheriv('aes-128-gcm', Buffer.from(key), Buffer.from(nonce));
+  d.setAuthTag(ct.subarray(-16));
+  const pt = Buffer.concat([d.update(ct.subarray(0, -16)), d.final()]);
+  assert.equal(pt.at(-1), 2);
+  assert.equal(pt.subarray(0, -1).toString(), msg);
+  const vapid = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'jwk' });
+  assert.equal(checkPush({ sub, vapid }).sub.endpoint, sub.endpoint);
+  assert.throws(() => checkPush({ sub: { ...sub, endpoint: 'http://x' }, vapid }), /tidak valid/);
+});

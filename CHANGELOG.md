@@ -3,6 +3,49 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — Run & Preview, agen bisa melihat hasil UI, dan fitur remote coding lain
+
+### Run & Preview (`daemon/procs.js`, `daemon/tunnel.js`, `daemon/project.js`)
+- **Masalah**: dev server (`npm run dev`) hanya bisa dibuka di `localhost` PC. Dari HP/laptop lain
+  hasilnya tidak bisa dilihat sama sekali. `!npm run dev` juga memblokir sesi dan dimatikan setelah 10 menit.
+- **Proses latar belakang per sesi**: berjalan terpisah dari agen tanpa batas waktu. Log disimpan di
+  ring buffer dan di-stream ke HP. Port terdeteksi otomatis dari log (Vite/Next/dll.) atau dari env
+  `PORT` bebas yang disuntikkan (dua sesi tidak bentrok di port 3000). Proses dimatikan beserta
+  anak-anaknya (`taskkill /T` di Windows, process group di Unix).
+- **Preview di HP**: Cloudflare quick tunnel (tanpa akun; `cloudflared` diunduh sekali ke
+  `~/.pocketcode/bin`). Tunnel masuk lewat gerbang lokal yang mewajibkan token rahasia. Token hanya
+  dikirim ke HP lewat kanal E2EE, jadi URL yang bocor ditolak (401). Gerbang menulis ulang
+  Host/Origin ke `localhost` agar Vite (`allowedHosts`) dan Next (`allowedDevOrigins`) menerima
+  request, termasuk WebSocket HMR. Link baru diberikan setelah DNS dan edge siap, sehingga tidak
+  memunculkan error "tidak ditemukan" yang tersimpan di cache HP.
+- **Worktree siap jalan**: perintah setup (`npm ci` / `pnpm install` / dst.) dan dev dideteksi
+  otomatis, bisa ditimpa lewat `.pocketcode.json` `{ "setup", "dev" }`. File `.env*` bisa disimpan
+  sebagai template per repo dan dipulihkan otomatis di sesi baru.
+- **Screenshot dari HP** dengan Chrome/Edge headless lewat CDP (tanpa Playwright), lengkap dengan
+  error konsol dan tombol "Suruh agen perbaiki".
+- PowerShell kini memakai `-ExecutionPolicy Bypass` untuk proses ini saja. Sebelumnya `npm`/`npx`
+  gagal di Windows dengan setelan default ("running scripts is disabled").
+- `pocketcode stop/restart/update` menghentikan daemon dengan rapi lewat IPC. Dev server dan tunnel
+  ikut mati; dulu `process.kill` di Windows meninggalkan proses anak.
+
+### Agen bisa melihat hasilnya sendiri (`daemon/devtools.js`)
+- Tool MCP in-process: `dev_start`, `dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot`
+  (gambar + log konsol dikirim ke model, dan screenshot tampil di HP). System prompt melarang dev
+  server lewat Bash dan meminta verifikasi visual setelah perubahan UI.
+
+### Fitur lain
+- **Web Push** (`daemon/webpush.js`, `web/sw.js`): notifikasi tetap muncul saat PWA ditutup
+  (agen selesai/berhenti, butuh izin, bertanya). Isinya dienkripsi untuk HP (RFC 8291), dan kunci
+  VAPID dibuat di HP lalu dibagikan ke tiap PC lewat kanal E2EE. Mengetuk notifikasi membuka sesi terkait.
+- **Kirim gambar** dari kamera/galeri/clipboard. Gambar dikompres di HP agar muat satu frame relay.
+- **Agen bertanya** (`AskUserQuestion`) dengan opsi tap di HP dan pilihan di terminal.
+- **Mode rencana**: agen hanya membaca dan menyusun rencana, lalu meminta persetujuan (Setujui / Revisi).
+- **Checkpoint & rewind**: tiap prompt men-snapshot worktree (termasuk file yang belum di-commit)
+  lewat index git sementara, tanpa menyentuh index/stash/branch pengguna. Tombol ↺ mengembalikan
+  semua file ke kondisi sebelum prompt itu, dan agen diberi tahu di prompt berikutnya.
+- Ringkasan tiap giliran kini menampilkan **persentase konteks** dan **biaya**. Ada peringatan saat konteks ≥80%.
+- TUI: `/run`, `/ps`, `/logs`, `/stop`, `/preview`, `/plan`, `/rewind`.
+
 ## 2026-10-08 — Perbaikan proxy, izin, effort, updater
 
 ### Loopback proxy (`daemon/proxy.js`)

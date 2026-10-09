@@ -60,7 +60,7 @@ pocketcode --pick              # pilih sesi lain (termasuk sesi dari HP)
 | `enter` | kirim; saat agen bekerja, pesan masuk antrean |
 | `\` + `enter` / `alt+enter` | baris baru |
 | `!` | mode shell (perintah langsung di folder sesi) |
-| `/` | perintah: `/model` `/sessions` `/new` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/update` `/restart` `/help` … |
+| `/` | perintah: `/model` `/sessions` `/new` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/update` `/help` … |
 | `esc` | hentikan agen |
 | `ctrl+o` | output lengkap tool terakhir |
 | `ctrl+c` ×2 | keluar (sesi tetap berjalan di PC) |
@@ -78,6 +78,10 @@ Cara pakai:
 - Ketik permintaan seperti biasa. Awali dengan `!` untuk menjalankan perintah shell langsung, misal `!npm test`.
 - **Prompt izin**: perintah shell dan perubahan file (Write/Edit, lengkap dengan cuplikan diff) meminta *Izinkan / Selalu / Tolak*. `git push` dan `gh pr create|merge` dari agen selalu meminta izin.
 - **⚡ auto-izin**: semua perintah dijalankan tanpa bertanya, kecuali push.
+- **▶ run**: jalankan dev server di PC (setup dependency otomatis), lihat log, screenshot, lalu **Preview di HP** lewat link tunnel pribadi. Hasil bisa dicek sebelum commit, dari HP atau laptop mana pun.
+- **🖼 gambar**: lampirkan screenshot/foto ke agen.
+- **☰ rencana**: agen menyusun rencana dulu, lalu kamu setujui atau revisi. Agen juga bisa bertanya dengan pilihan tap.
+- **↺ rewind**: kembalikan semua file ke kondisi sebelum prompt tertentu.
 - **⎇ git**: status, diff berwarna, commit, push, dan Pull Request.
 - **■**: hentikan agen yang sedang berjalan.
 - **⋯ menu PC**: perbarui pocketcode di PC secara jarak jauh, restart daemon, ganti model default, atau login ulang GitHub.
@@ -147,6 +151,6 @@ node test/worktree.it.mjs                  # skenario branch/worktree (butuh int
 ## TODO / ide berikutnya
 
 - Integrasi keychain OS untuk `secrets.json`.
-- Web Push notification (saat ini notifikasi hanya muncul ketika PWA terbuka).
-- Pane shell interaktif (PTY) dan upload gambar/screenshot ke agen.
+- Pane shell interaktif (PTY).
+- Tunnel preview E2EE lewat relay sendiri (pengganti quick tunnel Cloudflare).
 - Dukungan model Claude asli (bagian kedua rencana): cukup tambahkan pilihan provider per sesi di `daemon/sessions.js`.
