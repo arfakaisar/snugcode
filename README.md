@@ -375,6 +375,7 @@ POCKETCODE_HOME=/tmp/pc node daemon/cli.js start
 
 npm test                                   # unit test
 node test/e2e-phone.mjs                    # simulasi HP: pairing → sesi → agen → git
+npm run test:e2e                           # HP → relay dev → daemon → Agent SDK → mock 9router (tanpa key asli)
 node test/worktree.it.mjs                  # skenario branch/worktree (butuh internet)
 ```
 
