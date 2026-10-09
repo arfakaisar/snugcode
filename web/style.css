@@ -46,6 +46,9 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --app-h: 100dvh;
+  /* Jarak bawah composer: home indicator / garis gestur hanya menempati bagian bawah safe-area,
+     jadi kartu input cukup berada sedikit di atasnya (seperti aplikasi chat native). */
+  --pad-b: max(8px, calc(var(--safe-b) - 12px));
   --app-top: 0px;
   --bar-h: 56px;
   --col: 760px;
@@ -413,7 +416,9 @@ select.field {
 }
 
 /* ---------- kartu & daftar ---------- */
-.list { display: grid; gap: 8px; }
+/* minmax(0, 1fr): item grid boleh lebih sempit dari isinya, jadi judul panjang terpotong "…"
+   alih-alih melebarkan kartu keluar layar. */
+.list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .card {
   display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
   padding: 14px; min-height: 64px; position: relative;
@@ -505,7 +510,8 @@ button.card:active .chev { transform: translateX(3px); }
 .metachip {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 99px;
   background: var(--surface); border: 1px solid var(--line); color: var(--fg-2); font-size: 12.5px;
-  animation: rise .5s var(--spring) both; transition: transform .2s var(--spring);
+  /* Sama dengan sapaan di atasnya (rise .6s, mulai .1s), berurutan per pil. */
+  animation: rise .6s var(--spring) both; animation-delay: calc(.16s + var(--i, 0) * 60ms); transition: transform .2s var(--spring);
 }
 .metachip:active { transform: scale(.95); }
 .metachip svg { width: 14px; height: 14px; }
@@ -513,9 +519,10 @@ button.card:active .chev { transform: translateX(3px); }
 .metachip.on { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
 
 /* beranda: tombol "mulai sesi" bergaya composer di bawah */
-.session.home .col { padding-bottom: calc(110px + var(--safe-b)); }
+.session.home .col { padding-bottom: calc(92px + var(--pad-b)); }
 .starter {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px calc(12px + var(--safe-r)) calc(12px + var(--safe-b)) calc(12px + var(--safe-l));
+  /* Bawah: safe-area (home indicator / navigasi gestur) sudah memberi jarak, jadi tidak ditambah lagi. */
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px calc(10px + var(--safe-r)) var(--pad-b) calc(10px + var(--safe-l));
   background: linear-gradient(to top, var(--bg) 58%, transparent); pointer-events: none;
 }
 .starterbtn {
@@ -739,7 +746,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .welcome .mascot { margin: 0 auto 14px; display: block; width: 92px; height: 92px; }
 .welcome h2 { font-size: clamp(22px, 6.4vw, 28px); line-height: 1.25; margin: 0 0 12px; animation: rise .6s var(--spring) .1s both; }
 .welcome .tags { animation: rise .6s var(--spring) .18s both; }
-.sugs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 22px 0 12px; text-align: left; }
+.sugs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 22px 0 12px; text-align: left; }
 .sug {
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; padding: 12px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line);
   animation: rise .6s var(--spring) both; animation-delay: calc(var(--i) * 60ms + 250ms); transition: transform .25s var(--spring), background .15s;
@@ -789,8 +796,8 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .perm.ask { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
 .askq { margin: 12px 0; }
 .askq .qt { font-size: 14.5px; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.askq .opts { display: grid; gap: 8px; margin-bottom: 8px; }
-.opt { text-align: left; padding: 11px 14px; border-radius: var(--r); border: 1px solid var(--line-2); background: var(--surface-2); display: grid; gap: 2px; min-height: 46px; transition: border-color .15s, background .15s, transform .2s var(--spring); }
+.askq .opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 8px; }
+.opt { overflow-wrap: anywhere; text-align: left; padding: 11px 14px; border-radius: var(--r); border: 1px solid var(--line-2); background: var(--surface-2); display: grid; gap: 2px; min-height: 46px; transition: border-color .15s, background .15s, transform .2s var(--spring); }
 .opt:active { transform: scale(.98); }
 .opt span { color: var(--dim); font-size: 12.5px; }
 .opt.on { border-color: var(--accent); background: var(--accent-soft); }
@@ -824,10 +831,10 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 /* ---------- composer: kartu melayang ---------- */
 #composer {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
-  padding: 22px calc(10px + var(--safe-r)) calc(10px + var(--safe-b)) calc(10px + var(--safe-l));
+  padding: 22px calc(10px + var(--safe-r)) var(--pad-b) calc(10px + var(--safe-l));
   background: linear-gradient(to top, var(--bg) 62%, transparent);
 }
-html.kb #composer { padding-bottom: 8px; }
+html.kb #composer, html.kb .starter { padding-bottom: 8px; }
 #composer .inner { max-width: var(--col); margin: 0 auto; pointer-events: auto; }
 .cbox {
   background: var(--surface); border: 1px solid var(--line); border-radius: 26px; padding: 8px 8px 8px;
@@ -1073,7 +1080,7 @@ input[type=range]:disabled { opacity: .3; }
   #sheetBody { padding-top: 0; padding-bottom: 18px; }
   .sheethead { padding-top: 16px; }
   .sheetfoot { bottom: -18px; margin-bottom: -18px; padding-bottom: 18px; }
-  .sugs { grid-template-columns: repeat(4, 1fr); }
+  .sugs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @keyframes dialogIn { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
 @keyframes dialogOut { to { opacity: 0; transform: translate(-50%, -48%) scale(.97); } }

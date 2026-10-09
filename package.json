@@ -23,8 +23,9 @@
     "test:ui": "node test/e2e-ui.mjs",
     "typecheck": "tsc -p . && npm --prefix relay run typecheck",
     "dev:relay": "npm run build:web && cd relay && npx wrangler dev --var DEV_AUTH:1",
-    "deploy": "npm run build:web && cd relay && npx wrangler deploy",
-    "docs:images": "node scripts/docs-images.mjs"
+    "deploy": "npm run build:web && cd relay && npx wrangler deploy && npx wrangler deploy -c wrangler.alias.jsonc",
+    "docs:images": "node scripts/docs-images.mjs",
+    "icons": "node scripts/icons.mjs"
   },
   "license": "MIT",
   "dependencies": {

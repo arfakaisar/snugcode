@@ -178,12 +178,15 @@ matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => a
 export const vv = window.visualViewport;
 export let kbOpen = false;
 export function syncViewport() {
-  const hgt = vv ? vv.height : window.innerHeight;
-  const top = vv ? Math.max(0, vv.offsetTop) : 0;
+  const vh = vv ? vv.height : window.innerHeight;
+  const open = vv ? window.innerHeight - vv.height > 140 || (document.activeElement?.matches?.('input,textarea') && screen.height - vh > 260) : false;
+  // Keyboard tertutup: shell mengisi seluruh layar (innerHeight). Di sebagian HP (PWA layar penuh,
+  // navigasi gestur) visualViewport sedikit lebih pendek dan meninggalkan strip kosong di bawah.
+  const hgt = open ? vh : window.innerHeight;
+  const top = open && vv ? Math.max(0, vv.offsetTop) : 0;
   const root = document.documentElement.style;
   root.setProperty('--app-h', hgt + 'px');
   root.setProperty('--app-top', top + 'px');
-  const open = vv ? window.innerHeight - vv.height > 140 || (document.activeElement?.matches?.('input,textarea') && screen.height - hgt > 260) : false;
   if (open !== kbOpen) {
     kbOpen = open;
     document.documentElement.classList.toggle('kb', open);
@@ -561,6 +564,17 @@ export function onLongPress(el, fn) {
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancel);
   el.addEventListener('click', (e) => fired && ((fired = false), e.stopImmediatePropagation(), e.preventDefault()), true);
   el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+// Isi elemen diganti hanya bila `key` berubah. Mencegah animasi masuk diputar ulang saat data yang
+// sama digambar lagi (mis. pil & banner beranda setelah hasil cek pembaruan tiba).
+/** @param {HTMLElement} el @param {string} key @param {() => (Node | null | false)[]} build */
+export function renderIf(el, key, build) {
+  if (el.dataset.key === key) return false;
+  el.dataset.key = key;
+  // null/false dibuang oleh replaceChildren versi di atas.
+  el.replaceChildren(.../** @type {Node[]} */ (build()));
+  return true;
 }
 
 export const loading = (text) => h('div', { class: 'loading' }, mascot('think'), h('span', { class: 'shimmer' }, text));

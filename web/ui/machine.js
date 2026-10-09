@@ -4,7 +4,7 @@ import * as M from '../../shared/models.js';
 import { Conn, store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
-import { anim, busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, mascot, toast, ui } from './dom.js';
+import { anim, busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, renderIf, mascot, toast, ui } from './dom.js';
 import { pickModel } from './model-picker.js';
 import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
@@ -140,15 +140,15 @@ export function renderUpdateBanner() {
   const el = document.getElementById('updateBanner');
   if (!el) return;
   if (legacyDaemon())
-    return el.replaceChildren(
+    return renderIf(el, 'legacy', () => [
       h('button', { class: 'banner up', onclick: () => migrateSheet() },
         h('span', { class: 'bi' }, mascot()),
         h('span', { class: 'grow' }, h('div', { class: 'name' }, 'Pindahkan PC ini ke snugcode'), h('div', { class: 'sub' }, 'PC masih menjalankan versi lama (pocketcode). Ketuk untuk migrasi — pairing & sesi tetap.')),
         ic('right', 'chev'),
       ),
-    );
+    ]);
   const st = app.current?.updateStatus;
-  if (!st?.updateAvailable) return el.replaceChildren();
+  if (!st?.updateAvailable) return renderIf(el, '', () => []);
 
   const sha = st.latestCommit ? st.latestCommit.slice(0, 7) : 'terbaru';
   const behind = st.commitsBehind > 1 ? `${st.commitsBehind} commit tertinggal` : 'Pembaruan baru tersedia';
@@ -164,13 +164,13 @@ export function renderUpdateBanner() {
       });
     },
   }, 'Perbarui');
-  el.replaceChildren(
+  renderIf(el, 'up|' + sha + '|' + msg, () => [
     h('button', { class: 'banner up', onclick: () => updateMachineSheet() },
       h('span', { class: 'bi' }, ic('spark')),
       h('span', { class: 'grow' }, h('div', { class: 'name' }, `Pembaruan PC tersedia · ${sha}`), h('div', { class: 'sub' }, msg)),
       upBtn,
     ),
-  );
+  ]);
 }
 
 export function onUpdateStatus(st, notify = false) {
@@ -254,8 +254,8 @@ export const ghBad = () => ['invalid', 'missing'].includes(app.current?.info?.gi
 export function renderGhBanner() {
   const el = document.getElementById('ghBanner');
   if (!el) return;
-  if (!ghBad()) return el.replaceChildren();
-  el.replaceChildren(
+  if (!ghBad()) return renderIf(el, '', () => []);
+  renderIf(el, 'gh|' + app.current.info.githubState, () => [
     h('button', { class: 'banner warn', onclick: () => githubLoginSheet() },
       h('span', { class: 'bi' }, ic('github')),
       h('span', { class: 'grow' },
@@ -264,7 +264,7 @@ export function renderGhBanner() {
       ),
       ic('right', 'chev'),
     ),
-  );
+  ]);
 }
 
 export function onGithubStatus(st) {
