@@ -134,7 +134,7 @@ await browser.close();
 // TUI di pseudo-terminal: membuka sesi folder repo, memutar ulang riwayat, lalu kirim prompt
 const CLI = new URL('../daemon/cli.js', import.meta.url).pathname;
 // `script` (util-linux/BSD) memberi TUI pseudo-terminal sungguhan; dilewati bila tidak tersedia.
-const tui = spawn('script', process.platform === 'darwin' ? ['-q', '/dev/null', process.execPath, CLI] : ['-qfec', `${process.execPath} ${CLI}`, '/dev/null'], { cwd: repo, env: { ...cleanEnv, POCKETCODE_HOME: HOME, TERM: 'xterm-256color', COLUMNS: '100', LINES: '40' }, stdio: ['pipe', 'pipe', 'pipe'] });
+const tui = spawn('script', process.platform === 'darwin' ? ['-q', '/dev/null', process.execPath, CLI] : ['-qfec', `${process.execPath} ${CLI}`, '/dev/null'], { cwd: repo, env: { ...cleanEnv, SNUGCODE_HOME: HOME, TERM: 'xterm-256color', COLUMNS: '100', LINES: '40' }, stdio: ['pipe', 'pipe', 'pipe'] });
 let tout = '';
 tui.stdout.on('data', (d) => (tout += d));
 tui.stderr.on('data', (d) => (tout += d));

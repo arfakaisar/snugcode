@@ -23,7 +23,7 @@ export async function loadModels(fresh = false) {
 export function probeModel(id, retest = false) {
   if (retest) modelCache.probes.delete(id);
   if (!modelCache.probes.has(id)) {
-    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk menguji model.' : e.message }));
+    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Perbarui snugcode di PC untuk menguji model.' : e.message }));
     modelCache.probes.set(id, p);
     // Kegagalan koneksi tidak disimpan; hasil dari model disimpan 5 menit.
     p.then((r) => (r.ok === null ? modelCache.probes.delete(id) : setTimeout(() => modelCache.probes.delete(id), 5 * 60 * 1000)));

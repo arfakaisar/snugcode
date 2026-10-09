@@ -1,5 +1,5 @@
 // Harness uji end-to-end bersama: mock 9router, PC terdaftar di relay dev, daemon asli dengan
-// POCKETCODE_HOME sementara, klien HP (web/conn.js) yang sudah dipasangkan, dan satu sesi lokal.
+// SNUGCODE_HOME sementara, klien HP (web/conn.js) yang sudah dipasangkan, dan satu sesi lokal.
 // Dipakai test/e2e-agent.mjs dan test/e2e-ui.mjs. Butuh relay dev: `npm run dev:relay`.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,7 +123,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36) } = {}) {
     const d = new Daemon(loadConfig(), { log: (m) => console.log('[daemon]', m) });
     d.start();
     process.on('SIGTERM', () => Promise.resolve(d.stop()).finally(() => process.exit(0)));`;
-  const daemon = spawn(process.execPath, ['--input-type=module', '-e', DAEMON], { env: { ...cleanEnv, POCKETCODE_HOME: HOME, POCKETCODE_DEBUG: process.env.DEBUG || '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e', DAEMON], { env: { ...cleanEnv, SNUGCODE_HOME: HOME, SNUGCODE_DEBUG: process.env.DEBUG || '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let dlog = '';
   process.on('exit', () => daemon.exitCode === null && daemon.kill('SIGKILL'));
   daemon.stdout.on('data', (d) => (dlog += d));

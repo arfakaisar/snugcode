@@ -1,6 +1,6 @@
 {
-  "name": "pocketcode",
-  "short_name": "pocketcode",
+  "name": "snugcode",
+  "short_name": "snugcode",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0b0e14",

@@ -6,14 +6,14 @@ import { WORKSPACES } from './config.js';
 import { safeRm } from './cleaner.js';
 
 const API = 'https://api.github.com';
-export const TOKEN_INVALID = 'Login GitHub di PC ini sudah tidak berlaku (token dicabut). Login ulang: tombol "Login GitHub" di aplikasi HP, /login di terminal, atau `pocketcode login`.';
+export const TOKEN_INVALID = 'Login GitHub di PC ini sudah tidak berlaku (token dicabut). Login ulang: tombol "Login GitHub" di aplikasi HP, /login di terminal, atau `snugcode login`.';
 
 export async function gh(token, method, url, body) {
   const res = await fetch(url.startsWith('http') ? url : API + url, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
-      'user-agent': 'pocketcode',
+      'user-agent': 'snugcode',
       ...(token ? { authorization: 'Bearer ' + token } : {}),
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
@@ -125,7 +125,7 @@ export function git(cwd, args, token, opts = {}) {
 
 const safe = (s) => s.replace(/[^A-Za-z0-9._-]/g, '_');
 
-// Nama folder clone di ~/.pocketcode/workspaces untuk "owner/nama" (dipakai juga oleh pembersih).
+// Nama folder clone di ~/.snugcode/workspaces untuk "owner/nama" (dipakai juga oleh pembersih).
 export const repoDirName = (full) => {
   const [owner = '', name = ''] = String(full).split('/');
   return safe(owner) + '__' + safe(name);

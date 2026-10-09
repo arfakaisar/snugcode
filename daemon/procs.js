@@ -143,7 +143,7 @@ export class ProcManager {
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
-    child.on('error', (e) => onData(Buffer.from(`\n[pocketcode] ${e.message}\n`)));
+    child.on('error', (e) => onData(Buffer.from(`\n[snugcode] ${e.message}\n`)));
     child.on('close', (code) => {
       clearTimeout(p.timer);
       flush();

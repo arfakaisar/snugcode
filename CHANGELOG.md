@@ -1,7 +1,29 @@
 # Changelog
 
-Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
+Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
+
+## 2026-10-09 — Ganti nama: pocketcode → snugcode, maskot "Snug"
+
+### Nama baru
+- Paket `snugcode`, perintah `snugcode` (alias `snug`), branch sesi `snug/<id>`, env `SNUGCODE_*`,
+  konfigurasi repo `.snugcode.json`, autostart `snugcode` / `dev.snugcode`, tool MCP `mcp__snugcode__*`.
+- Pembaruan jarak jauh mengambil `github:arfakaisar/snugcode`.
+
+### Tetap kompatibel dengan instalasi lama
+- Folder data `~/.pocketcode` tetap dipakai bila sudah ada; env `POCKETCODE_*` dan `.pocketcode.json`
+  tetap dibaca; entri autostart lama dipindahkan otomatis saat daemon baru jalan.
+- Tidak diganti karena identitas protokol/penyimpanan: label kriptografi pairing & kanal
+  (`shared/crypto.js`), nama pipe IPC, indeks checkpoint git, dan URL/nama worker relay.
+- Daemon kini mengirim `brand`; PWA mengenali daemon lama dan menawarkan migrasi (perintah siap
+  salin atau dijalankan lewat sesi). Lihat README → Migrasi dari pocketcode.
+
+### Maskot & logo
+- Maskot **Snug**: mochi clay bertopi tidur berbintang, berselimut, dengan "zzz". SVG beranimasi CSS:
+  tidur (bernapas, topi bergoyang, zzz melayang), bekerja (mata berkedip, mengangguk, kaki
+  "mengetik", titik berpikir), muncul (squash & stretch, selimut naik), dan bisa dicolek.
+- Ikon PWA, favicon, gambar README, dan TUI (`(˘ᵕ˘)ᶻ snugcode`, indikator kerja berupa wajah
+  maskot yang berkedip) memakai maskot yang sama.
 
 ## 2026-10-09 — PWA dirombak: gaya aplikasi chat, navigasi lebih ringkas, banyak animasi ringan
 
@@ -32,6 +54,12 @@ Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master
   hanya berjalan saat dibutuhkan, dan semuanya mati bila `prefers-reduced-motion`.
 - Isi drawer dibuat saat dibuka dan dibuang saat ditutup; daftar sesinya hanya dirender ulang bila
   berubah. Tanpa dependensi baru: `app.js` 51 → 57 KB, `style.css` 10 → 14 KB (gzip).
+
+### Pembaruan PWA otomatis
+- Nama cache service worker kini hash isi aset (dibuat `build:web`), jadi setiap deploy UI langsung
+  terdeteksi tanpa menaikkan versi manual. Aset shell diunduh dengan `cache: 'reload'`.
+- PWA yang dilanjutkan dari latar belakang mengecek pembaruan, lalu memuat ulang sendiri saat versi
+  baru aktif (atau menawarkan lewat toast bila sedang ada teks yang diketik).
 
 ## 2026-10-09 — Agen hemat token & lebih cepat: tool ramping, subagen ringan, izin lebih cerdas
 

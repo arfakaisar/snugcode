@@ -29,7 +29,7 @@ export class Daemon {
     this.updaterMeta = getInstallInfo(config);
     this.keepAwake = startKeepAwake({ log: (m) => this.log(m) });
     this.conns = new Map();
-    this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => process.env.POCKETCODE_DEBUG && log(m), notify: (s, msg, o) => this.notify(s, msg, o) });
+    this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => (process.env.SNUGCODE_DEBUG || process.env.POCKETCODE_DEBUG) && log(m), notify: (s, msg, o) => this.notify(s, msg, o) });
     this.backoff = 1000;
     this.stopped = false;
     this.lastPairAttempt = 0;
@@ -84,7 +84,7 @@ export class Daemon {
     } catch {}
   }
 
-  // Kanal lokal untuk `pocketcode` di terminal. Hanya bisa diakses user yang sama
+  // Kanal lokal untuk `snugcode` di terminal. Hanya bisa diakses user yang sama
   // (izin file/pipe) dan tetap wajib token lokal dari secrets.json.
   listenLocal() {
     if (!this.secrets.localToken) {
@@ -141,7 +141,7 @@ export class Daemon {
       this.conns.clear();
       if (this.stopped) return;
       if (ev.code === 4003) {
-        this.log('✗ PC ini sudah dihapus dari akun. Jalankan `pocketcode setup` lagi.');
+        this.log('✗ PC ini sudah dihapus dari akun. Jalankan `snugcode setup` lagi.');
         return;
       }
       if (ev.code === 4000) this.log('! Ada daemon lain dengan PC yang sama yang mengambil alih koneksi.');
@@ -169,7 +169,7 @@ export class Daemon {
     const watching = new Set([...this.conns.values()].filter((c) => c.ready && c.visible && c.sub?.session === session).map((c) => c.deviceId));
     for (const [id, dev] of Object.entries(this.secrets.devices)) {
       if (!dev.push || watching.has(id)) continue;
-      sendPush(dev.push, { title: `pocketcode · ${title}`, body: msg, tag: session.id + (perm ? ':perm' : ''), sid: session.id, mid: this.config.machineId })
+      sendPush(dev.push, { title: `snugcode · ${title}`, body: msg, tag: session.id + (perm ? ':perm' : ''), sid: session.id, mid: this.config.machineId })
         .then((alive) => {
           if (alive) return;
           delete dev.push;
@@ -205,7 +205,7 @@ const RPC = {
     restartDaemon(c.d, { delay: 1000 });
     return { ok: true, message: 'Daemon sedang me-restart...' };
   },
-  // `pocketcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
+  // `snugcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
   // (di Windows, process.kill tidak menjalankan handler apa pun).
   shutdown(c) {
     if (!c.local) throw new Error('Hanya dari terminal PC');
@@ -235,7 +235,7 @@ const RPC = {
     return s.summary();
   },
   repos(c, p) {
-    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `pocketcode setup` di PC.');
+    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `snugcode setup` di PC.');
     return listRepos(c.d.secrets.githubToken, opt(p.q, 'q', { max: 200 }), c.d.config.githubLogin);
   },
   async branches(c, p) {
@@ -409,6 +409,8 @@ class RpcConn {
       github: c.githubLogin || null,
       githubState: this.d.github.state,
       platform: process.platform,
+      // PWA memakai ini untuk mengenali daemon lama (sebelum ganti nama) dan menawarkan migrasi.
+      brand: 'snugcode',
       version: this.d.updaterMeta?.version || '0.1.0',
       commit: this.d.updaterMeta?.commit || 'main',
       preventSleep: this.d.keepAwake?.active?.() ?? false,

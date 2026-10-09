@@ -124,16 +124,42 @@ export function ic(name, cls = '') {
   t.innerHTML = `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
   return /** @type {SVGElement} */ (t.content.firstChild);
 }
-// Logo "spark" pocketcode: 12 sinar dengan panjang tak beraturan. Kelas `think` = berdenyut
-// bergelombang + berputar (agen bekerja), `draw` = sinar tumbuh satu per satu (muncul).
-const RAYS = [9.6, 7.1, 8.7, 6.6, 9.2, 7.5, 8.9, 6.8, 9.5, 7.3, 8.4, 7];
-let sparkHtml = null;
+// Maskot "Snug": mochi clay bertopi tidur bintang, berselimut, dengan "zzz". Semua gerak ada di CSS:
+//   (bawaan) tidur: bernapas, topi bergoyang, zzz melayang
+//   think       : bangun & bekerja — mata berkedip, kepala mengangguk, kaki "mengetik", titik berpikir
+//   draw        : muncul meletup (squash & stretch) lalu selimut naik
+//   tap         : bisa dicolek — melompat kaget sebentar
+const MASCOT = `<ellipse class="m-shadow" cx="32" cy="58.6" rx="21" ry="2.4"/>
+<g class="m-bob"><g class="m-breath">
+<path class="m-body" d="M13 50C13 33 21 21.5 32 21.5S51 33 51 50Z"/>
+<g class="m-face">
+<g class="m-sleep"><path d="M23.4 37.2q3 3 6 0"/><path d="M34.6 37.2q3 3 6 0"/></g>
+<g class="m-open"><ellipse cx="26.4" cy="37.6" rx="2" ry="2.5"/><ellipse cx="37.6" cy="37.6" rx="2" ry="2.5"/></g>
+<ellipse class="m-blush" cx="21.6" cy="42" rx="2.8" ry="1.7"/><ellipse class="m-blush" cx="42.4" cy="42" rx="2.8" ry="1.7"/>
+<ellipse class="m-mouth" cx="32" cy="42.3" rx="1.4" ry="1.2"/>
+</g>
+<g class="m-cap"><path class="m-capb" d="M15.5 32.5C16 22.5 24 16.5 33.5 16.5c8.5 0 15.5 3.5 19.5 10.5 2.5 4.5 4 8 4.2 11.5.2 1.9-1.6 2.5-2.4.9-1.4-3.4-3.8-6.9-7.6-9.2-7.7-3.2-23.2-2.8-31.7 2.3Z"/>
+<path class="m-star" d="M27 22.2l.7 1.5 1.6.2-1.2 1.1.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.1 1.6-.2z"/><circle class="m-star" cx="40.5" cy="21.5" r="1"/><circle class="m-star" cx="20.5" cy="27.6" r=".8"/><path class="m-band" d="M16.4 31.8C24.5 27 39 26.6 47.3 30"/><circle class="m-pom" cx="56" cy="40.4" r="3.4"/></g>
+</g>
+<g class="m-blanket"><path class="m-blk" d="M7 51c0-4.8 3.8-7 9.5-6.6 6 .4 10 2.6 15.5 2.6s9.5-2.2 15.5-2.6C53.2 44 57 46.2 57 51v3.5c0 1.9-1.4 3.1-3.4 3.1H10.4c-2 0-3.4-1.2-3.4-3.1Z"/>
+<path class="m-stitch" d="M11.5 53.2h41"/><ellipse class="m-paw" cx="24.4" cy="45.6" rx="3.5" ry="2.5"/><ellipse class="m-paw" cx="39.6" cy="45.6" rx="3.5" ry="2.5"/></g>
+</g>
+<g class="m-zz"><path d="M45.5 15h3l-3 3.2h3"/><path d="M50.5 8.5h4l-4 4.2h4"/><path d="M56.5 1h5l-5 5.2h5"/></g>
+<g class="m-dots"><circle cx="47" cy="16" r="1.7"/><circle cx="52.4" cy="12" r="2"/><circle cx="58.4" cy="7" r="2.3"/></g>`;
 /** @returns {SVGElement} */
-export function spark(cls = '') {
-  sparkHtml ??= RAYS.map((l, i) => `<g transform="rotate(${i * 30} 12 12)"><path class="ray" style="--d:${i}" d="M12 9.6V${(12 - l).toFixed(1)}"/></g>`).join('');
+export function mascot(cls = '') {
   const t = document.createElement('template');
-  t.innerHTML = `<svg class="spark ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true">${sparkHtml}</svg>`;
-  return /** @type {SVGElement} */ (t.content.firstChild);
+  t.innerHTML = `<svg class="mascot ${cls}" viewBox="0 0 64 64" aria-hidden="true">${MASCOT}</svg>`;
+  const svg = /** @type {SVGElement} */ (t.content.firstChild);
+  if (/\btap\b/.test(cls))
+    svg.addEventListener('pointerdown', () => {
+      haptic(10);
+      svg.classList.remove('poke');
+      requestAnimationFrame(() => svg.classList.add('poke'));
+      clearTimeout(/** @type {any} */ (svg).pokeT);
+      /** @type {any} */ (svg).pokeT = setTimeout(() => svg.classList.remove('poke'), 1400);
+    });
+  return svg;
 }
 
 // ---------- tema: sistem / terang / gelap ----------
@@ -188,6 +214,7 @@ export function toast(msg, bad = false, ms = 3200) {
   while (box.children.length > 3) box.firstChild.remove();
   setTimeout(kill, ms);
   if (bad) haptic(30);
+  return el;
 }
 
 // ---------- header / layar / sheet ----------
@@ -469,7 +496,7 @@ $('#drawerScrim').addEventListener('click', () => drawer.close());
 /** @param {HTMLElement} scroller @param {() => *} onRefresh */
 export function pullToRefresh(scroller, onRefresh) {
   if (!coarse) return;
-  const ind = h('div', { class: 'ptr' }, spark());
+  const ind = h('div', { class: 'ptr' }, mascot('think'));
   scroller.prepend(ind);
   let y0 = null;
   let pull = 0;
@@ -491,7 +518,7 @@ export function pullToRefresh(scroller, onRefresh) {
     content().style.transition = 'none';
     content().style.transform = `translateY(${pull}px)`;
     ind.style.opacity = String(Math.min(1, pull / 70));
-    ind.style.transform = `translateX(-50%) rotate(${pull * 3}deg) scale(${0.5 + Math.min(pull, 70) / 140})`;
+    ind.style.transform = `translateX(-50%) scale(${0.5 + Math.min(pull, 70) / 140}, ${0.5 + Math.min(pull, 90) / 120})`;
   }, { passive: true });
   scroller.addEventListener('touchend', () => {
     if (y0 == null) return;
@@ -536,7 +563,7 @@ export function onLongPress(el, fn) {
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-export const loading = (text) => h('div', { class: 'loading' }, spark('think'), h('span', { class: 'shimmer' }, text));
+export const loading = (text) => h('div', { class: 'loading' }, mascot('think'), h('span', { class: 'shimmer' }, text));
 export const skeletons = (n = 3) => h('div', {}, ...Array.from({ length: n }, (_, i) => h('div', { class: 'skeleton', style: `--i:${i}` })));
 export const scrollCol = (...kids) => h('div', { class: 'scroll' }, h('div', { class: 'col' }, ...kids));
 /** @param {{ icon: string, t1: *, t2?: *, onclick?: (ev: MouseEvent) => *, danger?: boolean, chev?: boolean }} item */

@@ -1,4 +1,4 @@
-// pocketcode — Mencegah PC tertidur selama daemon berjalan.
+// snugcode — Mencegah PC tertidur selama daemon berjalan.
 import { spawn } from 'node:child_process';
 
 /** @param {{ log?: (msg: string) => void }} [opts] */
@@ -32,7 +32,7 @@ Start-Sleep -Seconds 864000
       });
       proc.on('error', (e) => log('! keepawake darwin error: ' + e.message));
     } else if (platform === 'linux') {
-      proc = spawn('systemd-inhibit', ['--what=sleep', '--why=pocketcode daemon active', 'sleep', '864000'], {
+      proc = spawn('systemd-inhibit', ['--what=sleep', '--why=snugcode daemon active', 'sleep', '864000'], {
         stdio: 'ignore',
       });
       proc.on('error', () => {

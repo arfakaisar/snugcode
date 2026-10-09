@@ -13,7 +13,7 @@ const indexFiles = new Map();
 async function indexEnv(cwd) {
   let file = indexFiles.get(cwd);
   if (!file) {
-    file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'])).trim());
+    file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'] /* nama lama dipertahankan: checkpoint sesi lama tetap bisa di-rewind */)).trim());
     indexFiles.set(cwd, file);
   }
   fs.rmSync(file + '.lock', { force: true });

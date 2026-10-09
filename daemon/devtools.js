@@ -8,11 +8,11 @@ const text = (t) => ({ content: [{ type: 'text', text: t }] });
 const fail = (t) => ({ content: [{ type: 'text', text: t }], isError: true });
 const tail = (s, n = 6000) => (s.length > n ? '…' + s.slice(-n) : s) || '(belum ada output)';
 
-export const DEV_START = 'mcp__pocketcode__dev_start';
+export const DEV_START = 'mcp__snugcode__dev_start';
 // Tanpa izin hanya untuk URL localhost (dev server); URL lain/`file:` ditanyakan (lihat sessions.js).
-export const SCREENSHOT = 'mcp__pocketcode__preview_screenshot';
+export const SCREENSHOT = 'mcp__snugcode__preview_screenshot';
 // Tool yang tidak menjalankan perintah baru: tidak perlu izin.
-export const SAFE_DEV_TOOLS = ['dev_stop', 'dev_logs', 'dev_list', 'preview_screenshot'].map((n) => 'mcp__pocketcode__' + n);
+export const SAFE_DEV_TOOLS = ['dev_stop', 'dev_logs', 'dev_list', 'preview_screenshot'].map((n) => 'mcp__snugcode__' + n);
 
 // Log konsol untuk model: baris kembar (spam HMR/re-render) digabung, tiap baris & totalnya dibatasi.
 // Error didahulukan; log biasa hanya mengisi sisa ruang.
@@ -47,7 +47,7 @@ export function devToolsServer(session) {
     }
   };
   return createSdkMcpServer({
-    name: 'pocketcode',
+    name: 'snugcode',
     version: '1.0.0',
     alwaysLoad: true,
     tools: [

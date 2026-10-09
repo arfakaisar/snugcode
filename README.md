@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="docs/images/hero.jpg" alt="pocketcode — Claude Code di PC-mu, dikendalikan dari HP" width="100%">
+<img src="docs/images/hero.jpg" alt="snugcode — Claude Code di PC-mu, dikendalikan dari HP" width="100%">
 
-# pocketcode
+# snugcode <sub>(˘ᵕ˘)ᶻ</sub>
 
 **Coding agent Claude Code yang berjalan di PC-mu, dikendalikan penuh dari HP.**
+
+<sub>Dulu bernama <b>pocketcode</b> — lihat <a href="#-migrasi-dari-pocketcode">Migrasi dari pocketcode</a>.</sub>
 Analisis repo, edit kode, jalankan test, preview web app, commit, push, dan buat Pull Request — sambil rebahan, di jalan, atau di mana saja.
 
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A522-5ee6a0?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -13,22 +15,22 @@ Analisis repo, edit kode, jalankan test, preview web app, commit, push, dan buat
 [![Platform](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-c7a2ff)](#-instalasi-di-pc)
 [![PWA](https://img.shields.io/badge/HP-PWA%20(Android%20%C2%B7%20iOS)-f2c14e)](#-pakai-dari-hp)
 
-[Fitur](#-fitur-utama) · [Cara kerja](#-cara-kerja) · [Instalasi](#-instalasi-di-pc) · [Pakai dari HP](#-pakai-dari-hp) · [Terminal](#-terminal-pocketcode) · [Keamanan](#-keamanan) · [FAQ](#-faq)
+[Fitur](#-fitur-utama) · [Cara kerja](#-cara-kerja) · [Instalasi](#-instalasi-di-pc) · [Pakai dari HP](#-pakai-dari-hp) · [Terminal](#-terminal-snugcode) · [Keamanan](#-keamanan) · [FAQ](#-faq)
 
 </div>
 
 ---
 
-## Kenapa pocketcode?
+## Kenapa snugcode?
 
-Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan PC. **pocketcode** memindahkan "remote control"-nya ke HP, sementara semua pekerjaan berat tetap di PC:
+Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan PC. **snugcode** memindahkan "remote control"-nya ke HP, sementara semua pekerjaan berat tetap di PC:
 
 | | |
 |---|---|
 | 💻 **Compute tetap di PC** | Kode, `node_modules`, Docker, compiler, dan build berjalan di komputermu sendiri. HP hanya berfungsi sebagai remote control. |
 | 🌐 **Tanpa setup jaringan** | Tidak perlu VPS, IP publik, port forwarding, VPN, Tailscale, atau ngrok. PC dan HP sama-sama membuka koneksi *keluar* ke relay. |
 | 🔐 **End-to-end encrypted** | Pairing PIN dengan PAKE (CPace/ristretto255), lalu setiap pesan dienkripsi XChaCha20-Poly1305. Relay tidak bisa membaca apa pun. |
-| 🔑 **Kredensial tidak keluar dari PC** | API key AI dan token GitHub hanya tersimpan di `~/.pocketcode`, tidak pernah dikirim ke HP maupun relay. |
+| 🔑 **Kredensial tidak keluar dari PC** | API key AI dan token GitHub hanya tersimpan di `~/.snugcode`, tidak pernah dikirim ke HP maupun relay. |
 | 🌿 **Aman untuk repo-mu** | Setiap sesi bekerja di `git worktree` dan branch terpisah, jadi branch utama tetap bersih sampai kamu memutuskan merge. |
 | 🔁 **Satu sesi, dua layar** | Mulai di terminal PC, lanjutkan di HP, atau sebaliknya. Keduanya tersinkron secara real time. |
 
@@ -49,9 +51,9 @@ Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan
 </tr>
 </table>
 
-<p align="center"><img src="docs/images/tui.jpg" alt="Terminal UI pocketcode" width="720"><br><sub><b>Terminal UI</b> (<code>pocketcode</code>) — pengalaman seperti <code>claude</code>, dengan sesi yang sama seperti di HP</sub></p>
+<p align="center"><img src="docs/images/tui.jpg" alt="Terminal UI snugcode" width="720"><br><sub><b>Terminal UI</b> (<code>snugcode</code>) — pengalaman seperti <code>claude</code>, dengan sesi yang sama seperti di HP</sub></p>
 
-> Gambar di atas adalah mockup dengan data contoh dari tampilan versi sebelumnya; sumbernya ada di [`docs/mockups/`](docs/mockups). Tampilan PWA kini bergaya aplikasi chat (tema terang/gelap, drawer, composer kartu).
+> Tangkapan layar aplikasi asli dengan data contoh (tema gelap), dibuat ulang dengan `npm run docs:images` (lihat [`scripts/docs-images.mjs`](scripts/docs-images.mjs)). Gambar hero & terminal dirender dari [`docs/mockups/`](docs/mockups).
 
 ---
 
@@ -99,12 +101,12 @@ flowchart LR
         R["Worker + Durable Objects<br/><i>hanya meneruskan byte terenkripsi</i>"]
     end
 
-    subgraph PC["💻 PC kamu — daemon pocketcode"]
+    subgraph PC["💻 PC kamu — daemon snugcode"]
         D["daemon/server.js"]
         A["Claude Code<br/>Agent SDK"]
         P["Loopback proxy<br/>127.0.0.1"]
         W["git worktree<br/>per sesi"]
-        T["Terminal UI<br/><code>pocketcode</code>"]
+        T["Terminal UI<br/><code>snugcode</code>"]
         D --> A --> P
         A --> W
         T <-- IPC lokal --> D
@@ -152,19 +154,19 @@ sequenceDiagram
 gitGraph
     commit id: "main"
     commit id: "fitur lama"
-    branch pocket/k3x9
-    checkout pocket/k3x9
+    branch snug/k3x9
+    checkout snug/k3x9
     commit id: "agen: useTheme"
     commit id: "agen: toggle navbar"
     checkout main
-    branch pocket/a81c
-    checkout pocket/a81c
+    branch snug/a81c
+    checkout snug/a81c
     commit id: "agen: fix test"
     checkout main
-    merge pocket/k3x9 id: "PR #12 merged"
+    merge snug/k3x9 id: "PR #12 merged"
 ```
 
-Setiap sesi mendapat folder `~/.pocketcode/workspaces/<owner>__<repo>/s-<id>` dengan branch sendiri (default `pocket/<id>`). Beberapa sesi bisa berjalan paralel di repo yang sama tanpa saling ganggu.
+Setiap sesi mendapat folder `~/.snugcode/workspaces/<owner>__<repo>/s-<id>` dengan branch sendiri (default `snug/<id>`). Beberapa sesi bisa berjalan paralel di repo yang sama tanpa saling ganggu.
 
 ---
 
@@ -173,25 +175,25 @@ Setiap sesi mendapat folder `~/.pocketcode/workspaces/<owner>__<repo>/s-<id>` de
 **Kebutuhan:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), akun GitHub, dan **API key 9router**.
 
 ```bash
-npm i -g github:arfakaisar/pocketcode
-pocketcode setup
-pocketcode autostart on
+npm i -g github:arfakaisar/snugcode
+snugcode setup
+snugcode autostart on
 ```
 
-`pocketcode setup` akan menanyakan:
+`snugcode setup` akan menanyakan:
 
 1. **API key 9router** (`https://router.gemz.space/v1`), lalu model utama (model ringan subagen dipilih otomatis).
 2. **Cara login GitHub** untuk clone, push, dan PR. Disarankan *login lewat browser/HP*.
 3. **Nama PC** dan **PIN** (6–12 huruf/angka, tidak peka huruf besar/kecil, misal `moon42`).
 4. Lalu tampil **satu link** (menautkan PC ke akun GitHub-mu) dan **satu kode** (login GitHub untuk PC). Keduanya boleh dibuka dari HP.
 
-`pocketcode autostart on` menjalankan daemon di latar belakang sekarang juga, dan otomatis setiap kali login ke Windows, macOS, atau Linux.
+`snugcode autostart on` menjalankan daemon di latar belakang sekarang juga, dan otomatis setiap kali login ke Windows, macOS, atau Linux.
 
 > [!TIP]
-> Tanpa install global: `npx github:arfakaisar/pocketcode setup`, lalu `npx github:arfakaisar/pocketcode start`.
+> Tanpa install global: `npx github:arfakaisar/snugcode setup`, lalu `npx github:arfakaisar/snugcode start`.
 
 > [!NOTE]
-> PC harus menyala selama dipakai dari HP. pocketcode mencegah PC tertidur selama sesi aktif, tapi kalau PC tertidur karena idle, ubah pengaturan sleep: di Windows, Settings → System → Power → Sleep: *Never* (saat dicolok).
+> PC harus menyala selama dipakai dari HP. snugcode mencegah PC tertidur selama sesi aktif, tapi kalau PC tertidur karena idle, ubah pengaturan sleep: di Windows, Settings → System → Power → Sleep: *Never* (saat dicolok).
 
 ---
 
@@ -239,7 +241,7 @@ flowchart LR
 
 ### Run & Preview
 
-Ketuk **▶** di kanan atas → **Jalankan**. Perintah setup (`npm ci`, `pnpm install`, …) dan dev (`npm run dev`, …) terdeteksi otomatis, atau bisa ditetapkan per repo lewat `.pocketcode.json`:
+Ketuk **▶** di kanan atas → **Jalankan**. Perintah setup (`npm ci`, `pnpm install`, …) dan dev (`npm run dev`, …) terdeteksi otomatis, atau bisa ditetapkan per repo lewat `.snugcode.json`:
 
 ```json
 { "setup": "pnpm install", "dev": "pnpm dev --port {port}" }
@@ -252,16 +254,16 @@ Env `PORT` diisi port bebas, dan `{port}` diganti dengan port yang sama. **Previ
 
 ---
 
-## ⌨ Terminal: `pocketcode`
+## ⌨ Terminal: `snugcode`
 
 ```bash
 cd proyek-kamu
-pocketcode                     # atau singkatnya: pocket
-pocketcode "jelaskan repo ini" # langsung kirim prompt
-pocketcode --pick              # pilih sesi lain (termasuk sesi dari HP)
+snugcode                     # atau singkatnya: snug
+snugcode "jelaskan repo ini" # langsung kirim prompt
+snugcode --pick              # pilih sesi lain (termasuk sesi dari HP)
 ```
 
-- Folder repo git tempat kamu menjalankan `pocketcode` langsung menjadi sesinya, tanpa clone. Sesi terakhir di folder itu otomatis dilanjutkan.
+- Folder repo git tempat kamu menjalankan `snugcode` langsung menjadi sesinya, tanpa clone. Sesi terakhir di folder itu otomatis dilanjutkan.
 - **Sesi di terminal dan di HP adalah sesi yang sama.** Sesi dari terminal ditandai "terminal" di aplikasi HP.
 - Daemon dinyalakan otomatis kalau belum berjalan.
 
@@ -281,26 +283,26 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 
 | Perintah | Fungsi |
 |---|---|
-| `pocketcode` / `pocket` | UI terminal |
-| `pocketcode setup` | Setup / ubah konfigurasi |
-| `pocketcode login` | Login ulang GitHub saja |
-| `pocketcode start` | Jalankan daemon di terminal ini |
-| `pocketcode stop` / `restart` | Hentikan / restart daemon latar belakang |
-| `pocketcode update` | Periksa dan pasang pembaruan |
-| `pocketcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
-| `pocketcode clean` | Pindai & bersihkan worktree / repo yatim |
-| `pocketcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali |
-| `pocketcode devices` | Daftar HP yang sudah dipasangkan |
-| `pocketcode revoke <id\|all>` | Cabut akses HP |
-| `pocketcode status` | Ringkasan konfigurasi |
+| `snugcode` / `snug` | UI terminal |
+| `snugcode setup` | Setup / ubah konfigurasi |
+| `snugcode login` | Login ulang GitHub saja |
+| `snugcode start` | Jalankan daemon di terminal ini |
+| `snugcode stop` / `restart` | Hentikan / restart daemon latar belakang |
+| `snugcode update` | Periksa dan pasang pembaruan |
+| `snugcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
+| `snugcode clean` | Pindai & bersihkan worktree / repo yatim |
+| `snugcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali |
+| `snugcode devices` | Daftar HP yang sudah dipasangkan |
+| `snugcode revoke <id\|all>` | Cabut akses HP |
+| `snugcode status` | Ringkasan konfigurasi |
 
 <details>
 <summary><b>📁 Lokasi data di PC</b></summary>
 
-Semua data disimpan di `~/.pocketcode` (bisa diganti dengan env `POCKETCODE_HOME`):
+Semua data disimpan di `~/.snugcode` (bisa diganti dengan env `SNUGCODE_HOME`). Instalasi lama yang sudah punya `~/.pocketcode` tetap memakai folder itu:
 
 ```
-~/.pocketcode/
+~/.snugcode/
 ├── config.json          # nama PC, relay, model default, …
 ├── secrets.json         # key 9router, token GitHub, PIN (hash), device secret HP
 ├── daemon.log           # log daemon latar belakang
@@ -339,10 +341,10 @@ sequenceDiagram
 ```
 
 - **Relay zero-knowledge**: tidak pernah melihat PIN, isi percakapan, kode, key 9router, atau token GitHub.
-- **Brute-force dibatasi**: setelah 5 kali PIN salah, pairing terkunci sampai `pocketcode pin` dijalankan di PC.
+- **Brute-force dibatasi**: setelah 5 kali PIN salah, pairing terkunci sampai `snugcode pin` dijalankan di PC.
 - **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen.
 - **Key 9router tidak pernah masuk ke proses agen.** Proses `claude` (dan Bash agen) hanya memegang token lokal acak; loopback proxy (`127.0.0.1`) menukarnya dengan key asli. Request tanpa token itu ditolak, jadi program lain di PC tidak bisa memakai key-mu.
-- **`~/.pocketcode` tertutup untuk agen**: Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan membaca folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
+- **`~/.snugcode` tertutup untuk agen**: Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan membaca folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
 - **Tanpa izin hanya yang aman**: tool baca lolos otomatis hanya di dalam worktree sesi. Membaca di luar worktree dan `WebFetch` meminta izin (atau auto-izin), agar prompt injection dari README/issue tidak bisa diam-diam mengirim file ke luar.
 - **Aksi ke remote** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) selalu meminta izin, juga saat auto-izin aktif.
 
@@ -354,7 +356,7 @@ sequenceDiagram
 ## 🗂 Struktur repo
 
 ```
-pocketcode/
+snugcode/
 ├── daemon/      # CLI, daemon, sesi Agent SDK, proxy, git, TUI, run & preview, updater
 ├── relay/       # Cloudflare Worker + Durable Objects (Hub, Pending)
 ├── web/         # PWA (vanilla JS, tanpa framework)
@@ -375,9 +377,9 @@ npm install && (cd relay && npm install)
 printf 'TOKEN_SECRET=dev\n' > relay/.dev.vars
 npm run dev:relay                         # relay + PWA di http://127.0.0.1:8787, login dev tanpa GitHub
 
-POCKETCODE_HOME=/tmp/pc node daemon/cli.js setup --relay http://127.0.0.1:8787 \
+SNUGCODE_HOME=/tmp/pc node daemon/cli.js setup --relay http://127.0.0.1:8787 \
   --key <key 9router> --model gemini/gemini-3.8-flash --skip-github --pin 123456 --name DevPC
-POCKETCODE_HOME=/tmp/pc node daemon/cli.js start
+SNUGCODE_HOME=/tmp/pc node daemon/cli.js start
 
 npm test                                   # unit test
 npm run typecheck                          # tsc --checkJs: daemon, shared, PWA, relay
@@ -390,7 +392,7 @@ node test/worktree.it.mjs                  # skenario branch/worktree (butuh int
 <details>
 <summary><b>Untuk pemilik: deploy relay</b></summary>
 
-Relay (Worker `pocketcode-relay`) dan OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
+Relay (Worker `snugcode-relay`) dan OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
 
 ```bash
 npm install && (cd relay && npm install)
@@ -402,10 +404,35 @@ Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TO
 
 ---
 
+## 🔁 Migrasi dari pocketcode
+
+snugcode adalah nama baru pocketcode. Protokol, data, dan pairing tidak berubah:
+
+- **Folder data** `~/.pocketcode` tetap dipakai bila sudah ada (pairing HP, sesi, worktree, riwayat agen). Instalasi baru memakai `~/.snugcode`.
+- **Relay** tetap di `https://pocketcode-relay.arfak.workers.dev`: mengganti nama worker Cloudflare berarti worker & database baru (akun dan PC tertaut hilang, callback OAuth GitHub harus diubah).
+- Env `POCKETCODE_*`, file `.pocketcode.json`, dan entri autostart lama tetap dikenali; autostart lama dipindahkan otomatis.
+
+Pembaruan jarak jauh dari daemon versi lama **tidak** bisa pindah sendiri ke paket baru, jadi tiap PC perlu dimigrasi sekali. Aplikasi HP menampilkan banner **"Pindahkan PC ini ke snugcode"** yang bisa menjalankannya lewat sesi, atau jalankan sendiri di terminal PC:
+
+```bash
+# macOS / Linux
+npm i -g github:arfakaisar/snugcode --include=optional && { pocketcode stop; npm rm -g pocketcode; snugcode autostart on; }
+```
+
+```powershell
+# Windows (PowerShell)
+npm i -g github:arfakaisar/snugcode --include=optional; if ($?) { pocketcode stop; npm rm -g pocketcode; snugcode autostart on }
+```
+
+> [!NOTE]
+> Repo GitHub perlu diganti namanya menjadi `snugcode` (Settings → Repository name). GitHub otomatis mengalihkan URL lama, jadi `git push` dan pembaruan dari PC yang belum dimigrasi tetap jalan.
+
+---
+
 ## ❓ FAQ
 
 <details>
-<summary><b>Apakah kodeku dikirim ke server pocketcode?</b></summary>
+<summary><b>Apakah kodeku dikirim ke server snugcode?</b></summary>
 
 Tidak. Kode tetap di PC. Yang lewat relay hanya pesan terenkripsi end-to-end yang tidak bisa dibaca relay. Kode hanya dikirim ke penyedia model AI (lewat 9router) sebagai konteks agen, sama seperti memakai Claude Code biasa.
 </details>
@@ -413,31 +440,31 @@ Tidak. Kode tetap di PC. Yang lewat relay hanya pesan terenkripsi end-to-end yan
 <details>
 <summary><b>HP bilang "Menunggu PC" terus.</b></summary>
 
-Pastikan daemon berjalan (`pocketcode status`, atau `pocketcode autostart on`) dan PC tidak tertidur. Log ada di `~/.pocketcode/daemon.log`. Halaman di HP tersambung otomatis begitu PC online.
+Pastikan daemon berjalan (`snugcode status`, atau `snugcode autostart on`) dan PC tidak tertidur. Log ada di `~/.snugcode/daemon.log`. Halaman di HP tersambung otomatis begitu PC online.
 </details>
 
 <details>
 <summary><b>PIN-ku terkunci.</b></summary>
 
-Jalankan `pocketcode pin` di PC untuk mengganti PIN dan membuka kunci.
+Jalankan `snugcode pin` di PC untuk mengganti PIN dan membuka kunci.
 </details>
 
 <details>
 <summary><b>Bisa dipakai beberapa PC atau beberapa HP?</b></summary>
 
-Bisa. Satu akun GitHub bisa menautkan banyak PC, dan setiap PC bisa dipasangkan dengan banyak HP. Lihat atau cabut HP dengan `pocketcode devices` / `pocketcode revoke`.
+Bisa. Satu akun GitHub bisa menautkan banyak PC, dan setiap PC bisa dipasangkan dengan banyak HP. Lihat atau cabut HP dengan `snugcode devices` / `snugcode revoke`.
 </details>
 
 <details>
 <summary><b>Apakah mengganggu instalasi Claude Code pribadiku?</b></summary>
 
-Tidak. pocketcode memakai `CLAUDE_CONFIG_DIR` sendiri di `~/.pocketcode/claude`.
+Tidak. snugcode memakai `CLAUDE_CONFIG_DIR` sendiri di `~/.snugcode/claude`.
 </details>
 
 <details>
 <summary><b>Screenshot/preview tidak jalan.</b></summary>
 
-Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExecutable` di `~/.pocketcode/config.json`). Preview memakai `cloudflared`, yang diunduh otomatis ke `~/.pocketcode/bin`.
+Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExecutable` di `~/.snugcode/config.json`). Preview memakai `cloudflared`, yang diunduh otomatis ke `~/.snugcode/bin`.
 </details>
 
 ---

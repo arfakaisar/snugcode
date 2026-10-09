@@ -11,7 +11,7 @@ const vapidPublic = (jwk) => b64u(Buffer.concat([Buffer.from([4]), unb64u(jwk.x)
 
 function vapidAuth(jwk, endpoint) {
   const aud = new URL(endpoint).origin;
-  const body = `${b64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))}.${b64u(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'https://github.com/arfakaisar/pocketcode' }))}`;
+  const body = `${b64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))}.${b64u(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'https://github.com/arfakaisar/snugcode' }))}`;
   const sig = crypto.sign('sha256', Buffer.from(body), { key: crypto.createPrivateKey({ key: jwk, format: 'jwk' }), dsaEncoding: 'ieee-p1363' });
   return `vapid t=${body}.${b64u(sig)}, k=${vapidPublic(jwk)}`;
 }

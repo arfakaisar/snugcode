@@ -24,9 +24,9 @@ const readJson = (f) => {
   }
 };
 
-// `.pocketcode.json` di root repo bisa menimpa deteksi: { "setup": "...", "dev": "..." }.
+// `.snugcode.json` (atau `.pocketcode.json` lama) di root repo bisa menimpa deteksi: { "setup": "...", "dev": "..." }.
 export function detectProject(cwd) {
-  const own = readJson(path.join(cwd, '.pocketcode.json')) || {};
+  const own = readJson(path.join(cwd, '.snugcode.json')) || readJson(path.join(cwd, '.pocketcode.json')) || {};
   const has = (f) => fs.existsSync(path.join(cwd, f));
   const pkg = readJson(path.join(cwd, 'package.json'));
   let setup = null;

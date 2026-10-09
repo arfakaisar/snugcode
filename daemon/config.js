@@ -1,4 +1,4 @@
-// Penyimpanan state daemon di ~/.pocketcode.
+// Penyimpanan state daemon di ~/.snugcode.
 //   config.json  : pengaturan biasa (relay, model, nama PC)
 //   secrets.json : token & kunci (izin file 600 di macOS/Linux)
 import fs from 'node:fs';
@@ -6,10 +6,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const HOME = process.env.POCKETCODE_HOME || path.join(os.homedir(), '.pocketcode');
+// Instalasi lama (sebelum ganti nama dari pocketcode) tetap memakai ~/.pocketcode bila folder itu sudah ada:
+// worktree, riwayat agen, dan pairing HP tersimpan dengan path absolut di dalamnya.
+const LEGACY_HOME = path.join(os.homedir(), '.pocketcode');
+const NEW_HOME = path.join(os.homedir(), '.snugcode');
+export const HOME =
+  process.env.SNUGCODE_HOME || process.env.POCKETCODE_HOME || (!fs.existsSync(NEW_HOME) && fs.existsSync(LEGACY_HOME) ? LEGACY_HOME : NEW_HOME);
 
 // Kanal lokal daemon <-> terminal (TUI): named pipe di Windows, unix socket di
-// macOS/Linux. Unik per folder data agar beberapa instalasi tidak bentrok.
+// macOS/Linux. Unik per folder data agar beberapa instalasi tidak bentrok. Prefiks 'pocketcode-' sengaja
+// dipertahankan: terminal versi baru tetap bisa bicara dengan daemon yang masih versi lama.
 export const IPC_PATH =
   process.platform === 'win32'
     ? '\\\\.\\pipe\\pocketcode-' + createHash('sha1').update(HOME.toLowerCase()).digest('hex').slice(0, 12)

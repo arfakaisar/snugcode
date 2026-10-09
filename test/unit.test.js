@@ -167,7 +167,7 @@ test('loopback proxy: sanitasi header, key asli hanya disuntikkan untuk pemegang
     (url, auth) => fetch(url + '/v1/messages', { headers: { ...auth, 'user-agent': 'claude-cli/1.0.0', 'x-app': 'cli', other: 'keep' } }).then((r) => r.text()),
   );
   assert.ok(text.includes('"name":"Bash"') && !text.includes('Bash_ide'));
-  assert.equal(seen['user-agent'], 'pocketcode/0.1');
+  assert.equal(seen['user-agent'], 'snugcode/0.1');
   assert.equal(seen['x-app'], undefined);
   assert.equal(seen.other, 'keep');
   // Router menerima key asli; token lokal tidak pernah keluar dari PC.
@@ -280,16 +280,16 @@ test('lightModel: subagen hanya Claude Haiku 5.5 / Gemini 3.8 Flash, urutan sesu
   assert.deepEqual(lightModel('ag/gemini-3.1-pro-high', null), { id: 'ag/gemini-3.8-flash-low', kind: 'flash' });
 });
 
-test('pocketcode prompt: ringkas, hanya aturan yang mengubah perilaku agen', async () => {
-  const { POCKETCODE_SYSTEM_PROMPT } = await import('../daemon/prompt.js');
+test('snugcode prompt: ringkas, hanya aturan yang mengubah perilaku agen', async () => {
+  const { SNUGCODE_SYSTEM_PROMPT } = await import('../daemon/prompt.js');
   // Dikirim di setiap request model: jaga tetap kecil.
-  assert.ok(POCKETCODE_SYSTEM_PROMPT.length < 2600, 'prompt ' + POCKETCODE_SYSTEM_PROMPT.length + ' karakter');
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /pocketcode/i);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /worktree/i);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /git push/i);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /dev_start/);
-  assert.match(POCKETCODE_SYSTEM_PROMPT, /Grep\/Glob/);
-  assert.doesNotMatch(POCKETCODE_SYSTEM_PROMPT, /CPace|XChaCha20|Cloudflare/);
+  assert.ok(SNUGCODE_SYSTEM_PROMPT.length < 2600, 'prompt ' + SNUGCODE_SYSTEM_PROMPT.length + ' karakter');
+  assert.match(SNUGCODE_SYSTEM_PROMPT, /snugcode/i);
+  assert.match(SNUGCODE_SYSTEM_PROMPT, /worktree/i);
+  assert.match(SNUGCODE_SYSTEM_PROMPT, /git push/i);
+  assert.match(SNUGCODE_SYSTEM_PROMPT, /dev_start/);
+  assert.match(SNUGCODE_SYSTEM_PROMPT, /Grep\/Glob/);
+  assert.doesNotMatch(SNUGCODE_SYSTEM_PROMPT, /CPace|XChaCha20|Cloudflare/);
 });
 
 test('agen: daftar tool ramping & subagen bawaan ditimpa dengan effort rendah', async () => {
@@ -451,7 +451,10 @@ test('project: deteksi perintah setup/dev dan simpan/pulihkan template .env', as
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { start: 'node s.js', dev: 'vite' } }));
     fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
     assert.deepEqual(detectProject(dir), { setup: 'pnpm install', dev: 'pnpm run dev' });
-    fs.writeFileSync(path.join(dir, '.pocketcode.json'), JSON.stringify({ dev: 'pnpm dev --host' }));
+    // Nama lama (.pocketcode.json) tetap dibaca; .snugcode.json didahulukan.
+    fs.writeFileSync(path.join(dir, '.pocketcode.json'), JSON.stringify({ dev: 'pnpm dev --legacy' }));
+    assert.equal(detectProject(dir).dev, 'pnpm dev --legacy');
+    fs.writeFileSync(path.join(dir, '.snugcode.json'), JSON.stringify({ dev: 'pnpm dev --host' }));
     assert.equal(detectProject(dir).dev, 'pnpm dev --host');
 
     const repo = 'test/pc-env-' + process.pid;
@@ -505,7 +508,7 @@ test('webpush: payload aes128gcm bisa didekripsi penerima (RFC 8291)', async () 
   const uaPub = ua.generateKeys();
   const auth = crypto.randomBytes(16);
   const sub = { endpoint: 'https://push.example/x', keys: { p256dh: uaPub.toString('base64url'), auth: auth.toString('base64url') } };
-  const msg = JSON.stringify({ title: 'pocketcode ✓', body: 'selesai' });
+  const msg = JSON.stringify({ title: 'snugcode ✓', body: 'selesai' });
   const buf = encrypt(sub, msg);
   const salt = buf.subarray(0, 16);
   const asPub = buf.subarray(21, 21 + buf[20]);
@@ -644,13 +647,14 @@ test('izin: path sensitif & tool baca di luar worktree', async () => {
     assert.equal((await s.askPermission('Read', { file_path: path.join(HOME, 'secrets.json') })).behavior, 'deny');
     assert.equal(await settled(s.askPermission('Read', { file_path: '/etc/hosts' })), 'menunggu');
     assert.equal(await settled(s.askPermission('WebFetch', { url: 'https://x.y/?q=1' })), 'menunggu');
-    assert.equal((await s.askPermission('mcp__pocketcode__preview_screenshot', { url: 'http://localhost:5173/' })).behavior, 'allow');
-    assert.equal(await settled(s.askPermission('mcp__pocketcode__preview_screenshot', { url: 'file:///etc/passwd' })), 'menunggu');
+    assert.equal((await s.askPermission('mcp__snugcode__preview_screenshot', { url: 'http://localhost:5173/' })).behavior, 'allow');
+    assert.equal(await settled(s.askPermission('mcp__snugcode__preview_screenshot', { url: 'file:///etc/passwd' })), 'menunggu');
     s.meta.auto = true;
     assert.equal((await s.askPermission('WebFetch', { url: 'https://x.y' })).behavior, 'allow');
     assert.equal((await s.askPermission('Write', { file_path: path.join(HOME, 'config.json'), content: '' })).behavior, 'deny');
     assert.equal((await s.askPermission('Edit', { file_path: path.join(CLAUDE_DIR, 'settings.json') })).behavior, 'deny');
-    assert.equal(await settled(s.askPermission('Bash', { command: 'cat ~/.pocketcode/secrets.json' })), 'menunggu');
+    assert.equal(await settled(s.askPermission('Bash', { command: 'cat ~/.snugcode/secrets.json' })), 'menunggu');
+    assert.equal(await settled(s.askPermission('Bash', { command: 'cat ~/.pocketcode/config.json' })), 'menunggu');
     // Izin yang tertunda: "Selalu" tidak berlaku untuk perintah yang menyentuh kredensial.
     const pending = [...s.perms.entries()].find(([, p]) => p.tool === 'Bash');
     assert.equal(s.permEvent(pending[0], pending[1]).always, undefined);
@@ -702,11 +706,11 @@ test('izin: edit di worktree langsung diterapkan, "Selalu" Bash memakai aturan p
     assert.deepEqual(s.meta.allowRules, ['Bash(npm test *)']);
     assert.ok(saved > 0);
     // Tanpa saran aturan: "Selalu" berlaku untuk tool itu (perilaku lama).
-    const res2 = s.askPermission('mcp__pocketcode__dev_start', { command: 'npm run dev' });
+    const res2 = s.askPermission('mcp__snugcode__dev_start', { command: 'npm run dev' });
     const [pid2] = [...s.perms.keys()];
     s.answerPermission(pid2, 'always');
     assert.equal((await res2).updatedPermissions, undefined);
-    assert.ok(s.alwaysAllow.has('mcp__pocketcode__dev_start'));
+    assert.ok(s.alwaysAllow.has('mcp__snugcode__dev_start'));
 
     // Hook PreToolUse: menunggu checkpoint, dan push/kredensial tetap bertanya walau cocok aturan "Selalu".
     let release;
@@ -716,7 +720,7 @@ test('izin: edit di worktree langsung diterapkan, "Selalu" Bash memakai aturan p
     release();
     assert.deepEqual(await h, {});
     assert.equal((await s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git -C . push origin x' } })).hookSpecificOutput.permissionDecision, 'ask');
-    assert.equal((await s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node -e "x" ~/.pocketcode/secrets.json' } })).hookSpecificOutput.permissionDecision, 'ask');
+    assert.equal((await s.beforeTool({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node -e "x" ~/.snugcode/secrets.json' } })).hookSpecificOutput.permissionDecision, 'ask');
   } finally {
     s.endTurn();
     fs.rmSync(cwd, { recursive: true, force: true });
@@ -746,7 +750,7 @@ test('index sesi rusak: sesi dipulihkan dari worktree & tidak ada yang dihapus',
       console.log(JSON.stringify(m.list()));
       await m.close();
       process.exit(0);`;
-    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, POCKETCODE_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, SNUGCODE_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const list = JSON.parse(out.trim().split('\n').at(-1));
     assert.equal(list.length, 1);
     assert.equal(list[0].id, 'ab12');
@@ -786,4 +790,47 @@ test('model event bersama: rencana, aktivitas, ringkasan selesai, penyaring dupl
   // Daemon menyertakan `todos` terstruktur pada event TodoWrite.
   const { toolSummary } = await import('../daemon/sessions.js');
   assert.equal(toolSummary('TodoWrite', { todos: [{ content: 'a', status: 'completed' }] }), '☑ a');
+});
+
+test('ganti nama: folder data lama ~/.pocketcode tetap dipakai, instalasi baru memakai ~/.snugcode', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-home-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.SNUGCODE_HOME;
+  delete env.POCKETCODE_HOME;
+  const read = () => execFileSync(process.execPath, ['--input-type=module', '-e', `const { HOME } = await import(${JSON.stringify(new URL('../daemon/config.js', import.meta.url).href)}); console.log(HOME);`], { env, encoding: 'utf8' }).trim();
+  try {
+    assert.equal(read(), path.join(home, '.snugcode'));
+    fs.mkdirSync(path.join(home, '.pocketcode'));
+    assert.equal(read(), path.join(home, '.pocketcode'));
+    fs.mkdirSync(path.join(home, '.snugcode'));
+    assert.equal(read(), path.join(home, '.snugcode'));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('ganti nama: entri autostart lama (pocketcode) dipindahkan ke snugcode', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-auto-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, APPDATA: process.env.APPDATA };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home, APPDATA: home });
+  try {
+    const { autostartFilePath, isAutostartEnabled, syncAutostart } = await import('../daemon/autostart.js');
+    const legacy = autostartFilePath().replace(/snugcode/g, 'pocketcode');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, 'lama');
+    assert.ok(isAutostartEnabled());
+    assert.equal(syncAutostart('/opt/snugcode/daemon/cli.js', '/usr/bin/node'), true);
+    assert.ok(!fs.existsSync(legacy), 'entri lama dihapus');
+    assert.match(fs.readFileSync(autostartFilePath(), 'utf8'), /snugcode[\/]daemon[\/]cli\.js/);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) v == null ? delete process.env[k] : (process.env[k] = v);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

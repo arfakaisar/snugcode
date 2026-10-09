@@ -13,7 +13,7 @@ const SEARCH_TIPS = 'Use Glob to find files by pattern, Grep to search contents,
 
 const GENERAL = {
   description: 'General-purpose agent on a fast model for open-ended, multi-step research: questions that need many searches and reads, or a self-contained side task. Can run commands and edit files when the task explicitly asks for it.',
-  prompt: `You are a subagent of pocketcode's coding agent. Complete the delegated task fully and efficiently. ${SEARCH_TIPS} Only edit files or run state-changing commands when the task explicitly asks for it. ${REPORT}`,
+  prompt: `You are a subagent of snugcode's coding agent. Complete the delegated task fully and efficiently. ${SEARCH_TIPS} Only edit files or run state-changing commands when the task explicitly asks for it. ${REPORT}`,
   tools: ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],
   effort: /** @type {const} */ ('medium'),
 };

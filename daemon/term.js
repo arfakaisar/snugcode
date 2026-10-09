@@ -11,7 +11,7 @@ export const fgc = (rgb) => (TRUECOLOR ? `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]
 export const bgc = (rgb) => (TRUECOLOR ? `\x1b[48;2;${rgb[0]};${rgb[1]};${rgb[2]}m` : `\x1b[48;5;${to256(rgb)}m`);
 export const paint = (open, close) => (s) => (NO_COLOR ? String(s) : open + s + close);
 export const color = (hex) => paint(fgc(hexRgb(hex)), '\x1b[39m');
-export const PAL = { green: '#5ee6a0', cyan: '#59d6e6', blue: '#7cb7ff', purple: '#c7a2ff', yellow: '#f2c14e', red: '#ff6b6b', pink: '#ff8fc7', gray: '#6f7a8a', fg: '#dbe2ea', soft: '#aab4c2', line: '#3a4352' };
+export const PAL = { clay: '#d97757', peach: '#f2b49b', green: '#5ee6a0', cyan: '#59d6e6', blue: '#7cb7ff', purple: '#c7a2ff', yellow: '#f2c14e', red: '#ff6b6b', pink: '#ff8fc7', gray: '#6f7a8a', fg: '#dbe2ea', soft: '#aab4c2', line: '#3a4352' };
 export const c = Object.fromEntries(Object.entries(PAL).map(([k, v]) => [k, color(v)]));
 export const bold = paint('\x1b[1m', '\x1b[22m');
 export const dim = paint('\x1b[2m', '\x1b[22m');

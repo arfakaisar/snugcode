@@ -1,8 +1,11 @@
 // Service worker: membuat PWA bisa di-install, membuka shell aplikasi saat offline,
 // dan menampilkan Web Push dari PC saat aplikasi ditutup. API & WebSocket tidak pernah di-cache.
-const CACHE = 'pocketcode-v9';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
-self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
+// CACHE diganti hash aset oleh scripts/build-web.mjs saat build.
+const CACHE = 'snugcode-dev';
+// index.html tidak ikut: relay mengalihkannya (307) ke './'.
+const SHELL = ['./', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
+// cache: 'reload' = selalu dari jaringan, bukan dari HTTP cache browser yang mungkin masih versi lama.
+self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
@@ -36,7 +39,7 @@ self.addEventListener('push', (e) => {
     self.clients.matchAll({ type: 'window' }).then((wins) => {
       // Aplikasi sedang dilihat: notifikasi in-app sudah cukup.
       if (wins.some((w) => w.visibilityState === 'visible')) return;
-      return self.registration.showNotification(d.title || 'pocketcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon.svg', badge: 'icon.svg', data: { sid: d.sid, mid: d.mid } });
+      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon.svg', badge: 'icon.svg', data: { sid: d.sid, mid: d.mid } });
     }),
   );
 });
