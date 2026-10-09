@@ -1,47 +1,95 @@
 <!doctype html>
 <html lang="id"><head><meta charset="utf-8">
+<!-- Mockup terminal `snugcode` (warna & tata letak dari daemon/tui.js). window.at(ms) menggambar
+     keadaan pada waktu tertentu; scripts/docs-images.mjs merekamnya menjadi demo-tui.gif. -->
 <style>
-  body { margin: 0; background: #07090d; font: 15px/1.5 'Cascadia Mono', Consolas, monospace; color: #dbe2ea; }
-  .win { margin: 24px; border: 1px solid #222a36; border-radius: 12px; overflow: hidden; background: #0b0e14; box-shadow: 0 30px 60px -30px #000; }
-  .tb { height: 36px; background: #141a22; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: #6f7a8a; font-size: 12px; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #1f1e1d; font: 14.5px/1.5 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace; color: #dbe2ea; display: flex; }
+  .win { margin: 22px; flex: 1; display: flex; flex-direction: column; border: 1px solid #2c3440; border-radius: 12px; overflow: hidden; background: #0b0e14; box-shadow: 0 30px 70px -30px #000; }
+  .tb { height: 34px; flex: none; background: #141a22; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: #6f7a8a; font-size: 12px; }
   .tb i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-  pre { margin: 0; padding: 16px 20px 20px; font: inherit; white-space: pre; }
-  .g { color: #5ee6a0 } .c { color: #59d6e6 } .b { color: #7cb7ff } .p { color: #c7a2ff } .y { color: #f2c14e } .r { color: #ff6b6b }
+  #scr { flex: 1; overflow: hidden; padding: 14px 20px 16px; white-space: pre; }
+  .g { color: #5ee6a0 } .c { color: #59d6e6 } .b { color: #7cb7ff } .p { color: #c7a2ff } .y { color: #f2c14e } .r { color: #ff6b6b } .cl { color: #d97757 }
   .k { color: #6f7a8a } .s { color: #aab4c2 } .l { color: #3a4352 } .B { font-weight: 700 }
   .grad { background: linear-gradient(90deg, #f2b49b, #d97757); -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 700 }
   .u { background: #1b222d }
-.box{border:1px solid #3a4352;border-radius:8px;padding:6px 14px;margin:4px 0;width:640px;white-space:pre}
-.box+*{}</style></head>
+  .box { border: 1px solid #3a4352; border-radius: 8px; padding: 5px 14px; margin: 3px 0; width: 760px; white-space: pre }
+  .box.y { border-color: #f2c14e88 }
+  .cur { background: #dbe2ea; color: #0b0e14 }
+</style></head>
 <body><div class="win"><div class="tb"><i style="background:#ff6b6b"></i><i style="background:#f2c14e"></i><i style="background:#5ee6a0"></i><span style="margin-left:10px">~/proyek/landing — snugcode</span></div>
-<pre><div class="box"><span class="grad">(˘ᵕ˘)ᶻ snugcode</span>  <span class="k">— Claude Code harness · 9router</span>
+<div id="scr"></div></div>
+<script>
+const PROMPT = 'jalankan test lalu perbaiki yang gagal';
+const FINAL = 'Test yang gagal sudah diperbaiki: <span class="p">useTheme</span> membaca localStorage saat SSR.\n  Semua <span class="B">24 test lulus</span>.';
+const SPIN = ['(ᵔᴗᵔ)   ', '(ᵔᴗᵔ).  ', '(ᵔᴗᵔ).. ', '(ᵔᴗᵔ)...', '(-ᴗ-)...', '(ᵔᴗᵔ)   '];
+const T = { type: 500, send: 2600, bash: 3400, fail: 4700, read: 5500, perm: 6400, ok: 8600, edit: 8700, bash2: 9500, pass: 10500, text: 10900, done: 12600 };
+window.TOTAL = 13000;
+
+const header = `<div class="box"><span class="grad">(˘ᵕ˘)ᶻ snugcode</span>  <span class="k">— Claude Code harness · 9router</span>
 
   <span class="k">/help</span> bantuan  <span class="k">/model</span> model &amp; effort  <span class="k">!</span> shell
 
   <span class="k">folder </span> ~/proyek/landing
   <span class="k">repo   </span> arfakaisar/landing<span class="k"> · </span><span class="b">main</span>
   <span class="k">model  </span> <span class="p">◆ </span>claude-opus-5-5 · high
-  <span class="k">PC     </span> PC-Rumah<span class="k"> · @arfakaisar · bisa dilanjutkan di HP</span>
-</div>
-<span class="u"> <span class="g B">❯</span> jalankan test lalu perbaiki yang gagal                                 </span>
+  <span class="k">PC     </span> Laptop Arfa<span class="k"> · @arfakaisar · bisa dilanjutkan di HP</span>
+</div>`;
+const status = (dirty) => `  <span class="p">◆ </span><span class="s">claude-opus-5-5 · high</span><span class="k">  ·  </span><span class="b">git </span><span class="s">main</span>${dirty ? '<span class="y"> +1</span>' : ''}<span class="k">  ·  ~/proyek/landing</span>                 <span class="k">? bantuan</span>`;
+const input = (text, cursor) => `<div class="box"><span class="g B">❯ </span>${text ? text + (cursor ? '<span class="cur"> </span>' : '') : '<span class="k">Minta sesuatu…  (/ perintah · ! shell · \\ + enter baris baru)</span>'}
+</div>`;
+const spinner = (t, act, since) => `\n<span class="grad">${SPIN[Math.floor(t / 130) % SPIN.length]}</span> <span class="cl">${act}…</span> <span class="k">(${Math.max(1, Math.round((t - since) / 1000 * 3))}s · <b>esc</b> untuk hentikan)</span>`;
+const perm = `<div class="box y"><span class="y B">Izinkan Edit?</span>
+<span class="s">src/hooks/useTheme.ts</span>
 
-<span class="g">●</span> <span class="B">Bash</span><span class="s">(npm test)</span>
-<span class="l">  ⎿  </span><span class="s">✗ useTheme › menyimpan pilihan ke localStorage</span>
-<span class="s">     Tests: 1 failed, 23 passed</span>
+<span class="r">- const saved = localStorage.theme</span>
+<span class="g">+ const saved = typeof window !== 'undefined'</span>
+<span class="g">+   ? localStorage.getItem('theme') : null</span>
 
-<span class="g">●</span> <span class="B">Read</span><span class="s">(src/hooks/useTheme.ts)</span>
-<span class="l">  ⎿  </span><span class="k">24 baris dibaca</span>
+<span class="c">❯ 1. Ya</span>
+<span class="s">  2. Ya, dan jangan tanya lagi untuk Edit di sesi ini</span>
+<span class="s">  3. Tidak (esc)</span>
+</div>  <span class="k">↑↓ pilih · enter · 1-3</span>`;
 
-<span class="g">●</span> <span class="B">Edit</span><span class="s">(src/hooks/useTheme.ts)</span>
-<span class="l">  ⎿  </span>Diubah: <span class="g">+2</span> <span class="r">−1</span>
-<span class="r">     - const saved = localStorage.theme</span>
-<span class="g">     + const saved = typeof window !== 'undefined'</span>
-<span class="g">     +   ? localStorage.getItem('theme') : null</span>
+function at(t) {
+  const out = [header];
+  if (t >= T.send) out.push(`<span class="u"> <span class="g B">❯</span> ${PROMPT.padEnd(70)}</span>\n`);
+  if (t >= T.bash) out.push(`\n<span class="g">●</span> <span class="B">Bash</span><span class="s">(npm test)</span>`);
+  if (t >= T.fail) out.push(`<span class="l">  ⎿  </span><span class="r">✗</span> <span class="s">useTheme › menyimpan pilihan ke localStorage</span>\n<span class="s">     Tests: </span><span class="r">1 failed</span><span class="s">, 23 passed</span>`);
+  if (t >= T.read) out.push(`\n<span class="g">●</span> <span class="B">Read</span><span class="s">(src/hooks/useTheme.ts)</span>\n<span class="l">  ⎿  </span><span class="k">24 baris dibaca</span>`);
+  if (t >= T.ok) out.push(`<span class="k">  </span><span class="g">✓</span><span class="k"> diizinkan · Edit</span>`);
+  if (t >= T.edit) out.push(`\n<span class="g">●</span> <span class="B">Edit</span><span class="s">(src/hooks/useTheme.ts)</span>\n<span class="l">  ⎿  </span>Diubah: <span class="g">+2</span> <span class="r">−1</span>\n<span class="r">     - const saved = localStorage.theme</span>\n<span class="g">     + const saved = typeof window !== 'undefined'</span>\n<span class="g">     +   ? localStorage.getItem('theme') : null</span>`);
+  if (t >= T.bash2) out.push(`\n<span class="g">●</span> <span class="B">Bash</span><span class="s">(npm test)</span>`);
+  if (t >= T.pass) out.push(`<span class="l">  ⎿  </span><span class="g">✓</span> <span class="s">24 passed</span><span class="k"> (1.8s)</span>`);
+  if (t >= T.text) {
+    // Teks akhir di-stream per karakter (tag HTML dilewati utuh).
+    const n = Math.floor((t - T.text) / 18);
+    let shown = '', vis = 0;
+    for (let i = 0; i < FINAL.length && vis < n; i++) {
+      if (FINAL[i] === '<') { const j = FINAL.indexOf('>', i); shown += FINAL.slice(i, j + 1); i = j; continue; }
+      shown += FINAL[i]; vis++;
+    }
+    const open = (shown.match(/<span/g) || []).length - (shown.match(/<\/span>/g) || []).length;
+    out.push(`\n<span class="g">●</span> ${shown}${'</span>'.repeat(Math.max(0, open))}`);
+  }
+  if (t >= T.done) out.push(`\n<span class="g">✻</span> <span class="k">Selesai · 6 langkah · 38s · 21.4k→1.2k tok · cache 92%</span>`);
 
-<span class="g">●</span> Test yang gagal sudah diperbaiki: <span class="p">useTheme</span> membaca localStorage saat SSR.
-  Semua <span class="B">24 test lulus</span>.
-
-<span class="g">✻</span> <span class="k">Selesai · 6 langkah · 38s · 21.4k↑ 1.2k↓ token</span>
-
-<div class="box"><span class="g B">❯ </span><span class="k">Minta sesuatu…  (/ perintah · ! shell · \ + enter baris baru)</span>
-</div>  <span class="p">◆ </span><span class="s">claude-opus-5-5 · high</span><span class="k">  ·  </span><span class="b">git </span><span class="s">main</span><span class="y"> +1</span><span class="k">  ·  ~/proyek/landing</span>       <span class="k">? bantuan</span></pre>
-</div></body></html>
+  const running = t >= T.send && t < T.done;
+  if (running) {
+    const act = t >= T.perm && t < T.ok ? 'Menunggu izinmu' : t < T.bash ? 'Berpikir' : t < T.fail || (t >= T.bash2 && t < T.pass) ? 'Menjalankan npm test' : t < T.perm ? 'Membaca kode' : 'Menulis jawaban';
+    out.push(spinner(t, act, T.send));
+  } else out.push('');
+  if (t >= T.perm && t < T.ok) out.push(perm);
+  else {
+    const typed = t < T.send ? PROMPT.slice(0, Math.max(0, Math.floor((t - T.type) / 48))) : '';
+    out.push(input(typed, t < T.send && Math.floor(t / 400) % 2 === 0));
+    out.push(status(t >= T.edit));
+  }
+  const scr = document.getElementById('scr');
+  scr.innerHTML = out.join('\n');
+  scr.scrollTop = scr.scrollHeight;
+}
+window.at = at;
+at(window.TOTAL);
+</script>
+</body></html>

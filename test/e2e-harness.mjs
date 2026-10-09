@@ -21,10 +21,17 @@ export const routerLog = [];
 // Markdown panjang (judul, kode berbaris kosong, list) untuk menguji render bertahap.
 const MD = Array.from({ length: 12 }, (_, i) => `## Bagian ${i + 1}\n\nParagraf **tebal** dan \`kode\` nomor ${i + 1}.\n\n\`\`\`js\nconst x${i} = 1;\n\nconsole.log(x${i});\n\`\`\`\n\n- item a${i}\n- item b${i}`).join('\n\n');
 let n = 0;
-const sse = (res, events) => {
+// delay > 0: event dikirim bertahap (ms per event), mis. untuk merekam GIF dokumentasi.
+const sse = (res, events, delay = 0) => {
   res.writeHead(200, { 'content-type': 'text/event-stream' });
-  for (const e of events) res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
-  res.end();
+  const send = (e) => res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
+  if (!delay) {
+    for (const e of events) send(e);
+    return res.end();
+  }
+  let i = 0;
+  const t = setInterval(() => (i < events.length ? send(events[i++]) : (clearInterval(t), res.end())), delay);
+  res.on('close', () => clearInterval(t));
 };
 function textMsg(model, text) {
   const id = 'msg_' + ++n;
@@ -48,7 +55,7 @@ function toolMsg(model, name, input) {
     { type: 'message_stop' },
   ];
 }
-function startMockRouter(cwdRef) {
+function startMockRouter(cwdRef, reply) {
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => (body += d));
@@ -70,6 +77,9 @@ function startMockRouter(cwdRef) {
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ id: 'msg_x', type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }));
       }
+      // Skenario khusus dari pemanggil (scripts/docs-images.mjs): { events, delay } atau null.
+      const custom = reply?.({ model, msgs, lastText, cwd: cwdRef.cwd, body: j });
+      if (custom) return sse(res, custom.events, custom.delay);
       if (hasResult || lastText.includes('"type":"tool_result"')) return sse(res, textMsg(model, 'Selesai menulis file.\n\nBaris **dua**.'));
       if (/SLOW/.test(lastText)) {
         const ev = textMsg(model, 'x'.repeat(600));
@@ -96,7 +106,7 @@ function startMockRouter(cwdRef) {
 
 
 // Relay dev menyimpan state antar run: nama PC unik agar mudah dikenali (mis. di layar daftar PC).
-export async function setup({ name = 'e2e-' + Date.now().toString(36) } = {}) {
+export async function setup({ name = 'e2e-' + Date.now().toString(36), reply } = {}) {
   const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-e2e-'));
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-e2e-repo-'));
   execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -105,7 +115,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36) } = {}) {
   execFileSync('git', ['add', '-A'], { cwd: repo });
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init'], { cwd: repo });
   const ref = { cwd: repo, secrets: path.join(HOME, 'secrets.json') };
-  const router = await startMockRouter(ref);
+  const router = await startMockRouter(ref, reply);
 
   // --- registrasi PC di relay dev ---
   const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name }) })).json();

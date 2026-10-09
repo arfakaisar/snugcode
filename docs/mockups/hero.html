@@ -2,32 +2,32 @@
 <html lang="id"><head><meta charset="utf-8">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
 <style>
-  body { margin: 0; width: 1280px; height: 640px; overflow: hidden; font-family: ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #f5f4ef;
-    background: radial-gradient(760px 520px at 78% 40%, #3a2a2255 0%, transparent 70%), radial-gradient(600px 400px at 0% 100%, #2b2f4a55 0%, transparent 70%), #1f1e1d; }
-  .wrap { display: flex; height: 100%; align-items: center; padding: 0 64px; gap: 40px; }
-  .txt { flex: 1; }
-  .logo { display: flex; align-items: center; gap: 20px; }
-  .logo img { width: 92px; height: 92px; border-radius: 22px; box-shadow: 0 18px 40px -16px #000; }
-  .logo span { font: 600 68px/1 'Source Serif 4', Georgia, serif; letter-spacing: -.03em; }
-  .tag { font: 400 34px/1.25 'Source Serif 4', Georgia, serif; color: #c3c1b8; margin: 26px 0 30px; }
-  .tag b { color: #d97757; font-weight: 600; }
-  .tag span { display: block; margin-top: 12px; font: 400 19px/1.4 ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #8f8d85; }
-  .pills { display: flex; flex-wrap: wrap; gap: 10px; max-width: 560px; }
-  .pills span { font-size: 15px; padding: 9px 15px; border-radius: 99px; background: #30302e; color: #c3c1b8; }
-  .pills span.on { color: #f5f4ef; background: #d97757; }
-  .phones { display: flex; gap: 24px; align-items: center; }
-  .phone { width: 220px; border-radius: 34px; padding: 8px; background: #30302e; box-shadow: 0 34px 70px -24px #000; }
-  .phone img { display: block; width: 100%; border-radius: 27px; }
-  .phone.mid { transform: translateY(-20px); width: 244px; }
+  body { margin: 0; width: 1280px; height: 640px; overflow: hidden; position: relative; font-family: ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #f5f4ef;
+    background: radial-gradient(700px 520px at 82% 46%, #4a2f2466 0%, transparent 70%), radial-gradient(620px 420px at 0% 100%, #2b2f4a55 0%, transparent 70%), #1f1e1d; }
+  body::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(#ffffff0a 1px, transparent 1px); background-size: 22px 22px; mask-image: linear-gradient(90deg, #000 0%, transparent 55%); }
+  .txt { position: absolute; left: 72px; top: 0; bottom: 0; width: 560px; display: flex; flex-direction: column; justify-content: center; z-index: 2; }
+  .logo { display: flex; align-items: center; gap: 18px; }
+  .logo img { width: 76px; height: 76px; border-radius: 19px; box-shadow: 0 18px 40px -16px #000; }
+  .logo span { font: 600 56px/1 'Source Serif 4', Georgia, serif; letter-spacing: -.03em; }
+  h1 { font: 400 40px/1.18 'Source Serif 4', Georgia, serif; letter-spacing: -.01em; margin: 30px 0 14px; color: #f5f4ef; }
+  h1 b { color: #d97757; font-weight: 600; }
+  p { margin: 0 0 30px; font-size: 18.5px; line-height: 1.5; color: #a5a39b; max-width: 500px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 9px; max-width: 540px; }
+  .pills span { font-size: 14px; padding: 8px 14px; border-radius: 99px; background: #2c2b29; color: #c3c1b8; border: 1px solid #3a3936; }
+  .pills span.on { color: #fff; background: #d97757; border-color: #d97757; }
+  .phone { position: absolute; border-radius: 36px; padding: 8px; background: #2c2b29; border: 1px solid #45433f; box-shadow: 0 40px 80px -24px #000, 0 0 0 1px #0006; }
+  .phone img { display: block; width: 100%; border-radius: 28px; }
+  .p1 { width: 222px; left: 728px; top: 112px; }
+  .p2 { width: 246px; left: 968px; top: 62px; }
 </style></head>
-<body><div class="wrap">
+<body>
   <div class="txt">
     <div class="logo"><img src="../../web/icon.svg" alt=""><span>snugcode</span></div>
-    <div class="tag">Claude Code di <b>PC-mu</b>,<br>dikendalikan dari <b>HP</b>.<span>Sambil rebahan, di jalan, di mana saja.</span></div>
-    <div class="pills"><span class="on">E2EE relay</span><span>tanpa VPS / port</span><span>git worktree per sesi</span><span>izin 1-tap + diff</span><span>Run &amp; Preview</span><span>PWA + terminal</span></div>
+    <h1>Claude Code di <b>PC-mu</b>,<br>dikendalikan dari <b>HP</b>.</h1>
+    <p>Agen bekerja di repo dan toolchain komputermu. Kamu memberi arahan, menyetujui diff, dan menjalankan preview dari mana saja.</p>
+    <div class="pills"><span class="on">End-to-end encrypted</span><span>Tanpa VPS / port forwarding</span><span>Worktree per sesi</span><span>Izin 1-tap dengan diff</span><span>Run &amp; Preview</span><span>PWA + terminal</span></div>
   </div>
-  <div class="phones">
-    <div class="phone"><img src="../images/sessions.jpg"></div>
-    <div class="phone mid"><img src="../images/session.jpg"></div>
-  </div>
-</div></body></html>
+  <div class="phone p1"><img src="../images/sessions.jpg" alt=""></div>
+  <div class="phone p2"><img src="../images/session.jpg" alt=""></div>
+</body></html>

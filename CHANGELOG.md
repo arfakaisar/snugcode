@@ -20,6 +20,13 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   potongan lingkaran/squircle launcher Android), dan `apple-touch-icon.png` untuk iOS (iOS tidak
   memakai SVG untuk ikon layar utama). Dibuat dengan `npm run icons`.
 
+### Dokumentasi
+- README ditulis ulang untuk UI baru: GIF demo (agen, Run & Preview, git, terminal), galeri layar
+  yang mengikuti tema gelap/terang GitHub (`<picture>`), dan tanpa emoji dekoratif.
+- `npm run docs:images` merekam UI asli dengan repo contoh (`toko-kopi`) dan skenario agen di mock
+  9router (`setup({ reply })` di `test/e2e-harness.mjs`); GIF di-encode dengan `gifenc` (frame
+  berbeda saja, palet global). Terminal dianimasikan dari `docs/mockups/tui.html`.
+
 ### Perbaikan
 - Celah di bawah kotak input (PWA iOS): `innerHeight`/`visualViewport` di sana bisa kurang sebesar
   status bar, sehingga shell berakhir ±60pt sebelum dasar layar. Shell, drawer, dan sheet kini menempel
