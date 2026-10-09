@@ -449,13 +449,15 @@ async function stopAndWait() {
 
 async function cliClean() {
   const { cleanupWorkspaces } = await import('./cleaner.js');
-  const indexFile = path.join(SESSIONS_DIR, 'index.json');
-  let sessions = [];
-  try {
-    sessions = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
-  } catch {}
+  const { readSessionIndex } = await import('./config.js');
+  const idx = readSessionIndex();
+  // Daftar sesi tidak terbaca = semua worktree akan terlihat "yatim": jangan hapus apa pun.
+  if (!idx.ok) {
+    console.log(c.r('✗ sessions/index.json tidak terbaca; pembersihan dibatalkan agar worktree tidak terhapus.'));
+    return;
+  }
   console.log(c.b('Memindai workspaces PC untuk folder yatim…'));
-  const r = await cleanupWorkspaces(sessions, { minAgeMs: 0 });
+  const r = await cleanupWorkspaces(idx.list, { minAgeMs: 0, repoTtlMs: 0 });
   const wtCount = r.removedWorktrees.length;
   const repoCount = r.removedRepos.length;
   const logCount = r.removedLogs.length;

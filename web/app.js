@@ -1,6 +1,8 @@
 // pocketcode PWA — UI terminal untuk mengendalikan agen di PC dari HP.
 import * as C from '../shared/crypto.js';
 import * as M from '../shared/models.js';
+import { md as mdRender, stableCut } from './md.js';
+import { Conn, store, token } from './conn.js';
 
 // ---------- util ----------
 const $ = (s) => document.querySelector(s);
@@ -24,21 +26,6 @@ for (const method of ['replaceChildren', 'append']) {
     return orig.apply(this, kids.flat().filter((k) => k != null && k !== false));
   };
 }
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const store = {
-  get(k) {
-    try {
-      return JSON.parse(localStorage.getItem('pc.' + k));
-    } catch {
-      return null;
-    }
-  },
-  set(k, v) {
-    try {
-      v == null ? localStorage.removeItem('pc.' + k) : localStorage.setItem('pc.' + k, JSON.stringify(v));
-    } catch {}
-  },
-};
 let conn = null;
 let current = null; // { m, info, session, renderer, ... }
 let me = null;
@@ -51,12 +38,6 @@ function ago(ts) {
   if (s < 3600) return Math.floor(s / 60) + ' mnt';
   if (s < 86400) return Math.floor(s / 3600) + ' jam';
   return Math.floor(s / 86400) + ' hari';
-}
-function deviceName() {
-  const ua = navigator.userAgent;
-  const m = ua.match(/\(([^)]+)\)/);
-  const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? (m?.[1].split(';').map((s) => s.trim()).find((s) => /^(SM-|Pixel|Redmi|M\d|V\d|CPH|RMX|2\d{3})/.test(s)) || 'Android') : 'Browser';
-  return os + ' · ' + new Date().toLocaleDateString('id-ID');
 }
 async function copyText(text) {
   try {
@@ -274,78 +255,10 @@ function busyButton(btn, label) {
 }
 
 // ---------- Markdown (aman: semua teks di-escape) ----------
-function inlineMd(s) {
-  return esc(s)
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>')
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
-}
-function codeBlock(code, lang) {
-  return `<div class="code"><div class="ch"><span>${esc(lang || 'kode')}</span><button class="copybtn" data-copy>${ic('copy').outerHTML}<span>salin</span></button></div><pre><code>${esc(code)}</code></pre></div>`;
-}
-function md(src) {
-  const L = src.split('\n');
-  const out = [];
-  let i = 0;
-  const isList = (l) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
-  while (i < L.length) {
-    const l = L[i];
-    const fence = l.match(/^\s*```\s*([\w+#.-]*)/);
-    if (fence) {
-      const buf = [];
-      i++;
-      while (i < L.length && !/^\s*```/.test(L[i])) buf.push(L[i++]);
-      i++;
-      out.push(codeBlock(buf.join('\n'), fence[1]));
-      continue;
-    }
-    if (!l.trim()) {
-      i++;
-      continue;
-    }
-    if (/^#{1,6}\s/.test(l)) {
-      out.push(`<h3>${inlineMd(l.replace(/^#+\s+/, ''))}</h3>`);
-      i++;
-      continue;
-    }
-    if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|?\s*:?-{2,}/.test(L[i + 1] || '')) {
-      const row = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-      const head = row(l);
-      i += 2;
-      const rows = [];
-      while (i < L.length && /^\s*\|.*\|\s*$/.test(L[i])) rows.push(row(L[i++]));
-      out.push(`<div class="tablewrap"><table><thead><tr>${head.map((c) => `<th>${inlineMd(c)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inlineMd(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
-      continue;
-    }
-    if (isList(l)) {
-      const ordered = /^\s*\d+[.)]/.test(l);
-      const items = [];
-      while (i < L.length && (isList(L[i]) || (/^\s{2,}\S/.test(L[i]) && items.length))) {
-        if (isList(L[i])) items.push(L[i].replace(/^\s*([-*+]|\d+[.)])\s+/, ''));
-        else items[items.length - 1] += ' ' + L[i].trim();
-        i++;
-      }
-      const tag = ordered ? 'ol' : 'ul';
-      out.push(`<${tag}>${items.map((t) => `<li>${inlineMd(t)}</li>`).join('')}</${tag}>`);
-      continue;
-    }
-    if (/^>\s?/.test(l)) {
-      const q = [];
-      while (i < L.length && /^>\s?/.test(L[i])) q.push(L[i++].replace(/^>\s?/, ''));
-      out.push(`<blockquote>${inlineMd(q.join(' '))}</blockquote>`);
-      continue;
-    }
-    const para = [];
-    while (i < L.length && L[i].trim() && !/^\s*```/.test(L[i]) && !/^#{1,6}\s/.test(L[i]) && !isList(L[i]) && !/^>\s?/.test(L[i])) para.push(L[i++]);
-    out.push(`<p>${para.map(inlineMd).join('<br>')}</p>`);
-  }
-  return out.join('');
-}
+let copyIconHtml = null;
+const md = (src) => mdRender(src, { copyIcon: (copyIconHtml ??= ic('copy').outerHTML) });
 
 // ---------- API relay ----------
-const token = () => store.get('token');
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { authorization: 'Bearer ' + token(), ...(opts.headers || {}) } });
   if (r.status === 401) {
@@ -354,135 +267,6 @@ async function api(path, opts = {}) {
     throw new Error('Sesi login habis');
   }
   return r.json();
-}
-
-// ---------- Koneksi terenkripsi ke PC ----------
-class Conn {
-  constructor(machine) {
-    this.m = machine;
-    this.rpcId = 0;
-    this.pending = new Map();
-    this.channel = null;
-    this.closedByUser = false;
-    this.backoff = 1000;
-    this.handlers = {};
-    this.online = false;
-  }
-  get dev() {
-    return store.get('dev.' + this.m.id);
-  }
-  connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    clearTimeout(this.reconnectTimer);
-    const ws = new WebSocket(`${proto}//${location.host}/ws/phone?token=${encodeURIComponent(token())}&mid=${encodeURIComponent(this.m.id)}`);
-    this.ws = ws;
-    this.channel = null;
-    ws.onmessage = (ev) => this.ws === ws && this.onFrame(ev.data);
-    ws.onopen = () => {
-      this.backoff = 1000;
-      clearInterval(this.ping);
-      this.ping = setInterval(() => ws.readyState === 1 && ws.send('ping'), 25000);
-    };
-    ws.onclose = (ev) => {
-      if (this.ws !== ws) return;
-      clearInterval(this.ping);
-      this.channel = null;
-      for (const p of this.pending.values()) p.reject(new Error('Koneksi terputus'));
-      this.pending.clear();
-      this.emit('state', 'reconnecting');
-      if (this.closedByUser) return;
-      if (ev.code === 4001 && ev.reason === 'revoked') {
-        store.set('dev.' + this.m.id, null);
-        return this.emit('state', 'revoked');
-      }
-      if (ev.code === 4003) return this.emit('state', 'removed');
-      this.reconnectTimer = setTimeout(() => !this.closedByUser && this.connect(), this.backoff);
-      this.backoff = Math.min(this.backoff * 2, 15000);
-    };
-  }
-  close() {
-    this.closedByUser = true;
-    clearInterval(this.ping);
-    this.ws?.close();
-  }
-  on(ev, fn) {
-    this.handlers[ev] = fn;
-  }
-  emit(ev, ...a) {
-    this.handlers[ev]?.(...a);
-  }
-  sendRaw(obj) {
-    if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));
-  }
-  onFrame(raw) {
-    if (raw === 'pong') return;
-    const f = JSON.parse(raw);
-    switch (f.t) {
-      case 'status':
-        this.online = f.online;
-        this.emit('state', f.online ? 'online' : 'offline');
-        if (f.online) this.startAuth();
-        return;
-      case 'auth2': {
-        const r = C.authFinishPhone(C.hexToBytes(this.dev.secret), this.authState, f);
-        if (!r) return this.emit('state', 'authfail');
-        this.channel = r.channel;
-        this.sendRaw({ t: 'auth3', ...r.msg });
-        return;
-      }
-      case 'auth_err':
-        store.set('dev.' + this.m.id, null);
-        return this.emit('state', 'needpin');
-      case 'pair2': {
-        const r = C.pairFinishPhone(this.pairState, f);
-        if (!r) return this.pairDone?.({ ok: false, reason: 'pin', left: f.left });
-        this.pairSecret = r.deviceSecret;
-        this.sendRaw({ t: 'pair3', ...r.msg });
-        return;
-      }
-      case 'pair_ok':
-        store.set('dev.' + this.m.id, { deviceId: f.deviceId, secret: C.bytesToHex(this.pairSecret) });
-        this.pairDone?.({ ok: true });
-        this.startAuth();
-        return;
-      case 'pair_err':
-        return this.pairDone?.({ ok: false, reason: f.reason });
-      case 'e': {
-        const msg = this.channel.open(f);
-        if (msg.ev === 'ready') return this.emit('ready', msg.info);
-        if (msg.ev) return this.emit(msg.ev, msg);
-        const p = this.pending.get(msg.id);
-        if (!p) return;
-        this.pending.delete(msg.id);
-        msg.err ? p.reject(new Error(msg.err)) : p.resolve(msg.r);
-      }
-    }
-  }
-  startAuth() {
-    const dev = this.dev;
-    if (!dev) return this.emit('state', 'needpin');
-    const a = C.authStartPhone();
-    this.authState = a.state;
-    this.sendRaw({ t: 'auth1', deviceId: dev.deviceId, ...a.msg });
-  }
-  async pair(pin) {
-    const prs = await C.pinToPrs(pin, this.m.id);
-    const p = C.pairStartPhone(prs);
-    this.pairState = p.state;
-    return new Promise((resolve) => {
-      this.pairDone = (r) => {
-        this.pairDone = null;
-        resolve(r);
-      };
-      this.sendRaw({ t: 'pair1', ...p.msg, name: deviceName() });
-    });
-  }
-  call(m, p = {}) {
-    if (!this.channel) return Promise.reject(new Error('Belum terhubung ke PC'));
-    const id = ++this.rpcId;
-    this.ws.send(JSON.stringify(this.channel.seal({ id, m, p })));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-  }
 }
 
 // ---------- Layar: login ----------
@@ -1085,7 +869,7 @@ async function updateMachineSheet() {
     );
   } catch (e) {
     if (isOldDaemon(e)) {
-      const isWin = info?.platform === 'win32';
+      const isWin = current?.info?.platform === 'win32';
       // Windows: claude.exe milik daemon yang masih jalan mengunci file → npm diam-diam
       // melewati binary. Jalankan sebagai proses terpisah (lepas dari sesi ini) yang
       // menghentikan daemon dulu, baru memasang, lalu menyalakan daemon lagi.
@@ -1626,6 +1410,8 @@ function showSession(s) {
   current.onEvents = (msg) => {
     if (msg.sid !== s.id) return;
     for (const e of msg.es) {
+      // Event yang sudah diterima (mis. lewat attach setelah reconnect) tidak digambar dua kali.
+      if (e.seq && e.seq <= current.lastSeq) continue;
       if (e.k === 'status') setRunning(e.s === 'running');
       else if (e.k === 'proc') onProc(e);
       else if (e.k === 'procOut') current.procOut?.(e);
@@ -2020,6 +1806,9 @@ function diffLines(lines) {
 const TOOL_KIND = { Bash: ['bash', '$'], dev_start: ['bash', '▶'], dev_stop: ['bash', '■'], dev_logs: ['read', '≡'], dev_list: ['read', '≡'], preview_screenshot: ['web', '◐'], Read: ['read', '◱'], NotebookRead: ['read', '◱'], Edit: ['edit', '✎'], MultiEdit: ['edit', '✎'], NotebookEdit: ['edit', '✎'], Write: ['write', '+'], Grep: ['search', '⌕'], Glob: ['search', '⌕'], LS: ['search', '⌕'], WebFetch: ['web', '⊕'], WebSearch: ['web', '⊕'], Task: ['agent', '◈'], Agent: ['agent', '◈'], AskUserQuestion: ['agent', '?'], ExitPlanMode: ['agent', '☰'] };
 const ACTIVITY = { Bash: 'menjalankan', dev_start: 'menyalakan', dev_logs: 'membaca log', preview_screenshot: 'melihat halaman', Read: 'membaca', Edit: 'mengedit', MultiEdit: 'mengedit', Write: 'menulis', Grep: 'mencari', Glob: 'mencari', WebFetch: 'membuka', WebSearch: 'mencari web', Task: 'subagen', Agent: 'subagen', AskUserQuestion: 'bertanya', ExitPlanMode: 'menyusun rencana' };
 
+const DOM_MAX = 2500;
+const DOM_TRIM = 500;
+
 class Renderer {
   constructor(term, col, dock) {
     this.term = term;
@@ -2080,6 +1869,12 @@ class Renderer {
   append(node, animate = true) {
     if (animate && !this.quiet) node.classList.add('ev');
     this.el.append(node);
+    // Sesi sangat panjang: buang node terlama agar HP tetap ringan (hanya saat pengguna di bawah,
+    // supaya posisi baca tidak melompat).
+    if (this.el.childElementCount > DOM_MAX && this.stick && !this.quiet) {
+      for (let i = 0; i < DOM_TRIM; i++) this.el.firstElementChild?.remove();
+      this.el.prepend(h('div', { class: 'meta' }, '… riwayat lama disembunyikan (buka ulang sesi untuk melihat lebih banyak)'));
+    }
     if (!this.stick && !this.quiet) {
       this.unread++;
       this.onUnread(this.unread);
@@ -2126,15 +1921,17 @@ class Renderer {
       case 'text':
         if (!this.textEl) {
           this.textSrc = '';
-          this.textEl = this.append(h('div', { class: 'ln txt' }));
+          this.textDone = 0;
+          this.textEl = this.append(h('div', { class: 'ln txt' }, h('div'), h('div')));
         }
         this.textSrc += e.d;
         this.activity = 'menulis…';
         if (!this.mdPending) {
           this.mdPending = true;
+          const el = this.textEl;
           const flush = () => {
             this.mdPending = false;
-            if (this.textEl) this.textEl.innerHTML = md(this.textSrc);
+            if (el === this.textEl) this.renderText();
             this.scroll();
           };
           this.quiet ? flush() : requestAnimationFrame(flush);
@@ -2172,7 +1969,7 @@ class Renderer {
         return;
       case 'out':
         if (!this.outEl) this.outEl = this.append(h('pre', { class: 'shout' }));
-        this.outEl.textContent += e.d;
+        this.outEl.append(e.d);
         this.outEl.scrollTop = this.outEl.scrollHeight;
         return this.scroll();
       case 'shDone':
@@ -2183,6 +1980,19 @@ class Renderer {
       case 'error':
         return this.line('e', '✗ ' + e.d);
     }
+  }
+  // Markdown dirender bertahap: blok yang sudah selesai (dipisah baris kosong di luar blok kode)
+  // dibekukan, hanya blok terakhir yang dirender ulang per frame. Dulu seluruh teks dirender
+  // ulang setiap delta (O(n²) untuk jawaban panjang dan saat memutar ulang riwayat).
+  renderText() {
+    const src = this.textSrc;
+    const [done, tail] = this.textEl.children;
+    const cut = stableCut(src, this.textDone);
+    if (cut > this.textDone) {
+      done.insertAdjacentHTML('beforeend', md(src.slice(this.textDone, cut)));
+      this.textDone = cut;
+    }
+    tail.innerHTML = md(src.slice(this.textDone));
   }
   tool(e) {
     this.textEl = null;

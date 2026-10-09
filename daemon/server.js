@@ -7,7 +7,7 @@ import * as C from '../shared/crypto.js';
 import { loadSecrets, saveSecrets, saveConfig, IPC_PATH } from './config.js';
 import { SessionManager } from './sessions.js';
 import { listModels, probeModel } from './router.js';
-import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, TOKEN_INVALID } from './github.js';
+import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, currentBranch, TOKEN_INVALID } from './github.js';
 import { GithubAuth } from './ghauth.js';
 import { getInstallInfo, checkUpdate, performUpdate, restartDaemon } from './updater.js';
 import { startKeepAwake } from './keepawake.js';
@@ -16,6 +16,8 @@ import { capture } from './browser.js';
 import { checkPush, sendPush } from './webpush.js';
 
 const MAX_PIN_FAILS = 5;
+// Versi protokol daemon <-> klien. 2 = kanal biner + daftar `caps` di info.
+const PROTO = 2;
 
 export class Daemon {
   constructor(config, { log = console.log } = {}) {
@@ -101,7 +103,9 @@ export class Daemon {
   connect() {
     const url = this.config.relayUrl.replace(/^http/, 'ws').replace(/\/+$/, '') + '/ws/machine?token=' + encodeURIComponent(this.secrets.machineToken);
     const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
+    this.relayBin = false; // relay lama hanya meneruskan frame teks; relay baru mengirim hello { bin }
     ws.onopen = () => {
       this.backoff = 1000;
       this.log(`✓ Terhubung ke relay sebagai "${this.config.machineName}". Buka aplikasi di HP untuk mulai.`);
@@ -110,13 +114,18 @@ export class Daemon {
     };
     ws.onmessage = (ev) => {
       if (ev.data === 'pong') return;
+      if (typeof ev.data !== 'string') {
+        const { cid, payload } = C.splitCid(ev.data);
+        return this.conns.get(cid)?.onBinary(payload);
+      }
       let f;
       try {
         f = JSON.parse(ev.data);
       } catch {
         return;
       }
-      if (f.t === 'open') this.conns.set(f.cid, new PhoneConn(this, f.cid));
+      if (f.t === 'hello') this.relayBin = !!f.bin;
+      else if (f.t === 'open') this.conns.set(f.cid, new PhoneConn(this, f.cid));
       else if (f.t === 'close') this.conns.get(f.cid)?.closed();
       else if (f.t === 'd') {
         let conn = this.conns.get(f.cid);
@@ -144,6 +153,9 @@ export class Daemon {
   sendRaw(cid, obj) {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'd', cid, d: JSON.stringify(obj) }));
   }
+  sendBin(cid, bytes) {
+    if (this.ws?.readyState === 1) this.ws.send(C.frameWithCid(cid, bytes));
+  }
   kick(cid, reason) {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'x', cid, reason }));
   }
@@ -166,6 +178,184 @@ export class Daemon {
   }
 }
 
+// ---------- RPC ----------
+// Validasi input RPC: pesan dari HP/terminal tidak pernah dipercaya bentuknya.
+const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+function need(v, name, { type = 'string', max = 100_000 } = {}) {
+  if (type === 'string' && (typeof v !== 'string' || !v || v.length > max)) throw new Error(`${name} tidak valid`);
+  if (type === 'number' && !Number.isFinite(+v)) throw new Error(`${name} tidak valid`);
+  return type === 'number' ? +v : v;
+}
+const opt = (v, name, o) => (v == null || v === '' ? undefined : need(v, name, o));
+
+// Tabel metode RPC: (conn, params) -> hasil. `conn.d` = Daemon, `conn.big` = kanal biner (tanpa batas 1MB relay).
+const RPC = {
+  info: (c) => c.info(),
+  updateStatus: (c) => checkUpdate(c.d.config, c.d.secrets),
+  async update(c) {
+    // claude.exe yang masih jalan mengunci file-nya → npm gagal memasang binary baru.
+    await c.d.sessions.stopAll();
+    const res = await performUpdate(c.d.config, c.d.secrets);
+    restartDaemon(c.d, { delay: 1200 });
+    return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };
+  },
+  restart(c) {
+    restartDaemon(c.d, { delay: 1000 });
+    return { ok: true, message: 'Daemon sedang me-restart...' };
+  },
+  // `pocketcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
+  // (di Windows, process.kill tidak menjalankan handler apa pun).
+  shutdown(c) {
+    if (!c.local) throw new Error('Hanya dari terminal PC');
+    setTimeout(() => Promise.resolve(c.d.stop()).finally(() => process.exit(0)), 50);
+    return true;
+  },
+  githubStatus: (c, p) => (p.check ? c.d.github.check() : c.d.github.status()),
+  githubLogin: (c) => c.d.github.begin(),
+  models: async (c) => (await listModels(c.d.config, c.d.secrets.routerKey)).map((m) => m.id), // versi lama: daftar ID saja
+  modelsInfo: (c, p) => listModels(c.d.config, c.d.secrets.routerKey, { fresh: !!p.fresh }),
+  probeModel: (c, p) => probeModel(c.d.config, c.d.secrets.routerKey, need(p.model, 'model', { max: 200 })),
+  setModel(c, p) {
+    if (p.model) c.d.config.model = need(p.model, 'model', { max: 200 });
+    if (p.smallModel) c.d.config.smallModel = need(p.smallModel, 'smallModel', { max: 200 });
+    saveConfig(c.d.config);
+    return c.info();
+  },
+  setSessionModel(c, p) {
+    const s = c.d.sessions.get(p.id);
+    if (s.status === 'running') throw new Error('Tunggu agen selesai (atau Stop) sebelum ganti model.');
+    const model = need(p.model, 'model', { max: 200 });
+    if (s.meta.model !== model) {
+      s.emitEvent({ k: 'note', d: `◆ model: ${s.meta.model} → ${model}` });
+      s.meta.model = model;
+      c.d.sessions.saveIndex();
+    }
+    return s.summary();
+  },
+  repos(c, p) {
+    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `pocketcode setup` di PC.');
+    return listRepos(c.d.secrets.githubToken, opt(p.q, 'q', { max: 200 }), c.d.config.githubLogin);
+  },
+  async branches(c, p) {
+    if (!REPO_RE.test(p.repo || '')) throw new Error('repo tidak valid');
+    const list = await gh(c.d.secrets.githubToken, 'GET', `/repos/${p.repo}/branches?per_page=100`);
+    return list.map((b) => b.name);
+  },
+  sessions: (c) => c.d.sessions.list(),
+  create: async (c, p) => (await c.d.sessions.create(p)).summary(),
+  attach(c, p) {
+    const s = c.d.sessions.get(p.id);
+    c.subscribe(s);
+    // Frame relay teks dibatasi ~1MB: kirim riwayat terbaru saja bila terlalu besar.
+    // Kanal biner memecah pesan besar, jadi batasnya jauh lebih longgar.
+    const since = +p.since || 0;
+    const all = s.since(since);
+    const limit = c.big ? 4_000_000 : 500_000;
+    let i = all.length;
+    for (let size = 0; i > 0 && size < limit; i--) size += JSON.stringify(all[i - 1]).length;
+    const events = i ? all.slice(i) : all;
+    return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo() };
+  },
+  detach(c) {
+    c.unsubscribe();
+    return true;
+  },
+  async send(c, p) {
+    await c.d.sessions.get(p.id).send(String(p.text || ''), p.images);
+    return true;
+  },
+  async interrupt(c, p) {
+    await c.d.sessions.get(p.id).interrupt();
+    return true;
+  },
+  perm: (c, p) => c.d.sessions.get(p.id).answerPermission(p.pid, p.decision, { answers: p.answers, message: p.message }),
+  plan(c, p) {
+    const s = c.d.sessions.get(p.id);
+    s.setPlan(p.on);
+    return s.summary();
+  },
+  rewind: (c, p) => c.d.sessions.get(p.id).rewindTo(need(p.seq, 'seq', { type: 'number' })),
+  // ---------- proses latar belakang & preview ----------
+  project(c, p) {
+    const s = c.d.sessions.get(p.id);
+    return { ...detectProject(s.meta.cwd), procs: s.procs.list(), preview: s.previewInfo() };
+  },
+  runDev: (c, p) => c.d.sessions.get(p.id).runDev(opt(p.cmd, 'cmd')),
+  procStart: (c, p) => c.d.sessions.get(p.id).procs.start(need(p.cmd, 'cmd'), opt(p.name, 'name', { max: 64 })),
+  procStop(c, p) {
+    c.d.sessions.get(p.id).procs.stop(p.name);
+    return true;
+  },
+  procLogs: (c, p) => c.d.sessions.get(p.id).procs.logs(p.name, 64 * 1024),
+  preview: (c, p) => c.d.sessions.get(p.id).preview(p.name),
+  previewClose(c, p) {
+    c.d.sessions.get(p.id).closeTunnel();
+    return true;
+  },
+  async screenshot(c, p) {
+    const s = c.d.sessions.get(p.id);
+    const port = s.procs.list().find((x) => x.name === p.name)?.port;
+    if (!port) throw new Error('Port dev server belum terdeteksi');
+    const clamp = (v, def) => Math.min(1600, Math.max(240, +v || def));
+    const r = await capture(`http://localhost:${port}${String(p.path || '/').replace(/^(?!\/)/, '/')}`, { width: clamp(p.width, 390), height: clamp(p.height, 844), cfg: c.d.config });
+    if (r.data.length > (c.big ? 6_000_000 : 450_000)) throw new Error('Screenshot terlalu besar untuk dikirim; perkecil viewport.');
+    return { data: r.data, mime: r.mime, title: r.title, logs: r.logs };
+  },
+  envSave(c, p) {
+    const s = c.d.sessions.get(p.id);
+    if (s.meta.local) throw new Error('Sesi terminal memakai folder aslinya; .env sudah ada di sana.');
+    return saveEnv(s.meta.repo, s.meta.cwd);
+  },
+  // ---------- Web Push (HP) ----------
+  pushSub(c, p) {
+    const dev = c.d.secrets.devices[c.deviceId];
+    if (!dev) throw new Error('Hanya untuk HP yang dipasangkan');
+    if (p.sub) dev.push = checkPush(p);
+    else delete dev.push;
+    c.d.saveSecrets();
+    return true;
+  },
+  visible(c, p) {
+    c.visible = !!p.on;
+    return true;
+  },
+  auto(c, p) {
+    const s = c.d.sessions.get(p.id);
+    s.meta.auto = !!p.on;
+    c.d.sessions.saveIndex();
+    return s.summary();
+  },
+  async delete(c, p) {
+    await c.d.sessions.remove(p.id);
+    return true;
+  },
+  // Dipicu pengguna: clone dasar repo yang tidak dipakai sesi mana pun ikut dihapus sekarang.
+  cleanup: (c) => c.d.sessions.cleanupOrphans({ minAgeMs: 0, repoTtlMs: 0 }),
+  status: (c, p) => gitStatus(c.d.sessions.get(p.id).meta.cwd),
+  diff: (c, p) => gitDiff(c.d.sessions.get(p.id).meta.cwd, { limit: c.big ? 2 * 1024 * 1024 : 400 * 1024 }),
+  commit(c, p) {
+    if (!p.message?.trim()) throw new Error('Pesan commit kosong');
+    const cfg = c.d.config;
+    const identity = cfg.githubLogin ? { login: cfg.githubLogin, id: cfg.githubId } : null;
+    return gitCommit(c.d.sessions.get(p.id).meta.cwd, String(p.message).trim(), identity);
+  },
+  async push(c, p) {
+    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub.');
+    const s = c.d.sessions.get(p.id);
+    const branch = await gitPush(s.meta.cwd, c.d.secrets.githubToken);
+    s.emitEvent({ k: 'note', d: `⇡ push ke origin/${branch}` });
+    return branch;
+  },
+  async pr(c, p) {
+    const s = c.d.sessions.get(p.id);
+    // Sesi lokal bisa pindah branch dari terminal: pakai branch yang sedang aktif (dibaca tanpa git).
+    const head = currentBranch(s.meta.cwd) || (await gitStatus(s.meta.cwd)).branch;
+    const pr = await createPR(c.d.secrets.githubToken, s.meta.repo, { head, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
+    s.emitEvent({ k: 'note', d: `PR #${pr.number} dibuat: ${pr.url}` });
+    return pr;
+  },
+};
+
 // RPC bersama untuk HP (lewat relay) dan terminal (lokal).
 class RpcConn {
   constructor(daemon) {
@@ -173,6 +363,7 @@ class RpcConn {
     this.ready = false;
     this.sub = null; // { session, listener }
     this.queue = [];
+    this.queueSid = null;
     this.visible = true; // HP mengabarkan saat PWA ke latar belakang (untuk Web Push)
   }
 
@@ -180,13 +371,17 @@ class RpcConn {
     throw new Error('not implemented');
   }
 
+  // Koneksi sudah putus: sisa antrean event tidak perlu dikirim.
   closed() {
+    this.queue = [];
     this.unsubscribe();
   }
 
-  async handleRpc({ id, m, p = {} }) {
+  async handleRpc({ id, m, p }) {
     try {
-      const r = await this.call(m, p);
+      const fn = Object.hasOwn(RPC, m) ? RPC[m] : null;
+      if (!fn) throw new Error('Metode tidak dikenal: ' + m);
+      const r = await fn(this, p && typeof p === 'object' ? p : {});
       this.push({ id, r: r ?? null });
     } catch (e) {
       if (e?.message === TOKEN_INVALID) this.d.github.markInvalid();
@@ -207,208 +402,40 @@ class RpcConn {
       version: this.d.updaterMeta?.version || '0.1.0',
       commit: this.d.updaterMeta?.commit || 'main',
       preventSleep: this.d.keepAwake?.active?.() ?? false,
+      // Fitur protokol yang didukung daemon ini: klien memeriksa ini, bukan menebak dari pesan error.
+      proto: PROTO,
+      caps: Object.keys(RPC),
     };
+  }
+
+  subscribe(s) {
+    this.unsubscribe();
+    const listener = (e) => this.queueEvent(s.id, e);
+    s.on('event', listener);
+    this.sub = { session: s, listener };
   }
 
   unsubscribe() {
     if (this.sub) this.sub.session.off('event', this.sub.listener);
     this.sub = null;
+    this.flushEvents();
   }
 
-  async call(m, p) {
-    const d = this.d;
-    const sec = d.secrets;
-    const S = d.sessions;
-    switch (m) {
-      case 'info':
-        return this.info();
-      case 'updateStatus':
-        return checkUpdate(d.config, sec);
-      case 'update': {
-        // claude.exe yang masih jalan mengunci file-nya → npm gagal memasang binary baru.
-        await S.stopAll();
-        const res = await performUpdate(d.config, sec);
-        restartDaemon(d, { delay: 1200 });
-        return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };
-      }
-      case 'restart': {
-        restartDaemon(d, { delay: 1000 });
-        return { ok: true, message: 'Daemon sedang me-restart...' };
-      }
-      // `pocketcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
-      // (di Windows, process.kill tidak menjalankan handler apa pun).
-      case 'shutdown':
-        if (!(this instanceof LocalConn)) throw new Error('Hanya dari terminal PC');
-        setTimeout(() => Promise.resolve(d.stop()).finally(() => process.exit(0)), 50);
-        return true;
-      case 'githubStatus':
-        return p.check ? d.github.check() : d.github.status();
-      case 'githubLogin':
-        return d.github.begin();
-      case 'models': // versi lama: daftar ID saja
-        return (await listModels(d.config, sec.routerKey)).map((m) => m.id);
-      case 'modelsInfo':
-        return listModels(d.config, sec.routerKey, { fresh: !!p.fresh });
-      case 'probeModel':
-        if (typeof p.model !== 'string' || !p.model) throw new Error('model kosong');
-        return probeModel(d.config, sec.routerKey, p.model);
-      case 'setModel':
-        if (p.model) d.config.model = p.model;
-        if (p.smallModel) d.config.smallModel = p.smallModel;
-        saveConfig(d.config);
-        return this.info();
-      case 'setSessionModel': {
-        const s = S.get(p.id);
-        if (s.status === 'running') throw new Error('Tunggu agen selesai (atau Stop) sebelum ganti model.');
-        if (typeof p.model !== 'string' || !p.model) throw new Error('model kosong');
-        if (s.meta.model !== p.model) {
-          s.emitEvent({ k: 'note', d: `◆ model: ${s.meta.model} → ${p.model}` });
-          s.meta.model = p.model;
-          S.saveIndex();
-        }
-        return s.summary();
-      }
-      case 'repos':
-        if (!sec.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `pocketcode setup` di PC.');
-        return listRepos(sec.githubToken, p.q);
-      case 'branches': {
-        if (!/^[\w.-]+\/[\w.-]+$/.test(p.repo || '')) throw new Error('repo tidak valid');
-        const list = await gh(sec.githubToken, 'GET', `/repos/${p.repo}/branches?per_page=100`);
-        return list.map((b) => b.name);
-      }
-      case 'sessions':
-        return S.list();
-      case 'create': {
-        const s = await S.create(p);
-        return s.summary();
-      }
-      case 'attach': {
-        const s = S.get(p.id);
-        this.unsubscribe();
-        const listener = (e) => this.queueEvent(s.id, e);
-        s.on('event', listener);
-        this.sub = { session: s, listener };
-        // Frame relay dibatasi ~1MB: kirim riwayat terbaru saja bila terlalu besar.
-        const since = p.since || 0;
-        const all = s.since(since);
-        const events = [];
-        let size = 0;
-        for (let i = all.length - 1; i >= 0 && size < 500_000; i--) {
-          size += JSON.stringify(all[i]).length;
-          events.unshift(all[i]);
-        }
-        return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo() };
-      }
-      case 'detach':
-        this.unsubscribe();
-        return true;
-      case 'send':
-        await S.get(p.id).send(String(p.text || ''), p.images);
-        return true;
-      case 'interrupt':
-        await S.get(p.id).interrupt();
-        return true;
-      case 'perm':
-        return S.get(p.id).answerPermission(p.pid, p.decision, { answers: p.answers, message: p.message });
-      case 'plan':
-        S.get(p.id).setPlan(p.on);
-        return S.get(p.id).summary();
-      case 'rewind':
-        return S.get(p.id).rewindTo(+p.seq);
-      // ---------- proses latar belakang & preview ----------
-      case 'project': {
-        const s = S.get(p.id);
-        return { ...detectProject(s.meta.cwd), procs: s.procs.list(), preview: s.previewInfo() };
-      }
-      case 'runDev':
-        return S.get(p.id).runDev(p.cmd);
-      case 'procStart':
-        return S.get(p.id).procs.start(p.cmd, p.name || undefined);
-      case 'procStop':
-        S.get(p.id).procs.stop(p.name);
-        return true;
-      case 'procLogs':
-        return S.get(p.id).procs.logs(p.name, 64 * 1024);
-      case 'preview':
-        return S.get(p.id).preview(p.name);
-      case 'previewClose':
-        S.get(p.id).closeTunnel();
-        return true;
-      case 'screenshot': {
-        const s = S.get(p.id);
-        const port = s.procs.list().find((x) => x.name === p.name)?.port;
-        if (!port) throw new Error('Port dev server belum terdeteksi');
-        const clamp = (v, def) => Math.min(1600, Math.max(240, +v || def));
-        const r = await capture(`http://localhost:${port}${String(p.path || '/').replace(/^(?!\/)/, '/')}`, { width: clamp(p.width, 390), height: clamp(p.height, 844), cfg: d.config });
-        if (r.data.length > 450_000) throw new Error('Screenshot terlalu besar untuk dikirim; perkecil viewport.');
-        return { data: r.data, mime: r.mime, title: r.title, logs: r.logs };
-      }
-      case 'envSave': {
-        const s = S.get(p.id);
-        if (s.meta.local) throw new Error('Sesi terminal memakai folder aslinya; .env sudah ada di sana.');
-        return saveEnv(s.meta.repo, s.meta.cwd);
-      }
-      // ---------- Web Push (HP) ----------
-      case 'pushSub': {
-        const dev = sec.devices[this.deviceId];
-        if (!dev) throw new Error('Hanya untuk HP yang dipasangkan');
-        if (p.sub) dev.push = checkPush(p);
-        else delete dev.push;
-        d.saveSecrets();
-        return true;
-      }
-      case 'visible':
-        this.visible = !!p.on;
-        return true;
-      case 'auto': {
-        const s = S.get(p.id);
-        s.meta.auto = !!p.on;
-        S.saveIndex();
-        return s.summary();
-      }
-      case 'delete':
-        await S.remove(p.id);
-        return true;
-      case 'cleanup':
-        return S.cleanupOrphans({ minAgeMs: 0 });
-      case 'status':
-        return gitStatus(S.get(p.id).meta.cwd);
-      case 'diff':
-        return gitDiff(S.get(p.id).meta.cwd);
-      case 'commit': {
-        if (!p.message?.trim()) throw new Error('Pesan commit kosong');
-        const identity = d.config.githubLogin ? { login: d.config.githubLogin, id: d.config.githubId } : null;
-        return gitCommit(S.get(p.id).meta.cwd, p.message.trim(), identity);
-      }
-      case 'push': {
-        if (!sec.githubToken) throw new Error('PC ini belum login GitHub.');
-        const s = S.get(p.id);
-        const branch = await gitPush(s.meta.cwd, sec.githubToken);
-        s.emitEvent({ k: 'note', d: `⇡ push ke origin/${branch}` });
-        return branch;
-      }
-      case 'pr': {
-        const s = S.get(p.id);
-        // Sesi lokal bisa pindah branch dari terminal: pakai branch yang sedang aktif.
-        const head = (await gitStatus(s.meta.cwd)).branch;
-        const pr = await createPR(sec.githubToken, s.meta.repo, { head, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
-        s.emitEvent({ k: 'note', d: `PR #${pr.number} dibuat: ${pr.url}` });
-        return pr;
-      }
-      default:
-        throw new Error('Metode tidak dikenal: ' + m);
-    }
-  }
-
-  // Event digabung tiap ~60ms jadi satu frame.
+  // Event digabung tiap ~60ms jadi satu frame. Antrean hanya berisi event dari satu sesi:
+  // pindah sesi mengirim sisa antrean lama lebih dulu (dulu event sesi baru bisa berlabel sesi lama).
   queueEvent(sid, e) {
+    if (this.queueSid !== sid) this.flushEvents();
+    this.queueSid = sid;
     this.queue.push(e);
-    if (!this.flushTimer)
-      this.flushTimer = setTimeout(() => {
-        this.flushTimer = null;
-        const es = this.queue.splice(0);
-        this.push({ ev: 'events', sid, es });
-      }, 60);
+    this.flushTimer ??= setTimeout(() => this.flushEvents(), 60);
+  }
+
+  flushEvents() {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    if (!this.queue.length) return;
+    const es = this.queue.splice(0);
+    this.push({ ev: 'events', sid: this.queueSid, es });
   }
 }
 
@@ -416,6 +443,7 @@ class RpcConn {
 class LocalConn extends RpcConn {
   constructor(daemon, sock) {
     super(daemon);
+    this.local = true;
     this.sock = sock;
     let buf = '';
     sock.setEncoding('utf8');
@@ -480,8 +508,26 @@ class PhoneConn extends RpcConn {
     this.d.sendRaw(this.cid, obj);
   }
 
+  // Kanal biner bila HP & relay sama-sama mendukungnya (disepakati saat auth); selain itu frame teks.
   push(msg) {
-    if (this.channel) this.send(this.channel.seal(msg));
+    if (!this.channel) return;
+    if (this.bin) for (const f of this.channel.sealBin(msg)) this.d.sendBin(this.cid, f);
+    else this.send(this.channel.seal(msg));
+  }
+
+  get big() {
+    return !!this.bin;
+  }
+
+  onBinary(payload) {
+    if (!this.channel) return;
+    try {
+      const msg = this.channel.openBin(payload);
+      if (msg) this.onRpc(msg);
+    } catch (e) {
+      this.d.log('! pesan ditolak: ' + e.message);
+      this.d.kick(this.cid, 'protocol');
+    }
   }
 
   onMessage(raw) {
@@ -537,17 +583,18 @@ class PhoneConn extends RpcConn {
     const dev = this.d.secrets.devices[m.deviceId];
     if (!dev) return this.send({ t: 'auth_err', reason: 'unknown_device' });
     const r = C.authRespondMachine(C.hexToBytes(dev.secret), m);
-    this.authState = { ...r.state, deviceId: m.deviceId };
-    this.send({ t: 'auth2', ...r.msg });
+    this.authState = { ...r.state, deviceId: m.deviceId, bin: !!m.bin && this.d.relayBin };
+    this.send({ t: 'auth2', ...r.msg, ...(this.authState.bin ? { bin: 1 } : {}) });
   }
 
   auth3(m) {
     if (!this.authState) return;
     const ch = C.authVerifyMachine(this.authState, m);
-    const deviceId = this.authState.deviceId;
+    const { deviceId, bin } = this.authState;
     this.authState = null;
     if (!ch) return this.send({ t: 'auth_err', reason: 'bad_mac' });
     this.channel = ch;
+    this.bin = bin;
     this.ready = true;
     this.deviceId = deviceId;
     const dev = this.d.secrets.devices[deviceId];

@@ -76,12 +76,15 @@ export function gitCredentialToken() {
   });
 }
 
-export async function listRepos(token, q) {
+// `login` (dari config) menghemat satu panggilan /user; tiga request lainnya berjalan paralel.
+export async function listRepos(token, q, login) {
   if (!token) return [];
   if (q) {
-    const me = await gh(token, 'GET', '/user');
-    const r = await gh(token, 'GET', `/search/repositories?q=${encodeURIComponent(q + ' user:' + me.login + ' fork:true')}&per_page=30`);
-    const r2 = await gh(token, 'GET', `/user/repos?per_page=100&sort=pushed`);
+    const user = login || (await gh(token, 'GET', '/user')).login;
+    const [r, r2] = await Promise.all([
+      gh(token, 'GET', `/search/repositories?q=${encodeURIComponent(q + ' user:' + user + ' fork:true')}&per_page=30`),
+      gh(token, 'GET', `/user/repos?per_page=100&sort=pushed`),
+    ]);
     const ql = q.toLowerCase();
     const seen = new Set();
     return [...r2.filter((x) => x.full_name.toLowerCase().includes(ql)), ...r.items]
@@ -120,11 +123,28 @@ export function git(cwd, args, token, opts = {}) {
 
 const safe = (s) => s.replace(/[^A-Za-z0-9._-]/g, '_');
 
+// Nama folder clone di ~/.pocketcode/workspaces untuk "owner/nama" (dipakai juga oleh pembersih).
+export const repoDirName = (full) => {
+  const [owner = '', name = ''] = String(full).split('/');
+  return safe(owner) + '__' + safe(name);
+};
+
+// Penanda kapan clone dasar terakhir dipakai: clone yang tidak dipakai sesi mana pun tetap
+// disimpan beberapa hari (sesi baru tidak perlu clone ulang), baru kemudian dibersihkan.
+export const LAST_USED = '.last-used';
+export function touchRepo(repoDir) {
+  try {
+    const f = path.join(repoDir, LAST_USED);
+    const now = new Date();
+    if (fs.existsSync(f)) fs.utimesSync(f, now, now);
+    else fs.writeFileSync(f, '');
+  } catch {}
+}
+
 // Clone dasar per repo (tanpa checkout) + git worktree per sesi,
 // supaya beberapa sesi di repo yang sama tidak saling bertabrakan.
 export async function prepareWorktree(token, full, { base, branch, sessionId }) {
-  const [owner, name] = full.split('/');
-  const repoDir = path.join(WORKSPACES, safe(owner) + '__' + safe(name));
+  const repoDir = path.join(WORKSPACES, repoDirName(full));
   const baseDir = path.join(repoDir, '_base');
   if (!fs.existsSync(path.join(baseDir, '.git'))) {
     fs.mkdirSync(repoDir, { recursive: true });
@@ -144,8 +164,8 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
       if (Date.now() - stat.mtimeMs > 30000) fs.rmSync(lockFile, { force: true });
     }
   } catch {}
-  await git(baseDir, ['worktree', 'prune']).catch(() => {});
-  await git(baseDir, ['fetch', '--prune', 'origin'], token);
+  touchRepo(repoDir);
+  await Promise.all([git(baseDir, ['worktree', 'prune']).catch(() => {}), git(baseDir, ['fetch', '--prune', 'origin'], token)]);
   if (!base) base = (await git(baseDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], token).catch(() => 'origin/main')).trim().replace(/^origin\//, '');
 
   // Branch yang sedang dibuka sesi lain tidak bisa dibuka dua kali.
@@ -160,8 +180,9 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
   }
 
   const wt = path.join(repoDir, 's-' + sessionId);
-  const hasRemote = !!(await git(baseDir, ['ls-remote', '--heads', 'origin', branch], token)).trim();
-  const hasLocal = await git(baseDir, ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch]).then(() => true, () => false);
+  // Ref remote baru saja disegarkan oleh `fetch --prune`: cukup cek lokal, tanpa ls-remote ke jaringan.
+  const hasRef = (ref) => git(baseDir, ['show-ref', '--verify', '--quiet', ref]).then(() => true, () => false);
+  const [hasRemote, hasLocal] = await Promise.all([hasRef('refs/remotes/origin/' + branch), hasRef('refs/heads/' + branch)]);
   if (hasLocal) {
     // Branch lokal (mis. dari sesi lama yang belum di-push): jangan ditimpa.
     await git(baseDir, ['worktree', 'add', wt, branch], token);
@@ -204,6 +225,7 @@ export function currentBranch(cwd) {
 
 export async function removeWorktree(cwd) {
   const baseDir = path.join(path.dirname(cwd), '_base');
+  touchRepo(path.dirname(cwd));
   try {
     if (fs.existsSync(baseDir)) {
       await git(baseDir, ['worktree', 'remove', '--force', cwd]).catch(() => {});
@@ -213,32 +235,56 @@ export async function removeWorktree(cwd) {
   safeRm(cwd);
 }
 
-export async function gitStatus(cwd, token) {
-  const branch = (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-  const porcelain = await git(cwd, ['status', '--porcelain=v1', '-uall']);
-  const files = porcelain
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => ({ st: l.slice(0, 2), path: l.slice(3) }));
+// Satu `git status --porcelain=v2 --branch` memberi branch, upstream, ahead/behind, dan daftar
+// file sekaligus (dulu 4 proses berurutan); log diambil paralel.
+export function parseStatusV2(out) {
+  let branch = 'HEAD';
   let ahead = null;
   let behind = null;
-  try {
-    const ab = (await git(cwd, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).trim().split(/\s+/);
-    ahead = +ab[0];
-    behind = +ab[1];
-  } catch {
-    // Belum ada upstream: hitung commit yang belum ada di remote mana pun.
-    ahead = +(await git(cwd, ['rev-list', '--count', 'HEAD', '--not', '--remotes']).catch(() => '0')).trim();
+  let upstream = false;
+  const files = [];
+  for (const l of out.split('\n')) {
+    if (!l) continue;
+    if (l.startsWith('# ')) {
+      const [, key, ...rest] = l.split(' ');
+      if (key === 'branch.head') branch = rest[0] === '(detached)' ? 'HEAD' : rest.join(' ');
+      else if (key === 'branch.upstream') upstream = true;
+      else if (key === 'branch.ab') {
+        ahead = Math.abs(+rest[0]);
+        behind = Math.abs(+rest[1]);
+      }
+      continue;
+    }
+    const xy = (s) => s.replace(/\./g, ' ');
+    if (l[0] === '?') files.push({ st: '??', path: l.slice(2) });
+    else if (l[0] === '1') files.push({ st: xy(l.slice(2, 4)), path: l.split(' ').slice(8).join(' ') });
+    else if (l[0] === '2') {
+      const [p, orig] = l.split(' ').slice(9).join(' ').split('\t');
+      files.push({ st: xy(l.slice(2, 4)), path: orig ? `${orig} -> ${p}` : p });
+    } else if (l[0] === 'u') files.push({ st: xy(l.slice(2, 4)), path: l.split(' ').slice(10).join(' ') });
   }
-  const log = (await git(cwd, ['log', '-n', '8', '--pretty=format:%h %s'])).split('\n').filter(Boolean);
-  return { branch, files, ahead, behind, log, hasUpstream: behind !== null };
+  return { branch, files, ahead, behind, upstream };
 }
 
-export async function gitDiff(cwd) {
+export async function gitStatus(cwd) {
+  const [st, log] = await Promise.all([
+    git(cwd, ['status', '--porcelain=v2', '--branch', '-uall']).then(parseStatusV2),
+    git(cwd, ['log', '-n', '8', '--pretty=format:%h %s']).catch(() => ''),
+  ]);
+  let { ahead, behind } = st;
+  if (!st.upstream || ahead === null) {
+    // Belum ada upstream: hitung commit yang belum ada di remote mana pun.
+    ahead = +(await git(cwd, ['rev-list', '--count', 'HEAD', '--not', '--remotes']).catch(() => '0')).trim();
+    behind = null;
+  }
+  return { branch: st.branch, files: st.files, ahead, behind, log: log.split('\n').filter(Boolean), hasUpstream: behind !== null };
+}
+
+export async function gitDiff(cwd, { limit = 400 * 1024 } = {}) {
   // intent-to-add agar file baru ikut muncul di diff.
   await git(cwd, ['add', '-A', '-N']).catch(() => {});
   let diff = await git(cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff']);
-  const LIMIT = 400 * 1024;
+  const LIMIT = limit;
   let truncated = false;
   if (diff.length > LIMIT) {
     diff = diff.slice(0, LIMIT);

@@ -3,6 +3,62 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — Optimasi menyeluruh: keamanan data, latensi agen, protokol biner
+
+### Keamanan data & kredensial
+- **`sessions/index.json` ditulis atomik** (tmp + rename). Dulu crash/disk penuh saat menulis bisa
+  meninggalkan file terpotong → daftar sesi kosong → pembersih otomatis menghapus semua worktree
+  (termasuk kerja yang belum di-push). Index yang rusak sekarang disimpan sebagai
+  `index.json.broken-*` dan sesi **dipulihkan dari worktree di disk**. `pocketcode clean` menolak
+  berjalan bila index tidak terbaca.
+- **Race pembersih vs sesi baru**: repo yang sedang di-clone/disiapkan untuk sesi baru tidak lagi
+  bisa dihapus oleh pembersih (hapus sesi lain / tombol bersihkan) di tengah jalan.
+- **Key 9router tidak lagi ada di env proses claude**: proxy lokal memegang key asli dan hanya
+  menerima token lokal acak. `echo $ANTHROPIC_AUTH_TOKEN` dari Bash agen tidak membocorkan key.
+- **Izin diperketat**: `~/.pocketcode` (kecuali worktree & plans) selalu ditolak untuk tool file;
+  Read/Glob/Grep di luar worktree dan `WebFetch` meminta izin; screenshot URL non-localhost/`file:`
+  meminta izin; perintah yang menyebut `secrets.json` tidak bisa "selalu diizinkan".
+- **Event tidak hilang saat pindah sesi**: antrean event per koneksi dikirim dulu sebelum
+  berganti sesi (dulu event sesi baru bisa berlabel sesi lama lalu dibuang HP).
+
+### Latensi agen
+- **Proses `claude` tetap hidup antar prompt** (streaming input Agent SDK): prompt berikutnya tidak
+  lagi spawn proses + resume transcript. Di uji e2e: prompt kedua 65 ms vs 680–1100 ms. Proses
+  ditutup setelah 5 menit menganggur, maksimal 3 proses menganggur, dan otomatis dibuat ulang
+  (dengan resume) saat model/effort/URL berubah. Stop tetap instan.
+- **Checkpoint paralel**: snapshot worktree berjalan bersamaan dengan start-up agen; tool yang
+  mengubah file menunggu checkpoint selesai, jadi rewind tetap akurat.
+- **Git lebih sedikit proses**: `gitStatus` 1× `status --porcelain=v2 --branch` + log paralel
+  (dulu 4 proses berurutan); sesi baru tanpa `ls-remote` ekstra; clone dasar repo disimpan
+  3 hari setelah sesi terakhirnya dihapus (sesi baru tidak clone ulang dari nol).
+- **Screenshot**: browser headless dipakai ulang (context terisolasi per screenshot): ~0,4 s vs ~2 s.
+  Chrome sebagai root (Linux server/WSL) kini jalan (`--no-sandbox` hanya untuk root).
+- **Preview**: ganti port dev server tidak membuat tunnel baru; URL & cookie HP tetap berlaku.
+- **Log proses** memakai ring buffer (tidak menyalin ulang 256KB per chunk output).
+- **Riwayat sesi**: ditulis lewat write stream; saat dibuka hanya 8MB terakhir file `.jsonl` yang
+  dibaca; riwayat sesi yang 30 menit tidak dibuka dilepas dari memori.
+- **Repo search GitHub**: tanpa panggilan `/user` ekstra, request berjalan paralel.
+
+### Protokol & relay (proto 2)
+- **Kanal biner** HP ↔ relay ↔ PC: frame `[versi][nonce][ciphertext]` tanpa base64 & JSON
+  berlapis (±25–35% lebih kecil, relay tidak mem-parse JSON), dan pesan besar dipecah per 256KB,
+  jadi batas 1MB relay tidak lagi memotong riwayat (sampai 4MB), diff (2MB), dan screenshot.
+  Dinegosiasikan saat auth; HP/daemon/relay versi lama tetap memakai frame teks.
+- `info` memuat `proto` dan `caps` (daftar metode RPC) untuk deteksi fitur.
+- RPC daemon kini tabel handler dengan validasi input, bukan satu `switch` 180 baris.
+
+### PWA & TUI
+- Markdown dirender **bertahap** saat streaming (dulu seluruh teks dirender ulang tiap delta, O(n²));
+  output shell ditambah sebagai node teks; DOM sesi sangat panjang dipangkas; event duplikat
+  (setelah reconnect) diabaikan berdasarkan `seq`.
+- Service worker **stale-while-revalidate**: PWA terbuka instan walau sinyal lemah.
+- `web/app.js` dipecah: `web/conn.js` (koneksi E2EE + RPC) dan `web/md.js` (markdown);
+  `daemon/tui.js` dipecah: `daemon/term.js` (warna, wrap, markdown ANSI).
+- CI GitHub Actions: cek sintaks, unit test (Linux/Windows/macOS), dan bundle PWA.
+
+> **Urutan deploy**: kanal biner aktif bila relay sudah di-deploy ulang (`npm run deploy`) dan
+> daemon diperbarui. Semua kombinasi versi lama/baru tetap kompatibel (fallback ke frame teks).
+
 ## 2026-10-09 — pnpm/yarn tanpa instalasi global (`daemon/toolchain.js`)
 - **Bug**: Run di repo pnpm/yarn gagal dengan `pnpm : The term 'pnpm' is not recognized` bila
   PC tidak punya pnpm. Sejak Node 25, corepack juga tidak lagi ikut terpasang dengan Node.

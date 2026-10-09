@@ -9,6 +9,8 @@ const fail = (t) => ({ content: [{ type: 'text', text: t }], isError: true });
 const tail = (s, n = 6000) => (s.length > n ? '…' + s.slice(-n) : s) || '(belum ada output)';
 
 export const DEV_START = 'mcp__pocketcode__dev_start';
+// Tanpa izin hanya untuk URL localhost (dev server); URL lain/`file:` ditanyakan (lihat sessions.js).
+export const SCREENSHOT = 'mcp__pocketcode__preview_screenshot';
 // Tool yang tidak menjalankan perintah baru: tidak perlu izin.
 export const SAFE_DEV_TOOLS = ['dev_stop', 'dev_logs', 'dev_list', 'preview_screenshot'].map((n) => 'mcp__pocketcode__' + n);
 

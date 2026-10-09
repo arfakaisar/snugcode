@@ -5,7 +5,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSPACES, SESSIONS_DIR } from './config.js';
-import { git } from './github.js';
+import { git, repoDirName, LAST_USED } from './github.js';
+
+// Clone dasar yang tidak dipakai sesi mana pun tetap disimpan selama ini (default 3 hari):
+// sesi baru di repo yang sama cukup `fetch`, tidak perlu clone ulang dari nol.
+export const REPO_TTL_MS = 3 * 24 * 3600 * 1000;
 
 // Hapus berkas / folder secara aman dan tangguh di Windows/Linux/macOS.
 // Mengatasi file lock sementara dan atribut read-only yang sering terjadi pada git packfile.
@@ -38,14 +42,17 @@ function chmodRecursive(target) {
 }
 
 export async function cleanupWorkspaces(sessions, options = {}) {
-  const { workspacesDir = WORKSPACES, sessionsDir = SESSIONS_DIR, minAgeMs = 30000 } = options;
+  // `busy(folderRepo)`: repo yang sedang dipakai membuat sesi baru (clone/worktree berjalan)
+  // tidak boleh disentuh sama sekali, walau worktree barunya belum terdaftar sebagai sesi.
+  const { workspacesDir = WORKSPACES, sessionsDir = SESSIONS_DIR, minAgeMs = 30000, repoTtlMs = REPO_TTL_MS, busy = () => false } = options;
   const activeSessions = sessions instanceof Map ? [...sessions.values()] : Array.isArray(sessions) ? sessions : [];
 
   const activeCwds = new Set(
     activeSessions.map((s) => path.resolve(s.meta?.cwd || s.cwd || '').toLowerCase()).filter(Boolean),
   );
+  // Dibandingkan dengan nama folder (lihat repoDirName), bukan "owner/nama" yang ditebak dari folder.
   const activeRepos = new Set(
-    activeSessions.map((s) => String(s.meta?.repo || s.repo || '').toLowerCase()).filter(Boolean),
+    activeSessions.map((s) => s.meta?.repo || s.repo).filter(Boolean).map((r) => repoDirName(r).toLowerCase()),
   );
   const activeIds = new Set(
     activeSessions.map((s) => String(s.meta?.id || s.id || '').toLowerCase()).filter(Boolean),
@@ -76,7 +83,7 @@ export async function cleanupWorkspaces(sessions, options = {}) {
     } catch {
       continue;
     }
-    if (!stat.isDirectory()) continue;
+    if (!stat.isDirectory() || busy(entry)) continue;
 
     const baseDir = path.join(repoPath, '_base');
     let subDirs = [];
@@ -100,6 +107,7 @@ export async function cleanupWorkspaces(sessions, options = {}) {
         }
         // Cegah race condition: jangan hapus folder yang baru dibuat beberapa detik lalu
         if (minAgeMs > 0 && now - wtStat.mtimeMs < minAgeMs) continue;
+        if (busy(entry)) break;
 
         try {
           if (fs.existsSync(baseDir)) {
@@ -125,12 +133,18 @@ export async function cleanupWorkspaces(sessions, options = {}) {
       (r) => /^s-[\w-]+$/i.test(r) && activeCwds.has(path.resolve(repoPath, r).toLowerCase()),
     );
 
-    // Nama repo dari nama folder (misal arfakaisar__pocketcode -> arfakaisar/pocketcode)
-    const repoName = entry.replace('__', '/').toLowerCase();
-    const isRepoActive = activeRepos.has(repoName) || hasActiveWorktree;
+    const isRepoActive = activeRepos.has(entry.toLowerCase()) || hasActiveWorktree;
 
-    // Jika tidak ada sesi aktif lagi di repo ini dan folder bukan baru dibuat
-    if (!isRepoActive && (minAgeMs <= 0 || now - stat.mtimeMs >= minAgeMs)) {
+    // Kapan clone ini terakhir dipakai (penanda .last-used; clone lama tanpa penanda: mtime folder).
+    let lastUsed = stat.mtimeMs;
+    try {
+      lastUsed = Math.max(lastUsed, fs.statSync(path.join(repoPath, LAST_USED)).mtimeMs);
+    } catch {}
+    const idleFor = now - lastUsed;
+
+    // Tidak ada sesi aktif lagi di repo ini dan clone-nya sudah lama tidak dipakai.
+    // `busy` dicek ulang tepat sebelum menghapus: pembuatan sesi bisa dimulai saat `await` di atas.
+    if (!isRepoActive && idleFor >= Math.max(repoTtlMs, minAgeMs) && !busy(entry)) {
       safeRm(repoPath);
       result.removedRepos.push(repoPath);
     } else if (fs.existsSync(baseDir)) {

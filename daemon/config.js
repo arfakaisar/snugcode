@@ -29,11 +29,44 @@ function readJson(file, fallback) {
   }
 }
 
-function writeJson(file, data, mode) {
+// Tulis atomik (tmp + rename): crash, mati listrik, atau disk penuh di tengah penulisan
+// tidak pernah meninggalkan file yang terpotong. Rename di Windows bisa sesaat ditolak
+// (EPERM/EBUSY) bila file sedang dibaca antivirus/indexer, jadi dicoba ulang sebentar.
+export function writeJson(file, data, mode, { pretty = true } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode });
-  fs.renameSync(tmp, file);
+  fs.writeFileSync(tmp, pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data), { mode });
+  for (let i = 0; ; i++) {
+    try {
+      return fs.renameSync(tmp, file);
+    } catch (e) {
+      if (i >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * (i + 1));
+    }
+  }
+}
+
+// Daftar sesi (sessions/index.json). `ok: false` berarti file ADA tapi tidak terbaca: pemanggil
+// wajib menganggap daftar sesi tidak diketahui (jangan jalankan pembersih yang menghapus
+// worktree "yatim" berdasarkan daftar kosong). File rusak disimpan sebagai cadangan.
+export const SESSION_INDEX = path.join(SESSIONS_DIR, 'index.json');
+export function readSessionIndex({ quarantine = false } = {}) {
+  let raw;
+  try {
+    raw = fs.readFileSync(SESSION_INDEX, 'utf8');
+  } catch (e) {
+    return { ok: e.code === 'ENOENT', list: [] };
+  }
+  try {
+    const list = JSON.parse(raw);
+    if (Array.isArray(list)) return { ok: true, list };
+  } catch {}
+  if (quarantine) {
+    try {
+      fs.renameSync(SESSION_INDEX, SESSION_INDEX + '.broken-' + Date.now());
+    } catch {}
+  }
+  return { ok: false, list: [] };
 }
 
 export function loadConfig() {

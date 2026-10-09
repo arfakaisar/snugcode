@@ -335,7 +335,9 @@ sequenceDiagram
 - **Relay zero-knowledge**: tidak pernah melihat PIN, isi percakapan, kode, key 9router, atau token GitHub.
 - **Brute-force dibatasi**: setelah 5 kali PIN salah, pairing terkunci sampai `pocketcode pin` dijalankan di PC.
 - **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen.
-- **Loopback proxy** (`127.0.0.1`) tidak menambahkan kredensial, jadi program lain di PC tidak bisa memakai key-mu.
+- **Key 9router tidak pernah masuk ke proses agen.** Proses `claude` (dan Bash agen) hanya memegang token lokal acak; loopback proxy (`127.0.0.1`) menukarnya dengan key asli. Request tanpa token itu ditolak, jadi program lain di PC tidak bisa memakai key-mu.
+- **`~/.pocketcode` tertutup untuk agen**: Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan membaca folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
+- **Tanpa izin hanya yang aman**: tool baca lolos otomatis hanya di dalam worktree sesi. Membaca di luar worktree dan `WebFetch` meminta izin (atau auto-izin), agar prompt injection dari README/issue tidak bisa diam-diam mengirim file ke luar.
 - **Aksi ke remote** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) selalu meminta izin, juga saat auto-izin aktif.
 
 > [!WARNING]

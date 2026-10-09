@@ -170,4 +170,65 @@ export class Channel {
     this.recvSeq = s;
     return m;
   }
+
+  // ---------- Kanal biner (protokol v2) ----------
+  // Frame WebSocket biner: [versi 1B][nonce 24B][ciphertext]. Plaintext: [flag 1B][seq 4B BE][potongan JSON].
+  // Dibanding frame teks (JSON → base64 → JSON lagi) ukurannya ±25–35% lebih kecil dan relay
+  // tidak perlu mem-parse JSON. Pesan > BIN_CHUNK dipecah (flag MORE), jadi tidak lagi
+  // terbentur batas 1MB per frame relay. Nomor urut dipakai bersama dengan frame teks.
+  sealBin(obj) {
+    const body = enc(JSON.stringify(obj));
+    const frames = [];
+    for (let off = 0; off === 0 || off < body.length; off += BIN_CHUNK) {
+      const part = body.subarray(off, off + BIN_CHUNK);
+      const pt = new Uint8Array(5 + part.length);
+      pt[0] = off + BIN_CHUNK < body.length ? FLAG_MORE : 0;
+      new DataView(pt.buffer).setUint32(1, this.sendSeq++);
+      pt.set(part, 5);
+      const nonce = randomBytes(24);
+      frames.push(concatBytes(BIN_V1, nonce, xchacha20poly1305(this.sendKey, nonce).encrypt(pt)));
+    }
+    return frames;
+  }
+
+  // Hasil `undefined` = potongan pesan; pesan utuh dikembalikan setelah potongan terakhir.
+  openBin(frame) {
+    const b = frame instanceof Uint8Array ? frame : new Uint8Array(frame);
+    if (b.length < 1 + 24 + 16 + 5 || b[0] !== BIN_V1[0]) throw new Error('frame biner tidak dikenal');
+    const pt = xchacha20poly1305(this.recvKey, b.subarray(1, 25)).decrypt(b.subarray(25));
+    const s = new DataView(pt.buffer, pt.byteOffset).getUint32(1);
+    if (!(s > this.recvSeq)) throw new Error('replay');
+    this.recvSeq = s;
+    const part = pt.subarray(5);
+    this.parts ??= [];
+    this.partsLen = (this.partsLen || 0) + part.length;
+    if (this.partsLen > BIN_MAX) throw new Error('pesan terlalu besar');
+    this.parts.push(part);
+    if (pt[0] & FLAG_MORE) return undefined;
+    const whole = this.parts.length === 1 ? part : concatBytes(...this.parts);
+    this.parts = [];
+    this.partsLen = 0;
+    return JSON.parse(dec(whole));
+  }
+}
+
+const BIN_V1 = new Uint8Array([1]);
+const FLAG_MORE = 1;
+export const BIN_CHUNK = 256 * 1024;
+const BIN_MAX = 64 * 1024 * 1024;
+
+// Bingkai relay biner: [panjang cid 1B][cid ASCII][payload]. Dipakai PC <-> relay
+// (relay menambah/membuang cid; HP hanya melihat payload).
+export function frameWithCid(cid, payload) {
+  const id = enc(cid);
+  const out = new Uint8Array(1 + id.length + payload.length);
+  out[0] = id.length;
+  out.set(id, 1);
+  out.set(payload, 1 + id.length);
+  return out;
+}
+export function splitCid(buf) {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const n = b[0];
+  return { cid: dec(b.subarray(1, 1 + n)), payload: b.subarray(1 + n) };
 }

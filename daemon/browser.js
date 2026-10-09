@@ -32,7 +32,18 @@ async function connectCdp(url) {
   });
   let id = 0;
   const pending = new Map();
-  const handlers = [];
+  const handlers = new Set();
+  const cdp = {
+    closed: false,
+    send: (method, params = {}, sessionId) =>
+      new Promise((resolve, reject) => {
+        if (cdp.closed) return reject(new Error('Browser headless tertutup'));
+        pending.set(++id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params, sessionId }));
+      }),
+    on: (h) => (handlers.add(h), () => handlers.delete(h)),
+    close: () => ws.close(),
+  };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && pending.has(m.id)) {
@@ -41,15 +52,12 @@ async function connectCdp(url) {
       m.error ? reject(new Error(m.error.message)) : resolve(m.result);
     } else if (m.method) for (const h of handlers) h(m);
   };
-  return {
-    send: (method, params = {}, sessionId) =>
-      new Promise((resolve, reject) => {
-        pending.set(++id, { resolve, reject });
-        ws.send(JSON.stringify({ id, method, params, sessionId }));
-      }),
-    on: (h) => handlers.push(h),
-    close: () => ws.close(),
+  ws.onclose = () => {
+    cdp.closed = true;
+    for (const { reject } of pending.values()) reject(new Error('Browser headless tertutup'));
+    pending.clear();
   };
+  return cdp;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -64,23 +72,96 @@ async function waitFile(file, ms) {
   throw new Error('Browser headless tidak merespons');
 }
 
+// Satu browser headless dipakai ulang antar screenshot (agen biasanya mengambil beberapa
+// berturut-turut saat memverifikasi UI): start Chrome 1–2 detik hanya dibayar sekali. Tiap
+// screenshot memakai browser context baru (seperti jendela incognito), jadi cookie/storage
+// tidak terbawa. Browser ditutup setelah menganggur IDLE_MS.
+const IDLE_MS = 3 * 60 * 1000;
+let shared = null; // Promise<{ proc, cdp, profile }>
+let idleTimer = null;
+let inUse = 0;
+
+function launch(exe) {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'pocketcode-cdp-'));
+  const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--hide-scrollbars', '--mute-audio'];
+  // Chrome menolak berjalan sebagai root tanpa --no-sandbox (Linux server/WSL/container).
+  if (process.getuid?.() === 0) args.push('--no-sandbox');
+  const proc = spawn(exe, [...args, 'about:blank'], { stdio: 'ignore', windowsHide: true });
+  const kill = () => {
+    proc.kill();
+    // Profil sementara dipegang browser beberapa saat setelah ditutup (Windows).
+    setTimeout(() => fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }, () => {}), 1500).unref?.();
+  };
+  const p = (async () => {
+    try {
+      const cdp = await connectCdp(await waitFile(path.join(profile, 'DevToolsActivePort'), 10000));
+      return { proc, cdp, kill };
+    } catch (e) {
+      kill();
+      throw e;
+    }
+  })();
+  proc.once('exit', () => {
+    if (shared === p) shared = null;
+  });
+  return p;
+}
+
+async function acquire(exe) {
+  clearTimeout(idleTimer);
+  inUse++;
+  try {
+    let b = await (shared ??= launch(exe));
+    if (b.cdp.closed || b.proc.exitCode !== null) {
+      b.kill();
+      shared = null;
+      b = await (shared = launch(exe));
+    }
+    return b;
+  } catch (e) {
+    release();
+    shared = null;
+    throw e;
+  }
+}
+
+function release() {
+  inUse = Math.max(0, inUse - 1);
+  if (inUse) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(closeBrowser, IDLE_MS);
+  idleTimer.unref?.();
+}
+
+export async function closeBrowser() {
+  const p = shared;
+  shared = null;
+  clearTimeout(idleTimer);
+  if (!p) return;
+  try {
+    const b = await p;
+    b.cdp.close();
+    b.kill();
+  } catch {}
+}
+
 // Buka `url`, tunggu load (+ jeda agar framework selesai render), lalu ambil screenshot JPEG
 // dan log konsol/error. Request yang tidak pernah selesai (HMR, SSE) tidak membuatnya macet.
 export async function capture(url, { width = 390, height = 844, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
   const exe = findBrowser(cfg);
   if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.pocketcode/config.json.');
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'pocketcode-cdp-'));
-  const proc = spawn(exe, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--hide-scrollbars', '--mute-audio', 'about:blank'], { stdio: 'ignore', windowsHide: true });
+  const { cdp } = await acquire(exe);
   const logs = [];
-  let cdp;
+  let contextId;
+  let off;
   try {
-    cdp = await connectCdp(await waitFile(path.join(profile, 'DevToolsActivePort'), 10000));
-    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
+    ({ browserContextId: contextId } = await cdp.send('Target.createBrowserContext', { disposeOnDetach: true }));
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', browserContextId: contextId });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
     const S = (m, p) => cdp.send(m, p, sessionId);
     let loaded;
     const onLoad = new Promise((r) => (loaded = r));
-    cdp.on((m) => {
+    off = cdp.on((m) => {
       if (m.sessionId !== sessionId) return;
       const p = m.params;
       if (m.method === 'Page.loadEventFired') loaded();
@@ -101,9 +182,8 @@ export async function capture(url, { width = 390, height = 844, wait = 1500, tim
     const title = (await S('Runtime.evaluate', { expression: 'document.title', returnByValue: true })).result.value || '';
     return { data: shot.data, mime: 'image/jpeg', title, logs: logs.slice(-100) };
   } finally {
-    cdp?.close();
-    proc.kill();
-    // Profil sementara dipegang browser beberapa saat setelah ditutup (Windows).
-    setTimeout(() => fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }, () => {}), 1500);
+    off?.();
+    if (contextId) await cdp.send('Target.disposeBrowserContext', { browserContextId: contextId }).catch(() => {});
+    release();
   }
 }
