@@ -48,7 +48,7 @@
   --app-h: 100dvh;
   /* Jarak bawah composer: home indicator / garis gestur hanya menempati bagian bawah safe-area,
      jadi kartu input cukup berada sedikit di atasnya (seperti aplikasi chat native). */
-  --pad-b: max(8px, calc(var(--safe-b) - 12px));
+  --pad-b: max(10px, calc(var(--safe-b) - 4px));
   --app-top: 0px;
   --bar-h: 56px;
   --col: 760px;
@@ -156,17 +156,19 @@ a { color: var(--accent); text-decoration: none; }
 details > summary { list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 
-/* ---------- shell aplikasi: mengikuti visualViewport ---------- */
+/* ---------- shell aplikasi ----------
+   Keyboard tertutup: menempel ke tepi layar lewat CSS (top/bottom 0). Tinggi dari JS tidak dipakai:
+   di PWA iOS innerHeight & visualViewport bisa kurang sebesar status bar dan meninggalkan celah di
+   bawah. Keyboard terbuka (html.kb): mengikuti visualViewport agar composer tidak tertutup. */
 #app {
   position: fixed;
-  left: 0; right: 0;
-  top: var(--app-top);
-  height: var(--app-h);
+  left: 0; right: 0; top: 0; bottom: 0;
   display: flex; flex-direction: column;
   overflow: hidden;
   background: var(--bg);
   transition: transform .5s var(--spring);
 }
+html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 
 #bar {
   flex: none;
@@ -522,7 +524,7 @@ button.card:active .chev { transform: translateX(3px); }
 .session.home .col { padding-bottom: calc(92px + var(--pad-b)); }
 .starter {
   /* Bawah: safe-area (home indicator / navigasi gestur) sudah memberi jarak, jadi tidak ditambah lagi. */
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px calc(10px + var(--safe-r)) var(--pad-b) calc(10px + var(--safe-l));
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px calc(14px + var(--safe-r)) var(--pad-b) calc(14px + var(--safe-l));
   background: linear-gradient(to top, var(--bg) 58%, transparent); pointer-events: none;
 }
 .starterbtn {
@@ -574,7 +576,7 @@ button.card:active .chev { transform: translateX(3px); }
 #drawer { position: fixed; inset: 0; z-index: 15; }
 #drawerScrim { position: absolute; inset: 0; background: var(--scrim); opacity: 0; transition: opacity .5s var(--spring); }
 #drawerPanel {
-  position: absolute; top: var(--app-top); left: 0; height: var(--app-h); width: min(84vw, 330px);
+  position: absolute; top: 0; bottom: 0; left: 0; width: min(84vw, 330px);
   display: flex; flex-direction: column; background: var(--bg-2); border-right: 1px solid var(--line);
   padding: calc(10px + var(--safe-t)) 12px calc(10px + var(--safe-b)) calc(12px + var(--safe-l));
   transform: translateX(-100%); transition: transform .5s var(--spring); will-change: transform;
@@ -623,6 +625,9 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .session.chat { --ch: 120px; }
 #term { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 #term .col { padding-top: 6px; padding-bottom: calc(var(--ch) + 58px); }
+/* Sesi kosong: sambutan di tengah layar tanpa menggulir (ruang indikator kerja belum perlu). */
+#term .col:has(> .welcome:not(.used)) { min-height: 100%; display: flex; flex-direction: column; justify-content: center; padding-bottom: calc(var(--ch) + 4px); }
+#term .col:has(> .welcome:not(.used)) > .welcome { padding-top: 8px; }
 .ln { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; margin: 4px 0; }
 .ev { animation: rise .45s var(--spring) both; }
 
@@ -831,7 +836,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 /* ---------- composer: kartu melayang ---------- */
 #composer {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
-  padding: 22px calc(10px + var(--safe-r)) var(--pad-b) calc(10px + var(--safe-l));
+  padding: 22px calc(14px + var(--safe-r)) var(--pad-b) calc(14px + var(--safe-l));
   background: linear-gradient(to top, var(--bg) 62%, transparent);
 }
 html.kb #composer, html.kb .starter { padding-bottom: 8px; }
@@ -851,21 +856,21 @@ html.kb #composer, html.kb .starter { padding-bottom: 8px; }
 #input.shell { font-family: var(--mono); font-size: 15px; caret-color: var(--warn); }
 .crow { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
 .cbtn {
-  position: relative; height: 36px; min-width: 36px; padding: 0 12px; border-radius: 99px; flex: none;
+  position: relative; height: 40px; min-width: 40px; padding: 0 12px; border-radius: 99px; flex: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   border: 1px solid var(--line); color: var(--fg-2); font-size: 13px;
   transition: transform .25s var(--spring), background .15s, color .15s, border-color .15s;
 }
 .cbtn:active { transform: scale(.9); background: var(--surface-2); }
-.cbtn.plus { width: 36px; padding: 0; }
+.cbtn.plus { width: 40px; padding: 0; background: var(--surface-2); border-color: transparent; }
 .cbtn.plus svg { width: 20px; height: 20px; transition: transform .35s var(--spring); }
 .cbtn.plus.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
-.cbtn.model { border-color: transparent; max-width: 52vw; min-width: 0; flex: 0 1 auto; padding: 0 8px 0 10px; color: var(--fg-2); }
+.cbtn.model { height: 40px; background: var(--surface-2); border-color: transparent; max-width: 56vw; min-width: 0; flex: 0 1 auto; padding: 0 12px 0 14px; color: var(--fg); font-size: 14px; }
 .cbtn.model .ml { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cbtn.model .eff { color: var(--accent); font-size: 12px; flex: none; }
+.cbtn.model .eff { color: var(--dim); font-size: 14px; flex: none; }
 .cbtn.model .cv { width: 14px; height: 14px; color: var(--dim); }
 #send {
-  flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
   background: var(--accent); color: var(--accent-fg); transition: transform .25s var(--spring), background .25s, color .25s, box-shadow .25s;
   box-shadow: 0 4px 14px -6px var(--accent);
 }
@@ -896,8 +901,8 @@ html.kb #composer, html.kb .starter { padding-bottom: 8px; }
 #sheetBackdrop { position: absolute; inset: 0; background: var(--scrim); animation: fadeIn .35s both; }
 #sheetPanel {
   position: absolute; left: 0; right: 0;
-  bottom: calc(100% - var(--app-top) - var(--app-h));
-  max-height: calc(var(--app-h) - var(--safe-t) - 24px);
+  bottom: 0;
+  max-height: calc(100% - var(--safe-t) - 24px);
   display: flex; flex-direction: column;
   background: var(--bg-2); border: 1px solid var(--line); border-bottom: 0;
   border-radius: 28px 28px 0 0; box-shadow: 0 -24px 60px -20px rgba(0, 0, 0, .5);
@@ -905,6 +910,7 @@ html.kb #composer, html.kb .starter { padding-bottom: 8px; }
   transition: transform .4s var(--spring);
   will-change: transform;
 }
+html.kb #sheetPanel { bottom: calc(100% - var(--app-top) - var(--app-h)); max-height: calc(var(--app-h) - var(--safe-t) - 24px); }
 #sheet.closing #sheetPanel { animation: sheetDown .26s cubic-bezier(.4, 0, 1, 1) both; }
 #sheet.closing #sheetBackdrop { animation: fadeOut .26s both; }
 @keyframes sheetUp { from { transform: translateY(100%); } }
@@ -1071,10 +1077,11 @@ input[type=range]:disabled { opacity: .3; }
   .col { padding-left: 24px; padding-right: 24px; }
   #sheetPanel {
     left: 50%; right: auto; width: min(560px, calc(100vw - 48px)); bottom: auto; top: 50%;
-    transform: translate(-50%, -50%); max-height: min(82vh, calc(var(--app-h) - 48px));
+    transform: translate(-50%, -50%); max-height: min(82vh, calc(100% - 48px));
     border-radius: 26px; border-bottom: 1px solid var(--line);
     animation: dialogIn .4s var(--spring) both;
   }
+  html.kb #sheetPanel { bottom: auto; max-height: min(82vh, calc(var(--app-h) - 48px)); }
   #sheet.closing #sheetPanel { animation: dialogOut .2s ease-in both; }
   #sheetGrab { display: none; }
   #sheetBody { padding-top: 0; padding-bottom: 18px; }
