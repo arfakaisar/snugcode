@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-process.env.POCKETCODE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-wt-'));
+process.env.SNUGCODE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-wt-'));
 const { prepareWorktree, removeWorktree, git } = await import('../daemon/github.js');
 const REPO = 'octocat/Hello-World';
 const ok = (m) => console.log('✔ ' + m);
@@ -21,7 +21,7 @@ await assert.rejects(prepareWorktree(null, REPO, { branch: 'master', sessionId: 
 ok('branch yang sedang dipakai sesi lain ditolak dengan pesan jelas');
 
 // 3. Branch baru dari base default.
-const s3 = await prepareWorktree(null, REPO, { branch: 'pocket/a3', sessionId: 'a3' });
+const s3 = await prepareWorktree(null, REPO, { branch: 'snug/a3', sessionId: 'a3' });
 assert.equal(s3.base, 'master');
 ok('branch baru dari base default');
 
@@ -35,7 +35,7 @@ fs.writeFileSync(path.join(s3.cwd, 'x.txt'), 'x');
 await git(s3.cwd, ['add', '-A']);
 await git(s3.cwd, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'lokal']);
 await removeWorktree(s3.cwd);
-const s5 = await prepareWorktree(null, REPO, { branch: 'pocket/a3', sessionId: 'a5' });
+const s5 = await prepareWorktree(null, REPO, { branch: 'snug/a3', sessionId: 'a5' });
 assert.equal((await git(s5.cwd, ['log', '-1', '--pretty=%s'])).trim(), 'lokal');
 ok('lanjutkan branch lokal yang belum di-push tanpa kehilangan commit');
 
@@ -44,4 +44,4 @@ await removeWorktree(s1.cwd);
 await prepareWorktree(null, REPO, { branch: 'master', sessionId: 'a6' });
 ok('branch bisa dibuka lagi setelah sesi lamanya dihapus');
 
-fs.rmSync(process.env.POCKETCODE_HOME, { recursive: true, force: true });
+fs.rmSync(process.env.SNUGCODE_HOME, { recursive: true, force: true });

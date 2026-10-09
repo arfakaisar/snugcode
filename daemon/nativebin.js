@@ -53,7 +53,7 @@ export function nativeBinaryInstalled(root) {
 export function reinstallHint(root) {
   const isGit = !!root && fs.existsSync(path.join(root, '.git'));
   const cmd = isGit ? `npm install --include=optional (di folder ${root})` : `npm i -g ${PACKAGE_SPEC} --include=optional`;
-  return `Jalankan: pocketcode stop${process.platform === 'win32' ? ' (tutup juga claude.exe yang masih jalan)' : ''}, lalu ${cmd}, lalu pocketcode start.`;
+  return `Jalankan: snugcode stop${process.platform === 'win32' ? ' (tutup juga claude.exe yang masih jalan)' : ''}, lalu ${cmd}, lalu snugcode start.`;
 }
 
 export function missingBinaryMessage(root) {

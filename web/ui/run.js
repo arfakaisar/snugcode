@@ -21,7 +21,7 @@ export function showRun() {
     try {
       await fn();
     } catch (e) {
-      toast(isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk fitur Run & Preview.' : e.message, true);
+      toast(isOldDaemon(e) ? 'Perbarui snugcode di PC untuk fitur Run & Preview.' : e.message, true);
     }
     if (b.isConnected) done();
   };

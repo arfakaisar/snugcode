@@ -17,7 +17,7 @@
  * @property {number} [ts]  waktu dibuat (ms)
  * @property {string} [d]   teks (user/text/out/note/error/sh/result)
  * @property {string} [s]   ringkasan input tool, atau status sesi ('running' | 'idle') untuk k='status'
- * @property {string} [name] nama tool (tanpa prefiks mcp__pocketcode__) / nama proses
+ * @property {string} [name] nama tool (tanpa prefiks mcp__snugcode__) / nama proses
  * @property {string} [id]  id tool_use (tool/result)
  * @property {boolean} [ok] hasil tool / prompt berhasil
  * @property {TodoItem[]} [todos] daftar rencana (k='tool', name='TodoWrite'); daemon lama hanya mengirim `s`

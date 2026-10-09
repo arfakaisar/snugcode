@@ -82,7 +82,7 @@ let idleTimer = null;
 let inUse = 0;
 
 function launch(exe) {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'pocketcode-cdp-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'snugcode-cdp-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--hide-scrollbars', '--mute-audio'];
   // Chrome menolak berjalan sebagai root tanpa --no-sandbox (Linux server/WSL/container).
   if (process.getuid?.() === 0) args.push('--no-sandbox');
@@ -152,7 +152,7 @@ export async function closeBrowser() {
 /** @param {string} url @param {{ width?: number, height?: number, scale?: number, wait?: number, timeout?: number, fullPage?: boolean, cfg?: { browserExecutable?: string } }} [opts] */
 export async function capture(url, { width = 390, height = 844, scale = 2, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
   const exe = findBrowser(cfg);
-  if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.pocketcode/config.json.');
+  if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.snugcode/config.json.');
   const { cdp } = await acquire(exe);
   const logs = [];
   let contextId;

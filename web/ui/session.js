@@ -4,7 +4,7 @@ import * as M from '../../shared/models.js';
 import { EventCursor } from '../../shared/events.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
-import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, pop, spark, toast, toggleItem, ui } from './dom.js';
+import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, pop, mascot, toast, toggleItem, ui } from './dom.js';
 import { showGit } from './git.js';
 import { pickModel } from './model-picker.js';
 import { Renderer } from './renderer.js';
@@ -30,7 +30,7 @@ export function showSession(s) {
   const term = h('div', { id: 'term' }, col);
   const wl = h('span', { class: 'wl shimmer' }, 'Berpikir…');
   const wt = h('span', { class: 't' }, '0s');
-  const working = h('div', { id: 'working', hidden: true }, spark('think'), wl, wt);
+  const working = h('div', { id: 'working', hidden: true }, mascot('think'), wl, wt);
   const toBottom = h('button', { id: 'tobottom', hidden: true, 'aria-label': 'Ke pesan terbaru' }, ic('arrowdown'));
   const dock = h('div', { id: 'dock' });
   const input = h('textarea', { id: 'input', rows: 1, placeholder: 'Minta sesuatu ke agen…', autocapitalize: 'sentences', enterkeyhint: coarse ? 'enter' : 'send', 'aria-label': 'Pesan' });
@@ -109,7 +109,7 @@ export function showSession(s) {
       app.current.setPlan((await app.conn.call('plan', { id: s.id, on })).plan);
       toast(app.current.session.plan ? 'Mode rencana: agen menyusun rencana dulu, tanpa mengubah file' : 'Mode rencana mati');
     } catch (e) {
-      throw isOldDaemon(e) ? new Error('Perbarui pocketcode di PC untuk mode rencana.') : e;
+      throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk mode rencana.') : e;
     }
     return app.current.session.plan;
   };
@@ -186,7 +186,7 @@ export function showSession(s) {
                 try {
                   Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on }));
                 } catch (e) {
-                  throw isOldDaemon(e) ? new Error('Perbarui pocketcode di PC untuk fitur ini') : e;
+                  throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk fitur ini') : e;
                 }
                 return app.current.session.askEdits;
               },
@@ -216,7 +216,7 @@ export function showSession(s) {
         try {
           sum = await app.conn.call('setSessionModel', { id: s.id, model: id });
         } catch (e) {
-          throw isOldDaemon(e) ? new Error('Perbarui pocketcode di PC untuk ganti model di tengah sesi.') : e;
+          throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk ganti model di tengah sesi.') : e;
         }
         app.current.session.model = sum.model;
         setModelChip();

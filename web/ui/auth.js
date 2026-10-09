@@ -1,7 +1,7 @@
 // API relay, layar login GitHub, dan daftar PC.
 import { token, store } from '../conn.js';
 import { app } from './state.js';
-import { $, ago, coarse, copyText, greeting, h, haptic, ic, pullToRefresh, scrollCol, skeletons, spark, toast, ui } from './dom.js';
+import { $, ago, coarse, copyText, greeting, h, haptic, ic, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { openMachine } from './machine.js';
 import { accountMenu } from './push.js';
 
@@ -18,7 +18,7 @@ export async function api(path, opts = {}) {
 
 // ---------- Layar: login ----------
 export function showLogin() {
-  ui.set('pocketcode', { dot: 'none' });
+  ui.set('snugcode', { dot: 'none' });
   $('#bar').hidden = true;
   const feats = [
     ['shield', 'Terenkripsi end-to-end', 'relay tidak bisa membaca apa pun'],
@@ -28,7 +28,7 @@ export function showLogin() {
   ui.view(
     h('div', { class: 'scroll' },
       h('div', { class: 'hero login' },
-        h('div', { class: 'brand' }, spark('draw xl'), h('span', { class: 'wordmark' }, 'pocketcode')),
+        h('div', { class: 'brand' }, mascot('draw xl tap'), h('span', { class: 'wordmark' }, 'snugcode')),
         h('h1', { class: 'serif display' }, 'Coding dari saku,', h('br'), h('span', { class: 'accent-text' }, 'tenaga dari PC-mu.')),
         h('p', { class: 'lead' }, 'Agen Claude Code berjalan di komputermu — analisis repo, edit, commit, dan push langsung dari HP.'),
         h('div', { class: 'feats' }, ...feats.map(([icon, t1, t2], i) => h('div', { class: 'feat', style: `--i:${i}` }, h('span', { class: 'fi' }, ic(icon)), h('span', {}, h('b', {}, t1), h('span', {}, t2))))),
@@ -62,7 +62,7 @@ export async function showMachines({ resume = false } = {}) {
   const setHeader = () =>
     ui.set('PC saya', { actions: [...(coarse ? [] : [{ icon: 'refresh', label: 'Muat ulang', onclick: () => showMachines() }]), avatarBtn()] });
   setHeader();
-  const hello = h('div', { class: 'greet' }, spark('draw'), h('h1', { class: 'serif' }, greeting() + (app.me?.login ? ', ' + app.me.login : '')));
+  const hello = h('div', { class: 'greet' }, mascot('draw tap'), h('h1', { class: 'serif' }, greeting() + (app.me?.login ? ', ' + app.me.login : '')));
   const list = h('div', {}, skeletons(2));
   const sc = scrollCol(hello, h('p', { class: 'muted greet-sub' }, 'Pilih komputer untuk mulai bekerja.'), list);
   ui.view(sc);
@@ -80,7 +80,7 @@ export async function showMachines({ resume = false } = {}) {
   } catch (e) {
     return list.replaceChildren(h('div', { class: 'err' }, e.message));
   }
-  const install = 'npm i -g github:arfakaisar/pocketcode && pocketcode setup';
+  const install = 'npm i -g github:arfakaisar/snugcode && snugcode setup';
   const howto = h('div', { class: 'copyline' }, h('code', {}, install), h('button', { class: 'copybtn', onclick: async (e) => (await copyText(install)) && (e.currentTarget.classList.add('done'), toast('Perintah disalin')) }, ic('copy'), 'salin'));
   if (!machines.length)
     return list.replaceChildren(h('div', { class: 'empty' }, h('div', { class: 'emptyart' }, ic('monitor')), h('b', {}, 'Belum ada PC tertaut'), 'Di komputer, jalankan:', howto));

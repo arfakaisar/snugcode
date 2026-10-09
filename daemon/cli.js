@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// pocketcode — CLI daemon.
-//   pocketcode setup     : setup awal (relay, 9router, GitHub, PIN)
-//   pocketcode start     : jalankan daemon
-//   pocketcode stop      : hentikan daemon yang berjalan di latar belakang
-//   pocketcode autostart : jalankan otomatis saat login (on|off)
-//   pocketcode pin       : ganti PIN / buka kunci setelah salah berkali-kali
-//   pocketcode devices   : daftar HP terpasang;  pocketcode revoke <id|all>
-//   pocketcode status    : ringkasan konfigurasi
+// snugcode — CLI daemon.
+//   snugcode setup     : setup awal (relay, 9router, GitHub, PIN)
+//   snugcode start     : jalankan daemon
+//   snugcode stop      : hentikan daemon yang berjalan di latar belakang
+//   snugcode autostart : jalankan otomatis saat login (on|off)
+//   snugcode pin       : ganti PIN / buka kunci setelah salah berkali-kali
+//   snugcode devices   : daftar HP terpasang;  snugcode revoke <id|all>
+//   snugcode status    : ringkasan konfigurasi
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,13 +20,13 @@ import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { lightModel } from '../shared/models.js';
 import { checkUpdate, performUpdate } from './updater.js';
-import { writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
+import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
 const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
-// perintah dianggap prompt awal: pocketcode "jelaskan repo ini".
+// perintah dianggap prompt awal: snugcode "jelaskan repo ini".
 const cmd = args[0] && COMMAND_NAMES.includes(args[0]) ? args.shift() : 'tui';
 const flags = {};
 for (let i = 0; i < args.length; i++) {
@@ -99,7 +99,7 @@ async function setup() {
   ensureDirs();
   const cfg = loadConfig();
   const sec = loadSecrets();
-  console.log(c.b('\npocketcode setup') + c.d(`  (data disimpan di ${HOME})\n`));
+  console.log(c.b('\nsnugcode setup') + c.d(`  (data disimpan di ${HOME})\n`));
 
   // 1. 9router
   console.log(c.b('1) 9router'));
@@ -215,7 +215,7 @@ async function setup() {
   saveConfig(cfg);
   saveSecrets(sec);
   rl?.close();
-  console.log(c.g('\n✓ Setup selesai.') + ` Jalankan ${c.b('pocketcode start')} (atau ${c.b('pocketcode autostart on')}), lalu buka ${c.b(cfg.relayUrl)} di HP.\n`);
+  console.log(c.g('\n✓ Setup selesai.') + ` Jalankan ${c.b('snugcode start')} (atau ${c.b('snugcode autostart on')}), lalu buka ${c.b(cfg.relayUrl)} di HP.\n`);
 }
 
 async function resetPin() {
@@ -280,7 +280,7 @@ function autostart() {
   const mode = args.find((a) => !a.startsWith('--')) || 'on';
   if (mode === 'on' && CLI.includes('_npx')) {
     console.log(c.y('! Kamu menjalankan lewat npx. Untuk autostart, pasang global dulu agar path-nya tetap:'));
-    console.log(`    npm i -g ${PACKAGE_SPEC}   lalu   pocketcode autostart on`);
+    console.log(`    npm i -g ${PACKAGE_SPEC}   lalu   snugcode autostart on`);
   }
   if (mode === 'off') {
     disableAutostart();
@@ -291,8 +291,8 @@ function autostart() {
 
   // Nyalakan sekarang juga bila belum berjalan.
   if (!runningPid()) {
-    if (process.platform === 'linux') spawnSync('systemctl', ['--user', 'start', 'pocketcode']);
-    else if (process.platform === 'darwin') spawnSync('launchctl', ['load', path.join(os.homedir(), 'Library', 'LaunchAgents', 'dev.pocketcode.plist')]);
+    if (process.platform === 'linux') spawnSync('systemctl', ['--user', 'start', AUTOSTART_UNIT]);
+    else if (process.platform === 'darwin') spawnSync('launchctl', ['load', autostartFilePath()]);
     else spawnDetached();
     console.log(c.g('✓ Daemon dijalankan di latar belakang.') + c.d(` Log: ${LOG_FILE}`));
   } else console.log(c.d('Daemon sudah berjalan.'));
@@ -309,7 +309,7 @@ async function start() {
   ensureDirs();
   const other = runningPid();
   if (other && other !== process.pid) {
-    console.log(c.y(`Daemon sudah berjalan (pid ${other}). Hentikan dengan `) + c.b('pocketcode stop'));
+    console.log(c.y(`Daemon sudah berjalan (pid ${other}). Hentikan dengan `) + c.b('snugcode stop'));
     process.exit(1);
   }
   fs.writeFileSync(PID_FILE, String(process.pid));
@@ -323,8 +323,8 @@ async function start() {
     console.error = write;
   }
   const { Daemon } = await import('./server.js');
-  console.log(c.b('pocketcode') + c.d(` — ${cfg.machineName} · model ${cfg.model} · relay ${cfg.relayUrl}`));
-  if (sec.pinFails >= 5) console.log(c.r('! Pairing terkunci karena PIN salah berkali-kali. Jalankan `pocketcode pin`.'));
+  console.log(c.b('snugcode') + c.d(` — ${cfg.machineName} · model ${cfg.model} · relay ${cfg.relayUrl}`));
+  if (sec.pinFails >= 5) console.log(c.r('! Pairing terkunci karena PIN salah berkali-kali. Jalankan `snugcode pin`.'));
   const d = new Daemon(cfg);
   d.start();
   const bye = () => Promise.resolve(d.stop()).finally(() => process.exit(0));
@@ -418,10 +418,10 @@ async function cliRestart() {
 async function cliUpdate() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  console.log(c.b('Memeriksa pembaruan pocketcode…'));
+  console.log(c.b('Memeriksa pembaruan snugcode…'));
   const st = await checkUpdate(cfg, sec);
   if (!st.updateAvailable && !flags.force) {
-    console.log(c.g('✓ pocketcode sudah versi terbaru') + c.d(` (${st.currentCommit})`));
+    console.log(c.g('✓ snugcode sudah versi terbaru') + c.d(` (${st.currentCommit})`));
     return;
   }
   console.log(c.y('Ada pembaruan: ') + `${c.b(st.latestCommit)}${st.latestMessage ? ' — ' + st.latestMessage : ''}`);
@@ -473,22 +473,22 @@ async function cliClean() {
 }
 
 function help() {
-  console.log(`${c.b('pocketcode')} — coding agent di PC-mu, dari terminal & HP
+  console.log(`${c.b('snugcode')} — coding agent di PC-mu, dari terminal & HP
 
-  ${c.g('pocketcode')}                 buka UI terminal (folder repo ini jadi sesinya)
-  ${c.g('pocketcode "prompt"')}        buka UI dan langsung kirim prompt
-  ${c.g('pocketcode --pick')}          pilih sesi (termasuk sesi dari HP)
+  ${c.g('snugcode')}                 buka UI terminal (folder repo ini jadi sesinya)
+  ${c.g('snugcode "prompt"')}        buka UI dan langsung kirim prompt
+  ${c.g('snugcode --pick')}          pilih sesi (termasuk sesi dari HP)
 
-  pocketcode setup            setup / ubah konfigurasi
-  pocketcode login            login ulang GitHub (token dicabut/kedaluwarsa)
-  pocketcode autostart on     jalankan daemon di latar belakang + saat login
-  pocketcode start | stop     jalankan / hentikan daemon
-  pocketcode restart          restart daemon di latar belakang
-  pocketcode update           periksa & pasang pembaruan jarak jauh
-  pocketcode clean            pindai & bersihkan worktree / repo yatim
-  pocketcode pin              ganti PIN / buka kunci
-  pocketcode devices          HP yang terpasang;  pocketcode revoke <id|all>
-  pocketcode status           ringkasan konfigurasi`);
+  snugcode setup            setup / ubah konfigurasi
+  snugcode login            login ulang GitHub (token dicabut/kedaluwarsa)
+  snugcode autostart on     jalankan daemon di latar belakang + saat login
+  snugcode start | stop     jalankan / hentikan daemon
+  snugcode restart          restart daemon di latar belakang
+  snugcode update           periksa & pasang pembaruan jarak jauh
+  snugcode clean            pindai & bersihkan worktree / repo yatim
+  snugcode pin              ganti PIN / buka kunci
+  snugcode devices          HP yang terpasang;  snugcode revoke <id|all>
+  snugcode status           ringkasan konfigurasi`);
 }
 
 const commands = { tui, help, setup, login, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };

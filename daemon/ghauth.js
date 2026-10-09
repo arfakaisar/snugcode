@@ -28,7 +28,7 @@ export class GithubAuth extends EventEmitter {
   set(state) {
     if (state === this.state) return;
     this.state = state;
-    if (state !== 'ok') this.d.log(`! GitHub: ${state === 'missing' ? 'belum login' : 'token tidak berlaku'} — login ulang dari HP, /login di terminal, atau \`pocketcode login\`.`);
+    if (state !== 'ok') this.d.log(`! GitHub: ${state === 'missing' ? 'belum login' : 'token tidak berlaku'} — login ulang dari HP, /login di terminal, atau \`snugcode login\`.`);
     this.emit('change', this.status());
   }
 
@@ -61,7 +61,7 @@ export class GithubAuth extends EventEmitter {
 
   // Mulai device flow (atau pakai ulang kode yang masih berlaku).
   async begin() {
-    if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur di pocketcode.');
+    if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur di snugcode.');
     if (this.pending && Date.now() < this.pending.expiresAt - 30000 && !this.pending.error) return this.status();
     const start = await deviceFlowStart(GITHUB_CLIENT_ID);
     const pending = { code: start.user_code, uri: start.verification_uri, expiresAt: Date.now() + (start.expires_in || 900) * 1000 };

@@ -14,7 +14,7 @@ import { knownModelIds } from './router.js';
 import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
-import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
+import { SNUGCODE_SYSTEM_PROMPT } from './prompt.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
@@ -47,16 +47,16 @@ const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const FILE_TOOLS = new Set([...READ_TOOLS, ...EDIT_TOOLS]);
 
-// Tool bawaan yang ditawarkan ke model (tool MCP pocketcode ikut otomatis). Tanpa daftar ini
+// Tool bawaan yang ditawarkan ke model (tool MCP snugcode ikut otomatis). Tanpa daftar ini
 // Claude Code mengirim ±27 tool (Cron*, ScheduleWakeup, SendMessage, Workflow, EnterWorktree, …)
-// yang tidak dipakai di pocketcode: ±40 KB skema (≈10k token) di SETIAP request model.
+// yang tidak dipakai di snugcode: ±40 KB skema (≈10k token) di SETIAP request model.
 // Grep/Glob wajib disebut: build native menggantinya dengan Bash grep/find (output tak dibatasi).
 export const AGENT_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent', 'AskUserQuestion', 'ExitPlanMode', 'WebFetch', 'WebSearch'];
 // Tool yang bisa mengubah file: baru boleh jalan setelah checkpoint prompt tersimpan (hook PreToolUse),
 // termasuk yang lolos tanpa canUseTool lewat aturan "Selalu" (mis. Bash(npm test *)).
 const MUTATING_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|' + DEV_START;
 
-// Folder data pocketcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
+// Folder data snugcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
 // dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
 // Pengecualian: worktree sesi, folder plans, dan BACA folder config Claude milik agen sendiri
 // (output tool besar disimpan Claude Code di sana lalu dibaca kembali). Menulis ke folder config
@@ -67,7 +67,7 @@ const isInside = (p, dir) => {
 };
 export const isSensitivePath = (p, { write = false } = {}) =>
   isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
-const SECRET_CMD_RE = /secrets\.json|\.pocketcode[\\/]+(?:secrets|config|sessions|claude|env|bin|tools)\b/i;
+const SECRET_CMD_RE = /secrets\.json|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|env|bin|tools)\b/i;
 
 // Path yang disentuh tool file (Glob dengan pola absolut: bagian sebelum karakter glob pertama).
 export function toolPaths(tool, input = {}, cwd) {
@@ -122,8 +122,8 @@ function cut(s, n = OUT_LIMIT) {
   return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} karakter dipotong)` : s;
 }
 
-// "mcp__pocketcode__dev_start" -> "dev_start" (tool MCP lain: "server:tool").
-const shortName = (n) => (n.startsWith('mcp__') ? n.replace(/^mcp__pocketcode__/, '').replace(/^mcp__([^_]+(?:_[^_]+)*?)__/, '$1:') : n);
+// "mcp__snugcode__dev_start" -> "dev_start" (tool MCP lain: "server:tool").
+const shortName = (n) => (n.startsWith('mcp__') ? n.replace(/^mcp__snugcode__/, '').replace(/^mcp__([^_]+(?:_[^_]+)*?)__/, '$1:') : n);
 
 function toolResultText(content) {
   if (typeof content === 'string') return content;
@@ -146,12 +146,12 @@ function toolSummaryRaw(name, input = {}) {
     case 'Bash':
     case DEV_START:
       return input.command;
-    case 'mcp__pocketcode__preview_screenshot':
+    case 'mcp__snugcode__preview_screenshot':
       return input.url || input.path || '/';
-    case 'mcp__pocketcode__dev_stop':
-    case 'mcp__pocketcode__dev_logs':
+    case 'mcp__snugcode__dev_stop':
+    case 'mcp__snugcode__dev_logs':
       return input.name;
-    case 'mcp__pocketcode__dev_list':
+    case 'mcp__snugcode__dev_list':
       return '';
     case 'AskUserQuestion':
       return (input.questions || []).map((q) => q.question).join('\n');
@@ -273,7 +273,7 @@ export class Session extends EventEmitter {
   async runDev(cmd) {
     const det = detectProject(this.meta.cwd);
     const dev = String(cmd || '').trim() || det.dev;
-    if (!dev) throw new Error('Perintah dev tidak terdeteksi. Isi perintahnya, mis. "npm run dev", atau tambahkan .pocketcode.json { "dev": "..." }.');
+    if (!dev) throw new Error('Perintah dev tidak terdeteksi. Isi perintahnya, mis. "npm run dev", atau tambahkan .snugcode.json { "dev": "..." }.');
     if (!cmd && det.setup && this.procs.procs.get('setup')?.status !== 'running') {
       await this.procs.start(det.setup, 'setup');
       this.procs.get('setup').done.then((code) => code === 0 && this.procs.start(dev).catch((e) => this.emitEvent({ k: 'error', d: e.message })));
@@ -505,7 +505,7 @@ export class Session extends EventEmitter {
     const n = await rewind(this.meta.cwd, cp.tree);
     const title = String(u.d || 'gambar').slice(0, 80);
     // Agen tidak tahu file berubah di luar dirinya; beri tahu di prompt berikutnya.
-    this.meta.note = `[pocketcode] The user restored all files to their state before the prompt "${title}". Every change made after that point is gone. Re-read files before editing them.`;
+    this.meta.note = `[snugcode] The user restored all files to their state before the prompt "${title}". Every change made after that point is gone. Re-read files before editing them.`;
     this.mgr.saveIndex();
     this.emitEvent({ k: 'note', d: `↺ ${n} file dikembalikan ke sebelum "${title}"` });
     return n;
@@ -586,7 +586,7 @@ export class Session extends EventEmitter {
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
       // Output Bash (npm install/test, build) yang masuk konteks dibatasi; bawaan Claude Code 30k karakter.
       BASH_MAX_OUTPUT_LENGTH: process.env.BASH_MAX_OUTPUT_LENGTH || '15000',
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'pocketcode/0.1',
+      CLAUDE_AGENT_SDK_CLIENT_APP: 'snugcode/0.1',
       GIT_TERMINAL_PROMPT: '0',
       GCM_INTERACTIVE: 'never',
     });
@@ -613,8 +613,8 @@ export class Session extends EventEmitter {
         tools: AGENT_TOOLS,
         disallowedTools: ['EnterPlanMode'],
         agents: subagents(),
-        mcpServers: { pocketcode: devToolsServer(this) },
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: POCKETCODE_SYSTEM_PROMPT },
+        mcpServers: { snugcode: devToolsServer(this) },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: SNUGCODE_SYSTEM_PROMPT },
         canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
         hooks: { PreToolUse: [{ matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] }] },
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
@@ -632,7 +632,7 @@ export class Session extends EventEmitter {
   async beforeTool(h) {
     await this.cpReady;
     const input = /** @type {any} */ (h)?.tool_input;
-    if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'pocketcode: selalu butuh persetujuan pengguna' } };
+    if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'snugcode: selalu butuh persetujuan pengguna' } };
     return {};
   }
 
@@ -799,7 +799,7 @@ export class Session extends EventEmitter {
     const allow = { behavior: 'allow', updatedInput: input };
     const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
     const write = FILE_TOOLS.has(tool) && !READ_TOOLS.has(tool);
-    if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'Folder data pocketcode (~/.pocketcode) berisi kredensial dan tidak boleh diakses agen.' };
+    if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'Folder data snugcode berisi kredensial dan tidak boleh diakses agen.' };
     const isPush = isRemoteWrite(tool, input);
     const secretCmd = (tool === 'Bash' || tool === DEV_START) && SECRET_CMD_RE.test(input?.command || '');
     const shotUrl = tool === SCREENSHOT ? input?.url : null;
@@ -960,7 +960,7 @@ function recoverIndex(defaultModel) {
         const first = fs.readFileSync(path.join(SESSIONS_DIR, id + '.jsonl'), 'utf8').split('\n').find((l) => l.includes('"k":"user"'));
         if (first) title = String(JSON.parse(first).d || '').slice(0, 80);
       } catch {}
-      const branch = currentBranch(cwd) || 'pocket/' + id;
+      const branch = currentBranch(cwd) || 'snug/' + id;
       out.push({ id, repo: dir.replace('__', '/'), cwd, branch, base: base || 'main', model: defaultModel, title, createdAt: st.birthtimeMs || st.mtimeMs, updatedAt: st.mtimeMs, auto: false });
     }
   }
@@ -1075,7 +1075,7 @@ export class SessionManager {
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('Format repo harus owner/nama');
     const id = randomBytes(4).toString('hex');
-    branch = (branch || '').trim() || 'pocket/' + id;
+    branch = (branch || '').trim() || 'snug/' + id;
     // Selama clone/worktree disiapkan, pembersih tidak boleh menyentuh repo ini.
     const busyKey = repoDirName(repo).toLowerCase();
     this.busyRepos.set(busyKey, (this.busyRepos.get(busyKey) || 0) + 1);

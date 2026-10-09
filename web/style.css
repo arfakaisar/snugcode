@@ -1,4 +1,4 @@
-/* pocketcode — UI mobile bergaya aplikasi chat: hangat, tenang, banyak gerak halus.
+/* snugcode — UI mobile bergaya aplikasi chat: hangat, tenang, banyak gerak halus.
    Prinsip: tidak pernah zoom sendiri (kontrol form >= 16px, touch-action manipulation,
    text-size-adjust 100%), shell mengikuti visualViewport saat keyboard terbuka, target sentuh
    >= 36–44px, animasi hanya transform/opacity (murah di GPU), dan semua gerak dimatikan bila
@@ -248,17 +248,77 @@ details > summary::-webkit-details-marker { display: none; }
 @keyframes shimmerText { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @keyframes skel { from { opacity: .45; } to { opacity: .9; } }
 
-/* ---------- logo spark ---------- */
-.spark { color: var(--accent); width: 22px; height: 22px; overflow: visible; }
-.spark .ray { transform-box: view-box; transform-origin: 12px 12px; }
-.spark.xl { width: 52px; height: 52px; }
-.spark.draw .ray { animation: rayIn .7s var(--bounce) both; animation-delay: calc(var(--d) * 45ms + 80ms); }
-.spark.draw { animation: sparkSettle 1.6s var(--spring) both; }
-.spark.think { animation: spin 5s linear infinite; }
-.spark.think .ray { animation: rayWave 1.3s ease-in-out infinite; animation-delay: calc(var(--d) * -.108s); }
-@keyframes rayIn { from { transform: scale(0); opacity: 0; } }
-@keyframes sparkSettle { from { transform: rotate(-60deg); } }
-@keyframes rayWave { 0%, 100% { transform: scale(1); } 50% { transform: scale(.45); } }
+/* ---------- maskot "Snug" ---------- */
+.mascot {
+  width: 24px; height: 24px; overflow: visible; flex: none;
+  --m-body: #d97757; --m-cap: #6f7bc8; --m-cream: #fbeee0; --m-cream-2: #e3c4a8; --m-ink: #3a231a; --m-blush: #f6a48c; --m-z: #e9a688;
+}
+.mascot * { transform-box: view-box; }
+.mascot .m-shadow { fill: #000; opacity: .16; transform-origin: 32px 58.6px; animation: mShadow 3.6s ease-in-out infinite; }
+.mascot .m-body, .mascot .m-paw { fill: var(--m-body); }
+.mascot .m-capb { fill: var(--m-cap); }
+.mascot .m-band { fill: none; stroke: var(--m-cream); stroke-width: 3.6; stroke-linecap: round; }
+.mascot .m-pom { fill: var(--m-cream); }
+.mascot .m-star { fill: var(--m-cream); opacity: .9; }
+.mascot.think .m-star, .mascot.draw .m-star { animation: mTwinkle 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes mTwinkle { 50% { opacity: .35; transform: scale(.7); } }
+.mascot .m-blk { fill: var(--m-cream); stroke: var(--m-cream-2); stroke-width: 1.2; }
+.mascot .m-stitch { fill: none; stroke: var(--m-cream-2); stroke-width: 1.3; stroke-dasharray: 2 2.6; stroke-linecap: round; }
+.mascot .m-sleep path { fill: none; stroke: var(--m-ink); stroke-width: 2.6; stroke-linecap: round; }
+.mascot .m-open { fill: var(--m-ink); opacity: 0; transform-origin: 32px 37.6px; }
+.mascot .m-blush { fill: var(--m-blush); opacity: .8; }
+.mascot .m-mouth { fill: var(--m-ink); transform-origin: 32px 42.3px; animation: mMouth 3.6s ease-in-out infinite; }
+.mascot .m-zz path { fill: none; stroke: var(--m-z); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transform-box: fill-box; transform-origin: center; animation: mZ 3.6s ease-out infinite; }
+.mascot .m-zz path:nth-child(2) { animation-delay: 1.2s; }
+.mascot .m-zz path:nth-child(3) { animation-delay: 2.4s; }
+.mascot .m-dots { opacity: 0; fill: var(--m-body); }
+/* tidur: bernapas pelan, selimut ikut naik-turun, topi bergoyang */
+.mascot .m-breath { transform-origin: 32px 52px; animation: mBreath 3.6s ease-in-out infinite; }
+.mascot .m-blanket { transform-origin: 32px 57px; animation: mBlanket 3.6s ease-in-out infinite; }
+.mascot .m-cap { transform-origin: 26px 30px; animation: mCap 3.6s ease-in-out infinite; }
+.mascot .m-bob { transform-origin: 32px 58px; }
+@keyframes mBreath { 0%, 100% { transform: none; } 50% { transform: scale(.985, 1.045); } }
+@keyframes mBlanket { 50% { transform: translateY(-.9px); } }
+@keyframes mCap { 0%, 100% { transform: none; } 50% { transform: rotate(-4deg); } }
+@keyframes mShadow { 50% { transform: scaleX(.94); opacity: .12; } }
+@keyframes mMouth { 50% { transform: scale(1.25, 1.35); } }
+@keyframes mZ { 0% { opacity: 0; transform: translate(-4px, 6px) scale(.4) rotate(-12deg); } 25% { opacity: 1; } 75% { opacity: .9; } 100% { opacity: 0; transform: translate(4px, -7px) scale(1.15) rotate(8deg); } }
+/* bekerja: bangun, mata berkedip, kepala mengangguk, kaki mengetik, titik berpikir */
+.mascot.think .m-sleep, .mascot.think .m-zz { display: none; }
+.mascot.think .m-open { opacity: 1; animation: mBlink 3.2s infinite; }
+.mascot.think .m-bob { animation: mBob .9s ease-in-out infinite; }
+.mascot.think .m-breath { animation-duration: .9s; }
+.mascot.think .m-cap { animation: mCapBusy .9s ease-in-out infinite; }
+.mascot.think .m-mouth { animation: none; transform: scale(.8); }
+.mascot.think .m-paw { transform-origin: center; transform-box: fill-box; animation: mType .28s ease-in-out infinite alternate; }
+.mascot.think .m-paw:last-of-type { animation-delay: .14s; }
+.mascot.think .m-dots { opacity: 1; }
+.mascot.think .m-dots circle { animation: mDot 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.mascot.think .m-dots circle:nth-child(2) { animation-delay: .2s; }
+.mascot.think .m-dots circle:nth-child(3) { animation-delay: .4s; }
+@keyframes mBlink { 0%, 90%, 100% { transform: none; } 94% { transform: scaleY(.12); } }
+@keyframes mBob { 50% { transform: translateY(-2.4px) rotate(-1.5deg); } }
+@keyframes mCapBusy { 50% { transform: rotate(-9deg); } }
+@keyframes mType { to { transform: translateY(-2.2px); } }
+@keyframes mDot { 0%, 100% { opacity: .2; transform: translateY(1.5px) scale(.8); } 45% { opacity: 1; transform: none; } }
+/* muncul: meletup masuk (squash & stretch), selimut naik, zzz mulai setelahnya */
+.mascot.draw { animation: mPop .85s var(--bounce) both; }
+.mascot.draw .m-blanket { animation: mBlanketIn .75s var(--spring) .3s both, mBlanket 3.6s ease-in-out 1.05s infinite; }
+.mascot.draw .m-cap { animation: mCapIn .9s var(--bounce) .15s both, mCap 3.6s ease-in-out 1.05s infinite; }
+.mascot.draw .m-zz path { animation-delay: 1.1s; }
+.mascot.draw .m-zz path:nth-child(2) { animation-delay: 2.3s; }
+.mascot.draw .m-zz path:nth-child(3) { animation-delay: 3.5s; }
+@keyframes mPop { 0% { opacity: 0; transform: translateY(30%) scale(.2); } 55% { opacity: 1; transform: translateY(-6%) scale(1.12, .88); } 78% { transform: scale(.95, 1.07); } 100% { transform: none; } }
+@keyframes mBlanketIn { from { opacity: 0; transform: translateY(16px); } }
+@keyframes mCapIn { 0% { transform: translateY(-14px) rotate(-30deg); opacity: 0; } 60% { opacity: 1; } }
+/* dicolek: kaget melompat, mata terbuka sebentar */
+.mascot.tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.mascot.poke .m-bob { animation: mJump .7s var(--bounce); }
+.mascot.poke .m-sleep, .mascot.poke .m-zz { display: none; }
+.mascot.poke .m-open { opacity: 1; animation: none; transform: scale(1.15); }
+.mascot.poke .m-mouth { animation: none; transform: scale(1.6, 1.8); }
+@keyframes mJump { 0% { transform: none; } 25% { transform: scale(1.1, .85); } 55% { transform: translateY(-9px) scale(.94, 1.08); } 80% { transform: scale(1.05, .95); } 100% { transform: none; } }
+.mascot.xl { width: 72px; height: 72px; }
 
 /* teks berkilau (status "berpikir…", memuat) */
 .shimmer {
@@ -282,7 +342,7 @@ code.inline, .kbd { font-family: var(--mono); background: var(--surface-2); bord
 .err:empty { min-height: 0; margin: 0; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; flex: none; }
 .loading { display: flex; align-items: center; gap: 10px; color: var(--dim); padding: 14px 4px; }
-.loading .spark { width: 20px; height: 20px; }
+.loading .mascot { width: 24px; height: 24px; }
 .skeleton { height: 76px; border-radius: var(--r); margin: 10px 0; background: var(--surface); animation: skel .9s ease-in-out infinite alternate; animation-delay: calc(var(--i, 0) * 150ms); }
 .lead { font-size: 16px; color: var(--fg-2); margin: 0 0 22px; line-height: 1.55; }
 .fine { font-size: 12px; color: var(--dim); margin-top: 16px; text-align: center; }
@@ -401,6 +461,7 @@ button.card:active .chev { transform: translateX(3px); }
   background: var(--surface); color: var(--dim); animation: popIn .6s var(--bounce) both;
 }
 .emptyart svg { width: 28px; height: 28px; }
+.emptyart .mascot { width: 50px; height: 50px; }
 .emptyart.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
 .emptyart.up { color: var(--accent); background: var(--accent-soft); }
 .quote { color: var(--fg); margin-top: 6px; font-family: var(--serif); font-size: 16px; font-style: italic; word-break: break-word; }
@@ -419,7 +480,7 @@ button.card:active .chev { transform: translateX(3px); }
 #bar:not([hidden]) ~ #view .hero { padding-top: 24px; }
 .scroll > .hero { min-height: 100%; }
 .hero.center { align-items: center; text-align: center; }
-.hero.center .spark.xl { margin-bottom: 22px; }
+.hero.center .mascot.xl { width: 96px; height: 96px; margin-bottom: 18px; }
 .hero > * { animation: rise .6s var(--spring) both; }
 .hero > :nth-child(2) { animation-delay: 60ms; }
 .hero > :nth-child(3) { animation-delay: 120ms; }
@@ -427,7 +488,7 @@ button.card:active .chev { transform: translateX(3px); }
 .hero > :nth-child(5) { animation-delay: 240ms; }
 .hero > :nth-child(n+6) { animation-delay: 300ms; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
-.brand .spark.xl { width: 40px; height: 40px; }
+.brand .mascot.xl { width: 56px; height: 56px; }
 .wordmark { font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
 .hero.login h1 { margin-bottom: 14px; }
 .feats { display: grid; gap: 4px; margin: 0 0 28px; }
@@ -436,7 +497,7 @@ button.card:active .chev { transform: translateX(3px); }
 .feat b { display: block; font-size: 14.5px; }
 .feat span span { color: var(--dim); font-size: 13px; }
 .greet { display: flex; align-items: center; gap: 12px; margin: 18px 2px 4px; }
-.greet .spark { width: 34px; height: 34px; }
+.greet .mascot { width: 46px; height: 46px; margin-top: -6px; }
 .greet h1 { margin: 0; font-size: clamp(25px, 7vw, 32px); animation: rise .6s var(--spring) .1s both; }
 .greet-sub { margin: 4px 2px 0; }
 .homemeta { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
@@ -470,9 +531,9 @@ button.card:active .chev { transform: translateX(3px); }
 
 /* tarik untuk muat ulang */
 .ptr { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); opacity: 0; pointer-events: none; }
-.ptr .spark { width: 26px; height: 26px; }
+.ptr .mascot { width: 34px; height: 34px; }
 .ptr.spin { opacity: 1 !important; }
-.ptr.spin .spark { animation: spin 1s linear infinite; }
+.ptr.spin .mascot .m-bob { animation: mBob .5s ease-in-out infinite; }
 
 /* banner (pembaruan / GitHub) */
 .banner {
@@ -487,7 +548,8 @@ button.card:active .chev { transform: translateX(3px); }
 .banner .chev { color: var(--dim); }
 .banner.up { background: var(--accent-soft); }
 .banner.up .bi { background: var(--accent); color: var(--accent-fg); }
-.banner.up .bi svg { animation: spin 6s linear infinite; }
+.banner.up .bi svg:not(.mascot) { animation: spin 6s linear infinite; }
+.banner .bi .mascot { width: 30px; height: 30px; }
 .banner.warn { background: color-mix(in srgb, var(--bad) 12%, transparent); }
 .banner.warn .bi { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); }
 
@@ -517,7 +579,7 @@ html.drawer-open #app { transform: translateX(calc(min(84vw, 330px) * .28)); }
 html:not(.drawer-open) #drawerScrim { pointer-events: none; }
 html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #app { transition: none; }
 .dhead { display: flex; align-items: center; gap: 10px; padding: 10px 8px 16px; }
-.dhead .spark { width: 26px; height: 26px; }
+.dhead .mascot { width: 34px; height: 34px; }
 .dnew {
   display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 10px; border-radius: 16px;
   font-weight: 600; color: var(--fg); transition: background .15s, transform .25s var(--spring);
@@ -674,7 +736,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 
 /* sambutan sesi kosong */
 .welcome { text-align: center; padding: 34px 4px 8px; white-space: normal; }
-.welcome .spark { margin: 0 auto 16px; display: block; }
+.welcome .mascot { margin: 0 auto 14px; display: block; width: 92px; height: 92px; }
 .welcome h2 { font-size: clamp(22px, 6.4vw, 28px); line-height: 1.25; margin: 0 0 12px; animation: rise .6s var(--spring) .1s both; }
 .welcome .tags { animation: rise .6s var(--spring) .18s both; }
 .sugs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 22px 0 12px; text-align: left; }
@@ -745,8 +807,8 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
   background: color-mix(in srgb, var(--bg) 88%, transparent); pointer-events: none;
   animation: rise .4s var(--spring) both;
 }
-#working .spark { width: 20px; height: 20px; }
-#working.wait .spark { animation-duration: 12s; }
+#working .mascot { width: 26px; height: 26px; margin: -4px 0 -2px; }
+#working.wait .mascot .m-bob, #working.wait .mascot .m-paw { animation-duration: 2.4s; }
 #working .wl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #working.wait .wl { color: var(--accent); background: none; animation: pulse 1.4s ease-in-out infinite; }
 #working .t { color: var(--dim); flex: none; font-variant-numeric: tabular-nums; font-size: 12px; }
@@ -1023,7 +1085,7 @@ input[type=range]:disabled { opacity: .3; }
   .feats { display: none; }
   .hero { justify-content: flex-start; }
   .welcome { padding-top: 10px; }
-  .welcome .spark, .welcome .tips { display: none; }
+  .welcome .mascot, .welcome .tips { display: none; }
 }
 /* Layar pendek + sedang mengetik: sembunyikan pil mode & dok tetap ringkas. */
 html.kb.short #modes { display: none; }

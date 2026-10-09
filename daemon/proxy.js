@@ -1,4 +1,4 @@
-// pocketcode — Loopback proxy lokal untuk sanitasi header & router forwarding.
+// snugcode — Loopback proxy lokal untuk sanitasi header & router forwarding.
 // 1. Mencegah header SDK bawaan (user-agent claude-cli, x-app: cli) memicu injeksi
 //    parameter yang tidak valid pada router upstream (seperti reasoning_effort pada Anthropic).
 // 2. Menetralkan suffix `_ide` pada nama tool yang dihasilkan router upstream / Claude Code IDE
@@ -45,7 +45,7 @@ export function createToolNameRewriter() {
   };
 }
 
-// `getKey()`: key 9router terkini (dibaca setiap request agar `pocketcode setup` langsung berlaku).
+// `getKey()`: key 9router terkini (dibaca setiap request agar `snugcode setup` langsung berlaku).
 export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
   const localToken = 'pc-local-' + randomBytes(24).toString('hex');
   const want = Buffer.from(localToken);
@@ -64,7 +64,7 @@ export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
     req.socket?.setNoDelay?.(true);
     if (!authorized(req)) {
       res.writeHead(401, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'pocketcode proxy: token lokal tidak valid' } }));
+      return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'snugcode proxy: token lokal tidak valid' } }));
     }
     const headers = { ...req.headers, host: target.host };
     delete headers['x-api-key'];
@@ -75,7 +75,7 @@ export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
     delete headers['x-app'];
     delete headers.connection;
     if (typeof headers['user-agent'] === 'string' && headers['user-agent'].includes('claude-cli')) {
-      headers['user-agent'] = 'pocketcode/0.1';
+      headers['user-agent'] = 'snugcode/0.1';
     }
 
     const fail = (msg) => {

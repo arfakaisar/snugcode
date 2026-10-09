@@ -51,7 +51,7 @@ async function download(dest) {
 }
 
 let installing = null;
-// cloudflared: config.json → ~/.pocketcode/bin → PATH → unduh sekali dari rilis GitHub.
+// cloudflared: config.json → ~/.snugcode/bin → PATH → unduh sekali dari rilis GitHub.
 export function cloudflaredPath(cfg = {}) {
   if (cfg.cloudflaredExecutable) return Promise.resolve(cfg.cloudflaredExecutable);
   const local = path.join(BIN_DIR, EXE);
@@ -82,7 +82,7 @@ export function startGate(target, token) {
   };
   const deny = (res) => {
     res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(page('Link preview tidak valid', 'Buka preview lewat tombol Preview di aplikasi pocketcode.'));
+    res.end(page('Link preview tidak valid', 'Buka preview lewat tombol Preview di aplikasi snugcode.'));
   };
 
   /** @type {http.Server & { retarget?: (port: number) => void }} */

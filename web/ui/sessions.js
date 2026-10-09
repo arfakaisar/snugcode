@@ -3,7 +3,7 @@ import * as M from '../../shared/models.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
-import { ago, busyButton, drawer, greeting, h, haptic, ic, onLongPress, pullToRefresh, scrollCol, skeletons, spark, toast, ui } from './dom.js';
+import { ago, busyButton, drawer, greeting, h, haptic, ic, onLongPress, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { checkUpdateStatus, ghBad, modelItem, renderGhBanner, renderUpdateBanner, showMachineMenu } from './machine.js';
 import { pickModel } from './model-picker.js';
 import { accountMenu } from './push.js';
@@ -29,7 +29,7 @@ export async function showSessions() {
   const sc = scrollCol(
     h('div', { id: 'updateBanner' }),
     h('div', { id: 'ghBanner' }),
-    h('div', { class: 'greet' }, spark('draw'), h('h1', { class: 'serif' }, greeting() + (app.me?.login ? ', ' + app.me.login : ''))),
+    h('div', { class: 'greet' }, mascot('draw tap'), h('h1', { class: 'serif' }, greeting() + (app.me?.login ? ', ' + app.me.login : ''))),
     h('div', { id: 'homeMeta', class: 'homemeta' }),
     list,
   );
@@ -156,7 +156,7 @@ function buildDrawer() {
   }, () => {});
   const login = app.me?.login;
   return [
-    h('div', { class: 'dhead' }, spark('draw'), h('span', { class: 'wordmark' }, 'pocketcode')),
+    h('div', { class: 'dhead' }, mascot('draw tap'), h('span', { class: 'wordmark' }, 'snugcode')),
     h('button', { class: 'dnew', onclick: go(showNewSession) }, h('span', { class: 'si' }, ic('plus')), 'Sesi baru'),
     h('div', { class: 'dnav' },
       h('button', { class: 'ditem' + (cur.session ? '' : ' on'), onclick: go(() => ((ui.dir = -1), showSessions())) }, ic('home'), 'Beranda'),
@@ -237,7 +237,7 @@ export async function pickBranch(repo) {
     segOld.classList.toggle('on', v === 'existing');
     newName.hidden = v !== 'new';
     branchLabel.textContent = v === 'new' ? 'Dibuat dari' : 'Branch yang dilanjutkan';
-    hint.textContent = v === 'new' ? 'Kosongkan nama untuk branch otomatis pocket/<id>.' : 'Perubahan baru akan ditambahkan ke branch ini.';
+    hint.textContent = v === 'new' ? 'Kosongkan nama untuk branch otomatis snug/<id>.' : 'Perubahan baru akan ditambahkan ke branch ini.';
   };
   setMode('new');
   let model = app.current.info.model;

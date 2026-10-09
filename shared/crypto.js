@@ -44,6 +44,8 @@ export const normalizePin = (pin) => String(pin).trim().toLowerCase();
 
 // PIN -> password-related string. Disimpan daemon (bukan PIN mentahnya).
 export async function pinToPrs(pin, machineId) {
+  // Label 'pocketcode-*' di file ini adalah identitas protokol, bukan merek: jangan diganti, atau
+  // HP & PC yang sudah dipasangkan (dan versi campuran saat pembaruan) tidak bisa saling verifikasi.
   return scryptAsync(enc(normalizePin(pin)), enc('pocketcode-pin:' + machineId), { N: 2 ** 15, r: 8, p: 1, dkLen: 32 });
 }
 

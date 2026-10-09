@@ -2,7 +2,7 @@
 import { stableCut } from '../md.js';
 import { doneParts, todoItems, toolActivity } from '../../shared/events.js';
 import { app } from './state.js';
-import { anim, copyText, h, haptic, ic, md, spark, toast, ui } from './dom.js';
+import { anim, copyText, h, haptic, ic, md, mascot, toast, ui } from './dom.js';
 import { localNotify } from './push.js';
 
 // ---------- Renderer event agen ----------
@@ -102,7 +102,7 @@ export class Renderer {
     const name = s.repo.split('/')[1] || s.repo;
     this.append(
       h('div', { class: 'welcome' },
-        spark('draw xl'),
+        mascot('draw xl tap'),
         h('h2', { class: 'serif' }, 'Apa yang mau dikerjakan di ', h('span', { class: 'accent-text' }, name), '?'),
         h('div', { class: 'tags', style: 'justify-content:center' }, h('span', { class: 'tag' }, ic('branch'), s.branch), s.base ? h('span', { class: 'tag' }, 'dari ' + s.base) : null),
         h('div', { class: 'sugs' },
@@ -287,7 +287,7 @@ export class Renderer {
     this.renderDock();
     if (!this.quiet) {
       haptic([40, 60, 40]);
-      localNotify('pocketcode — butuh izin', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
+      localNotify('snugcode — butuh izin', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
     }
   }
   permAnswer(e) {

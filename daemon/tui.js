@@ -1,4 +1,4 @@
-// pocketcode — UI terminal (seperti `claude`), tersambung ke daemon lokal.
+// snugcode — UI terminal (seperti `claude`), tersambung ke daemon lokal.
 // Sesi yang sama bisa dilanjutkan di HP dan di terminal.
 import net from 'node:net';
 import fs from 'node:fs';
@@ -166,7 +166,7 @@ function ghCodeBox(p, copied) {
   ];
 }
 
-// `pocketcode login` saat daemon berjalan: login lewat daemon (tanpa restart).
+// `snugcode login` saat daemon berjalan: login lewat daemon (tanpa restart).
 export async function loginViaDaemon({ openBrowser = true } = {}) {
   const { client } = await tryConnect(loadSecrets().localToken);
   try {
@@ -190,7 +190,9 @@ export async function loginViaDaemon({ openBrowser = true } = {}) {
 }
 
 // ---------- utilitas tampilan ----------
-const SPIN = ['✶', '✸', '✹', '✺', '✹', '✸'];
+// Maskot snugcode yang sedang bekerja: berkedip sambil "mengetik" (lebar tetap 8 kolom).
+const SPIN = ['(ᵔᴗᵔ)   ', '(ᵔᴗᵔ).  ', '(ᵔᴗᵔ).. ', '(ᵔᴗᵔ)...', '(-ᴗ-)...', '(ᵔᴗᵔ)   '];
+const LOGO = '(˘ᵕ˘)ᶻ';
 const fmtDur = (ms) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
@@ -318,7 +320,7 @@ class App {
       const act = this.perms.length ? 'Menunggu izinmu' : this.busyText || this.activity || 'Berpikir';
       const meta = this.running ? `(${fmtDur(Date.now() - this.runStart)} · ${bold('esc')} untuk hentikan)` : '';
       lines.push('');
-      lines.push(...hardWrap(`${gradient(g, PAL.yellow, PAL.green)} ${c.yellow(trunc(act, W - 30))}${c.yellow('…')} ${dim(meta)}`, W - 1));
+      lines.push(...hardWrap(`${gradient(g, PAL.peach, PAL.clay)} ${c.clay(trunc(act, W - 34))}${c.clay('…')} ${dim(meta)}`, W - 1));
     }
     lines.push('');
 
@@ -812,7 +814,7 @@ class App {
     const kv = (k, v) => row(`  ${dim(k.padEnd(7))} ${v}`);
     const lines = [
       c.line('╭' + '─'.repeat(W - 2) + '╮'),
-      row(`${gradient('❯_ pocketcode')}  ${dim('— Claude Code harness · 9router')}`),
+      row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— Claude Code harness · 9router')}`),
       row(),
       row(`  ${dim('/help')} bantuan  ${dim('/model')} model & effort  ${dim('!')} shell`),
       row(),
@@ -1143,7 +1145,7 @@ class App {
     ];
     this.print([
       '',
-      bold(gradient('pocketcode')) + dim('  — perintah'),
+      bold(gradient('snugcode', PAL.peach, PAL.clay)) + dim('  — perintah'),
       ...COMMANDS.map(([cmd, d]) => `  ${c.cyan(cmd.padEnd(11))} ${c.soft(d)}`),
       '',
       bold('Pintasan'),
@@ -1313,14 +1315,14 @@ class App {
             const st = await this.cl.call('updateStatus');
             this.busyText = null;
             if (!st.updateAvailable && arg !== '--force') {
-              return this.setFlash(`✓ pocketcode sudah versi terbaru (${st.currentCommit})`);
+              return this.setFlash(`✓ snugcode sudah versi terbaru (${st.currentCommit})`);
             }
             this.print([
               '',
               bold(c.yellow('⬆ Pembaruan tersedia: ')) + c.yellow(st.latestCommit) + (st.latestMessage ? c.soft(' — ' + st.latestMessage) : ''),
               dim(`  Komit saat ini: ${st.currentCommit}`),
             ]);
-            if (!(await this.confirm('Update pocketcode', 'Pasang pembaruan dan restart daemon sekarang?'))) return;
+            if (!(await this.confirm('Update snugcode', 'Pasang pembaruan dan restart daemon sekarang?'))) return;
             this.busyText = 'Memasang pembaruan…';
             this.scheduleRender();
             const res = await this.cl.call('update');
@@ -1350,7 +1352,7 @@ class App {
           }
         }
         case '/restart': {
-          if (!(await this.confirm('Restart daemon', 'Restart daemon pocketcode sekarang?'))) return;
+          if (!(await this.confirm('Restart daemon', 'Restart daemon snugcode sekarang?'))) return;
           try {
             await this.cl.call('restart');
             this.print(['', c.green('● ') + bold('Daemon sedang me-restart…')]);
@@ -1515,7 +1517,7 @@ class App {
     out.write(this.clearLive() + '\x1b[?2004l\x1b[?25h');
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     const s = this.session;
-    out.write(`\n${gradient('❯_')} ${dim('sampai jumpa.')}${s ? dim(' Sesi tetap ada di PC — lanjutkan di HP atau jalankan ') + c.soft('pocketcode') + dim(' lagi.') : ''}\n`);
+    out.write(`\n${gradient(LOGO + 'ᶻ', PAL.peach, PAL.clay)} ${dim('sampai jumpa.')}${s ? dim(' Sesi tetap ada di PC — lanjutkan di HP atau jalankan ') + c.soft('snugcode') + dim(' lagi.') : ''}\n`);
     this.cl.sock.end();
     process.exit(0);
   }
@@ -1532,7 +1534,7 @@ function gitTop(dir) {
 // ---------- main ----------
 export async function runTui({ prompt = '', pick = false } = {}) {
   if (!process.stdin.isTTY || !out.isTTY) {
-    console.error('pocketcode perlu terminal interaktif. Untuk menjalankan daemon saja: pocketcode start');
+    console.error('snugcode perlu terminal interaktif. Untuk menjalankan daemon saja: snugcode start');
     process.exit(1);
   }
   out.write(dim('  menghubungkan ke daemon…') + '\r');
@@ -1583,7 +1585,7 @@ export async function runTui({ prompt = '', pick = false } = {}) {
     app.closed = true;
     out.write(app.clearLive() + '\x1b[?2004l\x1b[?25h');
     process.stdin.setRawMode(false);
-    console.error(c.red('\n✗ Koneksi ke daemon terputus.') + dim(' Jalankan pocketcode lagi.'));
+    console.error(c.red('\n✗ Koneksi ke daemon terputus.') + dim(' Jalankan snugcode lagi.'));
     process.exit(1);
   });
 

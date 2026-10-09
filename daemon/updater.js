@@ -1,4 +1,4 @@
-// pocketcode — Pemeriksaan, pembaruan jarak jauh, dan restart daemon.
+// snugcode — Pemeriksaan, pembaruan jarak jauh, dan restart daemon.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'daemon', 'cli.js');
 const PID_FILE = path.join(HOME, 'daemon.pid');
 
-const UPSTREAM_API = 'https://api.github.com/repos/arfakaisar/pocketcode';
+const UPSTREAM_API = 'https://api.github.com/repos/arfakaisar/snugcode';
 
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
@@ -62,7 +62,7 @@ export function getInstallInfo(cfg = loadConfig()) {
 }
 
 async function githubApi(p, sec = {}) {
-  const headers = { 'user-agent': 'pocketcode', accept: 'application/vnd.github+json' };
+  const headers = { 'user-agent': 'snugcode', accept: 'application/vnd.github+json' };
   if (sec.githubToken) headers.authorization = 'Bearer ' + sec.githubToken;
   const res = await fetch(UPSTREAM_API + p, { headers, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error('GitHub API ' + res.status);
@@ -167,7 +167,7 @@ async function npmInstall(args, opts = {}) {
 async function globalPackageRoot() {
   try {
     const { stdout } = await execFileAsync(npmCmd, ['root', '-g'], { timeout: 20000, shell: process.platform === 'win32' });
-    if (stdout.trim()) return path.join(stdout.trim(), 'pocketcode');
+    if (stdout.trim()) return path.join(stdout.trim(), 'snugcode');
   } catch {}
   return ROOT;
 }

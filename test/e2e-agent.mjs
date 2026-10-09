@@ -1,11 +1,12 @@
 // Uji end-to-end agen: HP (web/conn.js) -> relay lokal -> daemon asli -> Claude Agent SDK -> mock 9router.
 // Memeriksa kanal biner, izin dari HP, checkpoint/rewind, proses claude dipakai ulang antar prompt,
-// ganti model, Stop, klien lama (frame teks), penolakan akses ~/.pocketcode, dan IPC terminal.
+// ganti model, Stop, klien lama (frame teks), penolakan akses ~/.snugcode, dan IPC terminal.
 //   Terminal 1: npm run dev:relay        (relay dev di http://127.0.0.1:8787; TOKEN_SECRET di relay/.dev.vars)
 //   Terminal 2: npm run test:e2e         (Linux/macOS; butuh binary native Claude dari npm install)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { setup, ok, sleep, routerLog } from './e2e-harness.mjs';
 
@@ -74,7 +75,7 @@ const res3 = await waitFor((e) => e.k === 'result');
 assert.equal(res3.ok, false);
 assert.match(res3.d, /kredensial|tidak boleh/);
 await waitFor((e) => e.k === 'done');
-ok('Read ~/.pocketcode/secrets.json ditolak walau auto-izin: ' + res3.d.slice(0, 80));
+ok('Read ~/.snugcode/secrets.json ditolak walau auto-izin: ' + res3.d.slice(0, 80));
 
 // Pesan > 1MB lewat kanal biner (dipecah per 256KB)
 fs.writeFileSync(path.join(repo, 'big.txt'), ('y'.repeat(99) + '\n').repeat(15000));
@@ -142,7 +143,9 @@ ok('index.json valid');
 // Terminal (IPC lokal, seperti TUI) memakai tabel RPC yang sama; shutdown hanya dari terminal
 await assert.rejects(conn.call('shutdown'), /Hanya dari terminal/);
 const net = await import('node:net');
-const sock = net.connect(path.join(HOME, 'daemon.sock'));
+// Sama dengan IPC_PATH di daemon/config.js: named pipe di Windows, unix socket di macOS/Linux.
+const IPC = process.platform === 'win32' ? '\\\\.\\pipe\\pocketcode-' +createHash('sha1').update(HOME.toLowerCase()).digest('hex').slice(0, 12) : path.join(HOME, 'daemon.sock');
+const sock = net.connect(IPC);
 const lines = [];
 let lineWake;
 let lbuf = '';

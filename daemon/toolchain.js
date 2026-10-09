@@ -2,7 +2,7 @@
 //
 // pnpm/yarn tanpa instalasi global: banyak repo memakainya, tapi PC belum tentu punya
 // (dan sejak Node 25 corepack tidak lagi ikut Node). Corepack dipasang sekali ke
-// ~/.pocketcode/tools, shim pnpm/yarn-nya ke ~/.pocketcode/bin/pm. Versi pnpm/yarn mengikuti
+// ~/.snugcode/tools, shim pnpm/yarn-nya ke ~/.snugcode/bin/pm. Versi pnpm/yarn mengikuti
 // "packageManager" di package.json proyek. Folder shim ditaruh di AKHIR PATH, jadi pnpm/yarn
 // milik pengguna (bila ada) tetap diutamakan.
 import fs from 'node:fs';

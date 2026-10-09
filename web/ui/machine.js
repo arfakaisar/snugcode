@@ -4,7 +4,7 @@ import * as M from '../../shared/models.js';
 import { Conn, store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
-import { anim, busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, spark, toast, ui } from './dom.js';
+import { anim, busyButton, copyText, h, haptic, ic, isOldDaemon, loading, menuItem, mascot, toast, ui } from './dom.js';
 import { pickModel } from './model-picker.js';
 import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
@@ -19,7 +19,7 @@ export function openMachine(m, { sid } = {}) {
   store.set('last', { mid: m.id, sid });
   const msg = h('div', { class: 'muted' });
   const showStatus = (title, text, busy = true) =>
-    ui.view(h('div', { class: 'hero center' }, busy ? spark('think xl') : h('div', { class: 'lockicon' }, ic('monitor')), h('h1', { class: 'serif' + (busy ? ' shimmer' : '') }, title), msg, text ? h('p', { class: 'dim small' }, text) : null));
+    ui.view(h('div', { class: 'hero center' }, busy ? mascot('think xl') : h('div', { class: 'lockicon' }, ic('monitor')), h('h1', { class: 'serif' + (busy ? ' shimmer' : '') }, title), msg, text ? h('p', { class: 'dim small' }, text) : null));
   ui.set(m.name, { sub: 'menghubungkan…', back: goMachines, dot: 'busy' });
   msg.textContent = 'Membuka kanal terenkripsi ke PC…';
   showStatus('Menghubungkan');
@@ -29,7 +29,7 @@ export function openMachine(m, { sid } = {}) {
       ui.sub('offline');
       if (!app.current.ready) {
         msg.textContent = 'PC sedang offline.';
-        showStatus('Menunggu PC', 'Pastikan pocketcode berjalan di PC (pocketcode autostart on) dan PC tidak tertidur. Halaman ini tersambung otomatis begitu PC online.', true);
+        showStatus('Menunggu PC', 'Pastikan snugcode berjalan di PC (snugcode autostart on) dan PC tidak tertidur. Halaman ini tersambung otomatis begitu PC online.', true);
       } else toast('PC offline — menunggu tersambung lagi…', true);
     } else if (s === 'online' || s === 'reconnecting') {
       ui.dot('busy');
@@ -59,7 +59,7 @@ export function openMachine(m, { sid } = {}) {
   app.conn.on('notice', (msg) => {
     if (app.current?.session?.id === msg.sid && document.visibilityState === 'visible') return;
     toast(`${msg.title}: ${msg.msg}`);
-    localNotify('pocketcode', `${msg.title}: ${msg.msg}`);
+    localNotify('snugcode', `${msg.title}: ${msg.msg}`);
   });
   app.conn.connect();
 }
@@ -98,9 +98,9 @@ export function showPin(m) {
     haptic(60);
     err.textContent =
       r.reason === 'pin' ? `PIN salah.${r.left != null ? ` Sisa ${r.left} percobaan.` : ''}`
-      : r.reason === 'locked' ? 'Pairing terkunci karena terlalu banyak PIN salah. Jalankan `pocketcode pin` di PC.'
+      : r.reason === 'locked' ? 'Pairing terkunci karena terlalu banyak PIN salah. Jalankan `snugcode pin` di PC.'
       : r.reason === 'slow' ? 'Terlalu cepat, tunggu beberapa detik.'
-      : r.reason === 'nopin' ? 'PC belum punya PIN. Jalankan `pocketcode setup`.'
+      : r.reason === 'nopin' ? 'PC belum punya PIN. Jalankan `snugcode setup`.'
       : 'Gagal: ' + r.reason;
   };
   btn.onclick = go;
@@ -139,6 +139,14 @@ async function runUpdate(btn, after) {
 export function renderUpdateBanner() {
   const el = document.getElementById('updateBanner');
   if (!el) return;
+  if (legacyDaemon())
+    return el.replaceChildren(
+      h('button', { class: 'banner up', onclick: () => migrateSheet() },
+        h('span', { class: 'bi' }, mascot()),
+        h('span', { class: 'grow' }, h('div', { class: 'name' }, 'Pindahkan PC ini ke snugcode'), h('div', { class: 'sub' }, 'PC masih menjalankan versi lama (pocketcode). Ketuk untuk migrasi — pairing & sesi tetap.')),
+        ic('right', 'chev'),
+      ),
+    );
   const st = app.current?.updateStatus;
   if (!st?.updateAvailable) return el.replaceChildren();
 
@@ -173,7 +181,7 @@ export function onUpdateStatus(st, notify = false) {
   showSessionsMeta();
   if (st.updateAvailable && !was && notify) {
     haptic(15);
-    toast(`Pembaruan pocketcode tersedia (${st.latestCommit})! Ketuk banner untuk perbarui.`, false, 6000);
+    toast(`Pembaruan snugcode tersedia (${st.latestCommit})! Ketuk banner untuk perbarui.`, false, 6000);
   }
 }
 
@@ -183,6 +191,59 @@ export async function checkUpdateStatus(notify = false) {
     const st = await app.conn.call('updateStatus');
     onUpdateStatus(st, notify);
   } catch {}
+}
+
+// ---------- Migrasi dari pocketcode (nama lama) ----------
+// Daemon versi lama tidak mengirim `brand`. Pembaruan jarak jauhnya tidak bisa pindah sendiri ke paket
+// baru (ia memasang paket `snugcode` lalu menyalakan ulang kode lamanya), jadi migrasi dilakukan
+// dengan perintah: pasang snugcode → hentikan & hapus pocketcode → nyalakan snugcode. Folder data
+// ~/.pocketcode tetap dipakai, sehingga pairing HP, sesi, dan worktree tidak berubah.
+export const legacyDaemon = () => !!app.current?.info && !app.current.info.brand;
+const PKG = 'github:arfakaisar/snugcode';
+export function migrateCommands(platform) {
+  if (platform === 'win32')
+    return {
+      manual: `npm i -g ${PKG} --include=optional; if ($?) { pocketcode stop; npm rm -g pocketcode; snugcode autostart on }`,
+      // Lewat sesi: proses terpisah (tidak ikut mati saat daemon lama dihentikan); gagal pasang = tidak ada yang diubah.
+      viaSession: `Start-Process cmd -WindowStyle Hidden -ArgumentList '/c npm i -g ${PKG} --include=optional > "%USERPROFILE%\\.pocketcode\\migrate.log" 2>&1 && (pocketcode stop & ping -n 4 127.0.0.1 >nul & npm rm -g pocketcode & snugcode autostart on)'`,
+    };
+  const steps = `npm i -g ${PKG} --include=optional && { pocketcode stop; npm rm -g pocketcode; snugcode autostart on; }`;
+  return {
+    manual: steps,
+    viaSession: `node -e "require('child_process').spawn('sh',['-c',process.argv[1]],{detached:true,stdio:'ignore'}).unref()" '{ ${steps}; } > ~/.pocketcode/migrate.log 2>&1'`,
+  };
+}
+
+export function migrateSheet() {
+  const cmds = migrateCommands(app.current?.info?.platform);
+  const copy = async (e) => (await copyText(cmds.manual)) && (e.currentTarget.classList.add('done'), toast('Perintah disalin'));
+  ui.sheet(
+    ui.head('Migrasi ke snugcode', { sub: app.current.m.name }),
+    h('div', { class: 'empty', style: 'padding:6px 0 10px' },
+      h('div', { class: 'emptyart up' }, mascot('draw xl tap')),
+      h('b', {}, 'PC ini masih memakai pocketcode'),
+      'Pasang snugcode, lalu hentikan & hapus versi lama. Pairing HP, sesi, dan worktree tetap — folder data ~/.pocketcode dipakai terus.',
+    ),
+    h('div', { class: 'label' }, 'Jalankan di terminal PC'),
+    h('div', { class: 'copyline' }, h('code', {}, cmds.manual), h('button', { class: 'copybtn', onclick: copy }, ic('copy'), 'salin')),
+    h('div', { class: 'label' }, 'Atau dari HP'),
+    h('button', {
+      class: 'btn primary',
+      onclick: async (ev) => {
+        if (!(await ui.confirm({ title: 'Migrasi sekarang?', text: 'Perintah dijalankan di PC lewat sesi yang sedang menganggur. Daemon mati ±1 menit selama memasang, lalu tersambung lagi sebagai snugcode.', ok: 'Migrasi', icon: 'push' }))) return;
+        try {
+          // Daemon lama tidak bisa membuat sesi tanpa repo, jadi dipakai sesi yang ada.
+          const target = (await app.conn.call('sessions')).find((x) => x.status !== 'running');
+          if (!target) throw new Error('tidak ada sesi yang menganggur. Buat sesi dulu, atau jalankan perintah di atas di terminal PC.');
+          await app.conn.call('send', { id: target.id, text: '!' + cmds.viaSession });
+          toast('Migrasi berjalan di PC. Tunggu PC tersambung lagi…', false, 8000);
+        } catch (err) {
+          toast('Gagal: ' + err.message, true);
+        }
+      },
+    }, ic('push'), 'Migrasi otomatis (via sesi)'),
+    h('div', { class: 'fine' }, 'Log migrasi: ~/.pocketcode/migrate.log di PC.'),
+  );
 }
 
 // ---------- Login GitHub PC (dari HP) ----------
@@ -250,7 +311,7 @@ export async function githubLoginSheet() {
     body.replaceChildren(
       h('div', { class: 'muted small' }, 'Masukkan kode ini di halaman GitHub, lalu tekan Authorize:'),
       h('div', { class: 'ghcode' }, h('span', {}, p.code), copyBtn),
-      p.error ? h('div', { class: 'err' }, p.error) : h('div', { class: 'loading', style: 'justify-content:center' }, spark('think'), h('span', {}, 'menunggu otorisasi · ', left)),
+      p.error ? h('div', { class: 'err' }, p.error) : h('div', { class: 'loading', style: 'justify-content:center' }, mascot('think'), h('span', {}, 'menunggu otorisasi · ', left)),
       h('a', { class: 'btn primary', href: p.uri, target: '_blank', rel: 'noopener', onclick: () => copyText(p.code) }, ic('github'), 'Salin kode & buka GitHub'),
       h('div', { class: 'dim small', style: 'margin-top:12px;text-align:center' }, p.uri.replace(/^https:\/\//, '')),
       p.error ? h('button', { class: 'btn', style: 'margin-top:10px', onclick: () => githubLoginSheet() }, ic('refresh'), 'Minta kode baru') : null,
@@ -261,7 +322,7 @@ export async function githubLoginSheet() {
     render(await app.conn.call('githubLogin'));
   } catch (e) {
     close();
-    body.replaceChildren(h('div', { class: 'err' }, /Metode tidak dikenal/.test(e.message) ? 'Perbarui pocketcode di PC untuk login GitHub dari HP (jalankan `pocketcode login` di PC).' : e.message));
+    body.replaceChildren(h('div', { class: 'err' }, /Metode tidak dikenal/.test(e.message) ? 'Perbarui snugcode di PC untuk login GitHub dari HP (jalankan `snugcode login` di PC).' : e.message));
   }
 }
 
@@ -305,7 +366,7 @@ export function showMachineMenu() {
     h('div', { class: 'group' },
       menuItem({
         icon: 'spark',
-        t1: 'Perbarui pocketcode di PC',
+        t1: 'Perbarui snugcode di PC',
         t2: info.commit ? `Versi: ${info.commit}${info.version ? ' (' + info.version + ')' : ''}` : 'Periksa & pasang pembaruan jarak jauh',
         onclick: () => updateMachineSheet(),
       }),
@@ -330,7 +391,7 @@ export function showMachineMenu() {
         t1: 'Restart daemon PC',
         t2: info.preventSleep ? 'Cegah PC sleep: aktif' : 'Mulai ulang koneksi daemon',
         onclick: async () => {
-          if (!(await ui.confirm({ title: 'Restart daemon?', text: 'Daemon pocketcode di PC dimulai ulang. Sesi tersambung lagi otomatis setelah beberapa detik.', ok: 'Restart', icon: 'refresh' }))) return;
+          if (!(await ui.confirm({ title: 'Restart daemon?', text: 'Daemon snugcode di PC dimulai ulang. Sesi tersambung lagi otomatis setelah beberapa detik.', ok: 'Restart', icon: 'refresh' }))) return;
           try {
             const r = await app.conn.call('restart');
             toast(r.message || 'Daemon me-restart…');
@@ -359,7 +420,7 @@ export async function updateMachineSheet() {
     body.replaceChildren(
       h('div', { class: 'empty', style: 'padding:16px 0' },
         h('div', { class: 'emptyart' + (hasUpdate ? ' up' : ' ok') }, ic(hasUpdate ? 'push' : 'check')),
-        h('b', {}, hasUpdate ? 'Pembaruan tersedia' : 'pocketcode sudah versi terbaru'),
+        h('b', {}, hasUpdate ? 'Pembaruan tersedia' : 'snugcode sudah versi terbaru'),
         hasUpdate && st.latestMessage ? h('div', { class: 'quote' }, st.latestMessage) : null,
         h('div', { class: 'tags', style: 'justify-content:center;margin-top:12px' },
           st.currentCommit ? h('span', { class: 'tag' }, 'sekarang ' + st.currentCommit) : null,
@@ -369,46 +430,7 @@ export async function updateMachineSheet() {
       btn,
     );
   } catch (e) {
-    if (isOldDaemon(e)) {
-      const isWin = app.current?.info?.platform === 'win32';
-      // Windows: claude.exe milik daemon yang masih jalan mengunci file → npm diam-diam
-      // melewati binary. Jalankan sebagai proses terpisah (lepas dari sesi ini) yang
-      // menghentikan daemon dulu, baru memasang, lalu menyalakan daemon lagi.
-      const upCmd = isWin
-        ? `Start-Process cmd -WindowStyle Hidden -ArgumentList '/c pocketcode stop & ping -n 4 127.0.0.1 >nul & npm i -g github:arfakaisar/pocketcode --include=optional > "%USERPROFILE%\\.pocketcode\\update.log" 2>&1 & pocketcode restart'`
-        : 'npm i -g github:arfakaisar/pocketcode --include=optional && pocketcode restart';
-      body.replaceChildren(
-        h('div', { class: 'empty', style: 'padding:16px 0' },
-          h('div', { class: 'emptyart up' }, ic('push')),
-          h('b', {}, 'Daemon PC perlu pembaruan awal'),
-          h('div', { class: 'dim small', style: 'margin-top:8px;line-height:1.5' },
-            'Daemon di PC masih versi lama sebelum ada fitur pembaruan otomatis jarak jauh. Ketuk tombol di bawah untuk memasang pembaruan ke PC lewat sesi aktif:',
-          ),
-          h('button', {
-            class: 'btn primary',
-            style: 'margin-top:14px',
-            onclick: async (btnEv) => {
-              const done = busyButton(btnEv.currentTarget, 'Mengirim perintah update…');
-              try {
-                // Perintah dijalankan lewat sesi yang sedang tidak sibuk. Daemon lama tidak bisa
-                // membuat sesi tanpa repo, jadi tanpa sesi pengguna diarahkan ke perintah manual.
-                const target = (await app.conn.call('sessions')).find((s) => s.status !== 'running');
-                if (!target) throw new Error('tidak ada sesi yang sedang menganggur. Buat sesi dulu, atau jalankan perintah di bawah langsung di terminal PC.');
-                await app.conn.call('send', { id: target.id, text: '!' + upCmd });
-                toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
-                ui.closeSheet();
-              } catch (err) {
-                done();
-                toast('Gagal: ' + err.message, true);
-              }
-            },
-          }, 'Perbarui PC sekarang (via sesi)'),
-          h('div', { class: 'dim small', style: 'margin-top:14px' }, 'Atau ketik langsung di chat sesi:'),
-          h('pre', { class: 'shout', style: 'user-select:all;text-align:left;word-break:break-all' }, '!' + upCmd),
-        ),
-      );
-      return;
-    }
+    if (isOldDaemon(e)) return migrateSheet();
     body.replaceChildren(
       h('div', { class: 'err' }, 'Gagal memeriksa pembaruan: ' + e.message),
       h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => updateMachineSheet() }, 'Coba lagi'),
