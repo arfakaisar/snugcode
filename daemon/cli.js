@@ -18,7 +18,7 @@ import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SES
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
-import { fastModelVariant } from '../shared/models.js';
+import { lightModel } from '../shared/models.js';
 import { checkUpdate, performUpdate } from './updater.js';
 import { writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
@@ -118,8 +118,10 @@ async function setup() {
     }
   }
   cfg.model = await pickModel(models, 'model', cfg.model || models[0]);
-  const smallDefault = cfg.smallModel || fastModelVariant(cfg.model);
-  cfg.smallModel = await pickModel(models, 'small-model', smallDefault);
+  // Subagen selalu memakai model ringan: Claude Haiku 5.5 / Gemini 3.8 Flash (otomatis per model utama).
+  delete cfg.smallModel;
+  const light = lightModel(cfg.model, models);
+  console.log(c.d(`  model ringan (subagen): ${light.kind === 'main' ? 'Haiku 5.5 & Gemini 3.8 Flash tidak ada di router, memakai model utama' : light.id}`));
 
   // 2. Semua pertanyaan dulu, supaya langkah login bisa diselesaikan sekaligus.
   console.log(c.b('\n2) GitHub (untuk clone, push, dan PR)'));
@@ -340,7 +342,7 @@ function status() {
     machine: cfg.machineName,
     router: cfg.routerUrl,
     model: cfg.model,
-    smallModel: cfg.smallModel,
+    lightModel: lightModel(cfg.model).id,
     github: cfg.githubLogin || null,
     devices: Object.keys(sec.devices).length,
     pinLocked: sec.pinFails >= 5,

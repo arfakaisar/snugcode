@@ -14,6 +14,29 @@ export const SCREENSHOT = 'mcp__pocketcode__preview_screenshot';
 // Tool yang tidak menjalankan perintah baru: tidak perlu izin.
 export const SAFE_DEV_TOOLS = ['dev_stop', 'dev_logs', 'dev_list', 'preview_screenshot'].map((n) => 'mcp__pocketcode__' + n);
 
+// Log konsol untuk model: baris kembar (spam HMR/re-render) digabung, tiap baris & totalnya dibatasi.
+// Error didahulukan; log biasa hanya mengisi sisa ruang.
+export function consoleSummary(logs, { maxLine = 400, maxTotal = 5000 } = {}) {
+  const seen = new Map();
+  for (const l of logs) {
+    const key = `[${l.level}] ${String(l.text).slice(0, maxLine)}`;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  const lines = [...seen].map(([k, n]) => (n > 1 ? `${k} (×${n})` : k));
+  const bad = lines.filter((l) => /^\[(error|exception|assert|warning)\]/.test(l));
+  const out = [];
+  let total = 0;
+  for (const l of [...bad, ...lines.filter((l) => !bad.includes(l))]) {
+    if (total + l.length > maxTotal) {
+      out.push(`… ${lines.length - out.length} more lines omitted`);
+      break;
+    }
+    out.push(l);
+    total += l.length + 1;
+  }
+  return out.join('\n');
+}
+
 export function devToolsServer(session) {
   const procs = session.procs;
   const run = (fn) => async (args) => {
@@ -40,30 +63,32 @@ export function devToolsServer(session) {
         }),
       ),
       tool('dev_stop', 'Stop a background process started with dev_start.', { name: z.string() }, run(async ({ name }) => (procs.stop(name), text('stopped ' + name)))),
-      tool('dev_logs', 'Read recent output of a background process.', { name: z.string(), chars: z.number().int().positive().max(50000).optional() }, run(async ({ name, chars }) => text(tail(procs.logs(name), chars || 6000)))),
+      tool('dev_logs', 'Read recent output of a background process (default last 4000 chars).', { name: z.string(), chars: z.number().int().positive().max(20000).optional() }, run(async ({ name, chars }) => text(tail(procs.logs(name), chars || 4000)))),
       tool('dev_list', 'List background processes of this session with status and port.', {}, run(async () => text(JSON.stringify(procs.list(), null, 1) || '[]'))),
       tool(
         'preview_screenshot',
-        'Open a page in a headless browser on the PC and return a screenshot plus console errors. Use after UI changes to verify the result visually. Default viewport is a phone (390x844).',
+        'Open a page in a headless browser on the PC and return a screenshot plus console errors. Use after visual UI changes. Default viewport is a phone (390x844). Pass image:false when only console errors/title are needed (much cheaper).',
         {
           url: z.string().optional().describe('Full URL; defaults to the first running dev server'),
           path: z.string().optional().describe('Path appended to the dev server URL, e.g. /login'),
           width: z.number().int().min(200).max(2560).optional(),
           height: z.number().int().min(200).max(2560).optional(),
           fullPage: z.boolean().optional(),
+          image: z.boolean().optional().describe('Return the screenshot image (default true)'),
         },
-        run(async ({ url, path = '/', width, height, fullPage }) => {
+        run(async ({ url, path = '/', width, height, fullPage, image = true }) => {
           if (!url) {
             // Proses terbaru: setelah agen menyalakan ulang server, yang lama bisa masih berjalan dengan kode basi.
             const p = procs.list().filter((x) => x.status === 'running' && x.port).sort((a, b) => b.startedAt - a.startedAt)[0];
             if (!p) return fail('No running dev server with a detected port. Start one with dev_start or pass url.');
             url = `http://localhost:${p.port}${path.startsWith('/') ? path : '/' + path}`;
           }
-          const r = await capture(url, { width, height, fullPage, cfg: session.mgr.config });
+          const r = await capture(url, { width, height, fullPage, scale: 1, cfg: session.mgr.config });
           // Tampilkan juga di HP (bukan riwayat: base64 terlalu besar untuk .jsonl). Batas frame relay ~1MB.
           if (r.data.length < 450_000) session.live({ k: 'shot', url, mime: r.mime, data: r.data });
-          const logs = r.logs.map((l) => `[${l.level}] ${l.text}`).join('\n');
-          return { content: [{ type: 'image', data: r.data, mimeType: r.mime }, { type: 'text', text: `${url} — "${r.title}"\nconsole:\n${logs || '(kosong)'}` }] };
+          const logs = consoleSummary(r.logs);
+          const info = { type: 'text', text: `${url} — "${r.title}"\nconsole:\n${logs || '(empty)'}` };
+          return { content: image ? [{ type: 'image', data: r.data, mimeType: r.mime }, info] : [info] };
         }),
       ),
     ],

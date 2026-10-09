@@ -6,7 +6,9 @@ import net from 'node:net';
 import * as C from '../shared/crypto.js';
 import { loadSecrets, saveSecrets, saveConfig, IPC_PATH } from './config.js';
 import { SessionManager } from './sessions.js';
-import { listModels, probeModel } from './router.js';
+import { listModels, probeModel, knownModelIds } from './router.js';
+import { lightModel } from '../shared/models.js';
+import { mergeText } from '../shared/events.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, currentBranch, TOKEN_INVALID } from './github.js';
 import { GithubAuth } from './ghauth.js';
 import { getInstallInfo, checkUpdate, performUpdate, restartDaemon } from './updater.js';
@@ -216,8 +218,8 @@ const RPC = {
   modelsInfo: (c, p) => listModels(c.d.config, c.d.secrets.routerKey, { fresh: !!p.fresh }),
   probeModel: (c, p) => probeModel(c.d.config, c.d.secrets.routerKey, need(p.model, 'model', { max: 200 })),
   setModel(c, p) {
+    // Model ringan (subagen) tidak lagi bisa dipilih: otomatis Haiku 5.5 / Gemini 3.8 Flash.
     if (p.model) c.d.config.model = need(p.model, 'model', { max: 200 });
-    if (p.smallModel) c.d.config.smallModel = need(p.smallModel, 'smallModel', { max: 200 });
     saveConfig(c.d.config);
     return c.info();
   },
@@ -249,11 +251,12 @@ const RPC = {
     // Frame relay teks dibatasi ~1MB: kirim riwayat terbaru saja bila terlalu besar.
     // Kanal biner memecah pesan besar, jadi batasnya jauh lebih longgar.
     const since = +p.since || 0;
-    const all = s.since(since);
+    const all = mergeText(s.since(since));
     const limit = c.big ? 4_000_000 : 500_000;
     let i = all.length;
     for (let size = 0; i > 0 && size < limit; i--) size += JSON.stringify(all[i - 1]).length;
     const events = i ? all.slice(i) : all;
+    s.warm();
     return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo() };
   },
   detach(c) {
@@ -318,6 +321,11 @@ const RPC = {
   visible(c, p) {
     c.visible = !!p.on;
     return true;
+  },
+  edits(c, p) {
+    const s = c.d.sessions.get(p.id);
+    s.setAskEdits(p.on);
+    return s.summary();
   },
   auto(c, p) {
     const s = c.d.sessions.get(p.id);
@@ -395,7 +403,8 @@ class RpcConn {
     return {
       name: c.machineName,
       model: c.model,
-      smallModel: c.smallModel,
+      // Model ringan subagen untuk model default (tiap sesi menghitungnya dari model sesinya).
+      lightModel: lightModel(c.model, knownModelIds(c, this.d.secrets.routerKey)).id,
       router: c.routerUrl,
       github: c.githubLogin || null,
       githubState: this.d.github.state,

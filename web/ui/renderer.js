@@ -306,6 +306,7 @@ export class Renderer {
         h('pre', {}, e.summary || e.s || ''),
         e.x ? miniDiff(e.x).el : null,
         buttons,
+        !e.push && e.always ? h('div', { class: 'more' }, 'Selalu = izinkan otomatis di sesi ini: ' + e.always) : null,
         more,
       ),
     );

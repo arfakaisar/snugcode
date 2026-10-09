@@ -24,7 +24,8 @@
  * @property {number} [words] jumlah kata thinking
  * @property {number} [turns] jumlah langkah (k='done')
  * @property {number} [ms]  durasi (k='done')
- * @property {{ in: number, out: number }} [usage] token (k='done')
+ * @property {{ in: number, out: number, cr?: number, cw?: number }} [usage] token (k='done'); `in` termasuk cache,
+ *                         cr = dibaca dari prompt cache, cw = ditulis ke cache (daemon lama tidak mengirimnya)
  * @property {number} [ctx]  isi konteks dalam persen (k='done')
  * @property {number} [cost] biaya USD (k='done')
  * @property {string} [err]  alasan berhenti (k='done')
@@ -102,8 +103,32 @@ export const fmtDuration = (ms) => {
 export function doneParts(e) {
   const out = [`${e.turns ?? 0} langkah`, fmtDuration(e.ms || 0)];
   if (e.usage) out.push(`${fmtTok(e.usage.in)}→${fmtTok(e.usage.out)} tok`);
+  // Porsi input yang dibaca dari prompt cache (murah & cepat). 0% terus-menerus = router tidak meng-cache.
+  const pct = cachePct(e.usage);
+  if (pct != null) out.push(`cache ${pct}%`);
   if (e.ctx != null) out.push(`konteks ${e.ctx}%`);
   if (e.cost) out.push(`$${e.cost.toFixed(e.cost < 1 ? 3 : 2)}`);
+  return out;
+}
+
+/** @param {AgentEvent['usage']} u @returns {number | null} */
+export function cachePct(u) {
+  if (!u || typeof u.cr !== 'number' || !u.in) return null;
+  return Math.round((u.cr / u.in) * 100);
+}
+
+// Potongan teks streaming (satu event per ~80ms) digabung sebelum riwayat dikirim saat attach:
+// ribuan event kecil jadi beberapa event utuh (payload & render di HP jauh lebih ringan).
+// Aman untuk penyaring seq: event gabungan memakai seq potongan terakhir, dan semua potongannya
+// berada di rentang yang sama-sama baru bagi klien.
+/** @param {AgentEvent[]} events @returns {AgentEvent[]} */
+export function mergeText(events) {
+  const out = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    if (e.k === 'text' && prev?.k === 'text') out[out.length - 1] = { ...prev, d: prev.d + e.d, seq: e.seq, ts: e.ts };
+    else out.push(e);
+  }
   return out;
 }
 

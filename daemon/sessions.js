@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, anthropicBaseUrl, writeJson, readSessionIndex } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startRouterProxy } from './proxy.js';
-import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
+import { resolveModelEffort, lightModel } from '../shared/models.js';
+import { knownModelIds } from './router.js';
+import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
 import { POCKETCODE_SYSTEM_PROMPT } from './prompt.js';
@@ -42,7 +44,17 @@ const LOAD_TAIL_BYTES = 8 * 1024 * 1024;
 // mengirim isi file ke luar (prompt injection dari README/issue).
 const SAFE_TOOLS = new Set(['TodoWrite', 'Task', 'Agent', 'WebSearch', 'ToolSearch', 'BashOutput', ...SAFE_DEV_TOOLS]);
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
-const FILE_TOOLS = new Set([...READ_TOOLS, 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const FILE_TOOLS = new Set([...READ_TOOLS, ...EDIT_TOOLS]);
+
+// Tool bawaan yang ditawarkan ke model (tool MCP pocketcode ikut otomatis). Tanpa daftar ini
+// Claude Code mengirim ±27 tool (Cron*, ScheduleWakeup, SendMessage, Workflow, EnterWorktree, …)
+// yang tidak dipakai di pocketcode: ±40 KB skema (≈10k token) di SETIAP request model.
+// Grep/Glob wajib disebut: build native menggantinya dengan Bash grep/find (output tak dibatasi).
+export const AGENT_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent', 'AskUserQuestion', 'ExitPlanMode', 'WebFetch', 'WebSearch'];
+// Tool yang bisa mengubah file: baru boleh jalan setelah checkpoint prompt tersimpan (hook PreToolUse),
+// termasuk yang lolos tanpa canUseTool lewat aturan "Selalu" (mis. Bash(npm test *)).
+const MUTATING_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|' + DEV_START;
 
 // Folder data pocketcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
 // dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
@@ -78,6 +90,8 @@ const isLocalUrl = (u) => {
 const GIT_PUSH_RE = /\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|--?[\w-]+(?:=(?:"[^"]*"|'[^']*'|\S+))?))*\s+push\b/i;
 const GH_WRITE_RE = /\bgh(?:\.exe)?\s+(?:pr\s+(?:create|merge)|release\s+create|repo\s+(?:create|delete|fork))\b/i;
 export const isRemoteWrite = (tool, input) => (tool === 'Bash' || tool === DEV_START) && (GIT_PUSH_RE.test(input?.command || '') || GH_WRITE_RE.test(input?.command || ''));
+// Push, perintah yang menyentuh kredensial, pertanyaan, dan rencana tidak pernah bisa "Selalu".
+const neverAlways = (tool, input) => isRemoteWrite(tool, input) || SECRET_CMD_RE.test(input?.command || '') || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
 
 // Gambar dari HP (kamera/galeri/tempel), sudah dikompres di sisi HP agar muat satu frame relay (~1MB).
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -175,6 +189,18 @@ function toolDetail(name, input = {}) {
   return undefined;
 }
 
+// Aturan "Selalu" dari saran Claude Code untuk permintaan izin ini, mis. Bash(npm test *):
+// cukup perintah sejenis yang lolos, bukan semua Bash. Tanpa saran aturan (Edit di luar
+// worktree, tool MCP, …) "Selalu" berlaku untuk seluruh tool tersebut.
+/** @returns {{ toolName: string, ruleContent: string }[]} */
+export function suggestedRules(tool, suggestions) {
+  return (Array.isArray(suggestions) ? suggestions : [])
+    .filter((s) => s?.type === 'addRules' && s.behavior === 'allow' && Array.isArray(s.rules))
+    .flatMap((s) => s.rules)
+    .filter((r) => r?.toolName === tool && typeof r.ruleContent === 'string' && r.ruleContent);
+}
+const ruleText = (r) => `${r.toolName}(${r.ruleContent})`;
+
 
 // Antrean pesan user untuk query() dalam mode streaming input: satu proses claude per sesi
 // menerima prompt demi prompt lewat iterator ini.
@@ -220,6 +246,8 @@ export class Session extends EventEmitter {
     this.perms = new Map(); // pid -> { resolve, tool, input }
     // "Selalu izinkan" disimpan di meta agar tetap berlaku setelah daemon restart.
     this.alwaysAllow = new Set(meta.alwaysAllow || []);
+    // Aturan izin per pola perintah ("Bash(npm test *)"), diteruskan ke Claude Code.
+    this.allowRules = new Set(meta.allowRules || []);
     this.textBuf = '';
     this.textTimer = null;
     this.logFile = path.join(SESSIONS_DIR, meta.id + '.jsonl');
@@ -373,7 +401,7 @@ export class Session extends EventEmitter {
     const m = this.meta;
     // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
     const branch = (m.local && currentBranch(m.cwd)) || m.branch;
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, local: !!m.local, cwd: m.cwd };
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -442,7 +470,10 @@ export class Session extends EventEmitter {
 
   permEvent(pid, p) {
     const { tool, input } = p;
-    return { pid, tool: shortName(tool), s: toolSummary(tool, input, this.meta.cwd), title: p.title, push: isRemoteWrite(tool, input), plan: tool === 'ExitPlanMode' || undefined, ask: tool === 'AskUserQuestion' ? input.questions : undefined, x: toolDetail(tool, input) };
+    const rules = suggestedRules(tool, p.suggestions);
+    // Cakupan tombol "Selalu" untuk ditampilkan; tidak ada untuk aksi yang tidak pernah bisa "Selalu".
+    const always = neverAlways(tool, input) ? undefined : rules.length ? rules.map((r) => r.ruleContent).join(', ') : shortName(tool);
+    return { pid, tool: shortName(tool), s: toolSummary(tool, input, this.meta.cwd), title: p.title, push: isRemoteWrite(tool, input), plan: tool === 'ExitPlanMode' || undefined, ask: tool === 'AskUserQuestion' ? input.questions : undefined, x: toolDetail(tool, input), always };
   }
 
   pendingPerms() {
@@ -480,6 +511,13 @@ export class Session extends EventEmitter {
     return n;
   }
 
+  // Tinjau setiap edit file (Write/Edit) sebelum diterapkan. Mati (bawaan): edit di dalam worktree
+  // langsung diterapkan, karena setiap prompt punya checkpoint dan bisa di-rewind.
+  setAskEdits(on) {
+    this.meta.askEdits = !!on;
+    this.mgr.saveIndex();
+  }
+
   setPlan(on) {
     this.meta.plan = !!on;
     this.mgr.saveIndex();
@@ -487,47 +525,71 @@ export class Session extends EventEmitter {
     this.live({ k: 'mode', plan: !!on });
   }
 
-  // Proses claude untuk sesi ini: dipakai ulang antar prompt selama pengaturannya sama (model,
-  // effort, binary, URL). Berubah (mis. ganti model) → proses lama ditutup, yang baru melanjutkan
-  // percakapan lewat `resume`.
+  // Proses claude untuk sesi ini: dipakai ulang antar prompt. Ganti model/effort diterapkan
+  // langsung ke proses yang hidup (setModel / applyFlagSettings); proses baru (melanjutkan
+  // percakapan lewat `resume`) hanya bila binary, URL, token, atau model ringan berubah.
+  // Panggilan bersamaan (pre-warm saat sesi dibuka + prompt) berbagi satu proses.
   async ensureAgent() {
+    while (this._ensuring) await this._ensuring.catch(() => {});
+    const p = (this._ensuring = this.startAgent());
+    try {
+      return await p;
+    } finally {
+      if (this._ensuring === p) this._ensuring = null;
+    }
+  }
+
+  async startAgent() {
     const cfg = this.mgr.config;
     const sec = this.mgr.secrets;
     const claudeExe = claudeExecutable(cfg);
     const { actualModel, effort } = resolveModelEffort(this.meta.model);
-    // Tugas haiku / deskripsi tool / subagent selalu memakai varian cepat (low effort),
-    // agar prompt tidak tertahan thinking berlebih.
-    const smallCandidate = cfg.smallModel || fastModelVariant(this.meta.model);
-    const actualSmallModel = resolveModelEffort(fastModelVariant(smallCandidate)).actualModel || actualModel;
+    // Subagen & tugas utilitas: Claude Haiku 5.5 / Gemini 3.8 Flash (lihat lightModel).
+    const light = lightModel(this.meta.model, knownModelIds(cfg, sec.routerKey));
     const proxy = this.mgr.proxy;
     const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
     const baseUrl = proxyUrl || anthropicBaseUrl(cfg.routerUrl);
     // Lewat proxy, proses claude hanya memegang token lokal; key asli disuntikkan oleh proxy.
     const authToken = proxyUrl ? proxy.token : sec.routerKey;
-    const key = [claudeExe, actualModel, effort, actualSmallModel, baseUrl, authToken].join('|');
-    if (this.agent && !this.agent.dead && this.agent.key === key) {
-      clearTimeout(this.agent.idle);
-      this.agent.idle = null;
-      return this.agent;
+    const key = [claudeExe, light.id, baseUrl, authToken].join('|');
+    const cur = this.agent;
+    if (cur && !cur.dead && cur.key === key) {
+      clearTimeout(cur.idle);
+      cur.idle = null;
+      try {
+        if (cur.model !== actualModel) await cur.q.setModel(actualModel);
+        cur.model = actualModel;
+        // null = effort bawaan model ("auto").
+        if (cur.effort !== effort) await cur.q.applyFlagSettings({ effortLevel: effort });
+        cur.effort = effort;
+        return cur;
+      } catch (e) {
+        this.mgr.log('! ganti model di proses berjalan gagal, proses dibuat ulang: ' + e.message);
+      }
     }
     this.closeAgent();
 
     const env = { ...process.env };
-    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
+    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_SUBAGENT_MODEL)/.test(k)) delete env[k];
     Object.assign(env, {
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN: authToken,
       ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
       ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: actualSmallModel,
-      CLAUDE_CODE_SUBAGENT_MODEL: actualSmallModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: light.id,
+      // _FORCE: tanpa ini subagen bawaan (Explore, …) tetap memakai model utama.
+      CLAUDE_CODE_SUBAGENT_MODEL: light.id,
+      CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
       CLAUDE_CONFIG_DIR: CLAUDE_DIR,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      // Proses panjang lewat dev_start; Bash/Agent latar belakang hanya menambah skema & giliran liar.
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+      // Output Bash (npm install/test, build) yang masuk konteks dibatasi; bawaan Claude Code 30k karakter.
+      BASH_MAX_OUTPUT_LENGTH: process.env.BASH_MAX_OUTPUT_LENGTH || '15000',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'pocketcode/0.1',
       GIT_TERMINAL_PROMPT: '0',
       GCM_INTERACTIVE: 'never',
     });
-    if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
     // pnpm/yarn tetap ada untuk Bash agen walau tidak terpasang global (bila shim sudah disiapkan).
     Object.assign(env, await toolchainEnv('', env));
 
@@ -542,23 +604,57 @@ export class Session extends EventEmitter {
         ...(effort ? { effort } : {}),
         resume: this.meta.claudeSessionId || undefined,
         includePartialMessages: true,
-        // 'default': Write/Edit ikut lewat canUseTool sehingga bisa disetujui dari HP
-        // (dengan cuplikan diff); auto-izin & "Selalu" tetap meloloskannya tanpa bertanya.
+        // 'default': Write/Edit ikut lewat canUseTool (checkpoint, mode tinjau edit, folder data);
+        // auto-izin & "Selalu" tetap meloloskannya tanpa bertanya.
         // Mode rencana diatur dari HP/terminal saja, jadi agen tidak boleh masuk sendiri.
         permissionMode: this.meta.plan ? 'plan' : 'default',
         settingSources: ['project'],
-        settings: { plansDirectory: PLANS_DIR },
+        settings: { plansDirectory: PLANS_DIR, ...(this.allowRules.size ? { permissions: { allow: [...this.allowRules] } } : {}) },
+        tools: AGENT_TOOLS,
         disallowedTools: ['EnterPlanMode'],
+        agents: subagents(),
         mcpServers: { pocketcode: devToolsServer(this) },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: POCKETCODE_SYSTEM_PROMPT },
         canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
+        hooks: { PreToolUse: [{ matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] }] },
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
       },
     });
-    const agent = { key, q, input, actualModel, streamed: new Set(), currentMsgId: null, dead: false, idle: null, lastUsed: Date.now() };
+    const agent = { key, q, input, model: actualModel, effort, streamed: new Set(), currentMsgId: null, dead: false, idle: null, lastUsed: Date.now() };
     this.agent = agent;
     agent.loop = this.consume(agent);
     return agent;
+  }
+
+  // Hook PreToolUse untuk tool yang bisa mengubah file. Berjalan juga untuk tool yang lolos lewat
+  // aturan "Selalu" (mis. Bash(git *)) tanpa melewati canUseTool, jadi di sinilah dua jaminan dijaga:
+  // checkpoint prompt sudah tersimpan, dan push / perintah yang menyentuh kredensial tetap bertanya.
+  async beforeTool(h) {
+    await this.cpReady;
+    const input = /** @type {any} */ (h)?.tool_input;
+    if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'pocketcode: selalu butuh persetujuan pengguna' } };
+    return {};
+  }
+
+  // Sesi dibuka (HP/terminal): siapkan proses claude di latar belakang, jadi prompt pertama tidak
+  // menunggu spawn + resume transcript. Ditutup lagi bila tetap menganggur (AGENT_IDLE_MS).
+  warm() {
+    if (this.agent || this._ensuring || this.status !== 'idle') return;
+    this.ensureAgent().then(
+      (a) => {
+        if (this.turn || a.dead || a.idle) return;
+        this.idleAgent(a);
+      },
+      () => {},
+    );
+  }
+
+  idleAgent(agent) {
+    clearTimeout(agent.idle);
+    agent.lastUsed = Date.now();
+    agent.idle = setTimeout(() => this.closeAgent(agent), AGENT_IDLE_MS);
+    agent.idle.unref?.();
+    this.mgr.trimAgents();
   }
 
   async consume(agent) {
@@ -629,27 +725,23 @@ export class Session extends EventEmitter {
       this.flushText();
       const u = m.usage;
       // modelUsage juga memuat model kecil (subagen/utility); ambil milik model utama.
-      const ctxMax = m.modelUsage?.[agent.actualModel]?.contextWindow;
+      const ctxMax = m.modelUsage?.[agent.model]?.contextWindow;
       const ok = m.subtype === 'success' && !m.is_error;
       this.emitEvent({
         k: 'done',
         ok,
         turns: m.num_turns,
         ms: m.duration_ms,
-        usage: u ? { in: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), out: u.output_tokens } : undefined,
+        // cr/cw: token input yang dibaca dari / ditulis ke prompt cache (cr ≈ 0 terus = router tidak meng-cache).
+        usage: u ? { in: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), out: u.output_tokens, cr: u.cache_read_input_tokens || 0, cw: u.cache_creation_input_tokens || 0 } : undefined,
         cost: m.total_cost_usd || undefined,
         ctx: ctxMax && this.lastCtx ? Math.round((this.lastCtx / ctxMax) * 100) : undefined,
         err: m.subtype !== 'success' ? m.subtype : m.is_error ? cut(m.result || '', 600) : undefined,
       });
       this.mgr.notify(this, ok ? `✓ selesai · ${String(m.result || '').replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(m.result || m.subtype).slice(0, 140)}`);
       agent.streamed.clear();
-      agent.lastUsed = Date.now();
       if (this.turn?.agent === agent) this.endTurn();
-      if (!agent.dead) {
-        agent.idle = setTimeout(() => this.closeAgent(agent), AGENT_IDLE_MS);
-        agent.idle.unref?.();
-        this.mgr.trimAgents();
-      }
+      if (!agent.dead) this.idleAgent(agent);
     }
   }
 
@@ -717,12 +809,14 @@ export class Session extends EventEmitter {
     const planFile = this.meta.plan && ['Write', 'Edit'].includes(tool) && path.resolve(String(input?.file_path || '')).startsWith(PLANS_DIR + path.sep);
     const readInside = READ_TOOLS.has(tool) && paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR));
     const safe = (SAFE_TOOLS.has(tool) && !(shotUrl && !isLocalUrl(shotUrl))) || readInside;
+    // Edit di dalam worktree langsung diterapkan (bisa di-rewind), kecuali mode tinjau edit / rencana.
+    const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && paths.every((p) => isInside(p, cwd)) && !this.meta.askEdits && !this.meta.plan;
     // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
     if (!safe && this.cpReady) await this.cpReady;
-    if (!needsUser && (planFile || safe || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
+    if (!needsUser && (planFile || safe || editInside || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
     const pid = randomBytes(6).toString('hex');
     return new Promise((resolve) => {
-      const p = { resolve, tool, input, title: opts?.title };
+      const p = { resolve, tool, input, title: opts?.title, suggestions: opts?.suggestions };
       this.perms.set(pid, p);
       this.live({ k: 'perm', ...this.permEvent(pid, p) });
       this.mgr.notify(this, tool === 'AskUserQuestion' ? 'Agen bertanya' : tool === 'ExitPlanMode' ? 'Rencana siap ditinjau' : `Butuh izin: ${tool}`, { perm: true });
@@ -739,11 +833,18 @@ export class Session extends EventEmitter {
     const p = this.perms.get(pid);
     if (!p) return false;
     this.perms.delete(pid);
-    // Push & perintah yang menyentuh kredensial tidak pernah bisa "selalu diizinkan".
-    const never = isRemoteWrite(p.tool, p.input) || SECRET_CMD_RE.test(p.input?.command || '') || ['AskUserQuestion', 'ExitPlanMode'].includes(p.tool);
-    if (decision === 'always' && !never) {
-      this.alwaysAllow.add(p.tool);
-      this.meta.alwaysAllow = [...this.alwaysAllow];
+    let updatedPermissions;
+    if (decision === 'always' && !neverAlways(p.tool, p.input)) {
+      const rules = suggestedRules(p.tool, p.suggestions);
+      if (rules.length) {
+        // Berlaku langsung di proses berjalan (session) dan di proses berikutnya (settings).
+        updatedPermissions = [{ type: 'addRules', rules, behavior: 'allow', destination: 'session' }];
+        for (const r of rules) this.allowRules.add(ruleText(r));
+        this.meta.allowRules = [...this.allowRules];
+      } else {
+        this.alwaysAllow.add(p.tool);
+        this.meta.alwaysAllow = [...this.alwaysAllow];
+      }
       this.mgr.saveIndex();
     }
     const allow = decision === 'allow' || decision === 'always';
@@ -759,7 +860,7 @@ export class Session extends EventEmitter {
     }
     this.emitEvent({ k: 'permAnswer', pid, allow, tool: shortName(p.tool), s });
     const why = String(message || '').trim().slice(0, 4000);
-    p.resolve(allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: why || 'Pengguna menolak aksi ini dari HP.' });
+    p.resolve(allow ? { behavior: 'allow', updatedInput: input, ...(updatedPermissions ? { updatedPermissions } : {}) } : { behavior: 'deny', message: why || 'Pengguna menolak aksi ini dari HP.' });
     return true;
   }
 
@@ -879,6 +980,8 @@ export class SessionManager {
     } catch (e) {
       this.log('! gagal memulai loopback proxy: ' + e.message);
     }
+    // Daftar model router diambil di latar belakang: pemilihan model ringan subagen membacanya dari cache.
+    if (secrets.routerKey) knownModelIds(config, secrets.routerKey);
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     const idx = readSessionIndex({ quarantine: true });
     let index = idx.list;

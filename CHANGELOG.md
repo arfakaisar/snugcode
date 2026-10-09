@@ -3,6 +3,61 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — Agen hemat token & lebih cepat: tool ramping, subagen ringan, izin lebih cerdas
+
+Diukur dengan Agent SDK asli terhadap mock router (env bersih). Sebelumnya setiap langkah agen
+mengirim ±77 KB (±20k token): 27 tool (±55 KB skema) dan system prompt tambahan 5,4 KB.
+
+### Token per request: ±77 KB → ±35 KB (−55%)
+- **Daftar tool eksplisit** (`AGENT_TOOLS`): Bash, Read, Edit, Write, Glob, Grep, Agent,
+  AskUserQuestion, ExitPlanMode, WebFetch, WebSearch + tool MCP pocketcode. Dibuang: Cron*,
+  ScheduleWakeup, SendMessage, Workflow, ListAgents, ReportFindings, TaskStop, NotebookEdit, Skill,
+  EnterWorktree/ExitWorktree (bentrok dengan worktree pocketcode), ±40 KB per request.
+  Grep/Glob kini tersedia (build native menggantinya dengan Bash grep/find yang outputnya tak dibatasi).
+- **System prompt tambahan 5,4 KB → 1,8 KB**: hanya aturan yang mengubah perilaku agen (jawaban
+  ringkas untuk HP, Grep/Glob, Explore untuk eksplorasi luas, dev_start, tanpa git push).
+  Penjelasan arsitektur (E2EE, Cloudflare, keep-awake, …) dibuang.
+- `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (proses panjang lewat `dev_start`), output Bash yang
+  masuk konteks dibatasi 15k karakter (`BASH_MAX_OUTPUT_LENGTH`, bawaan 30k).
+- Screenshot agen memakai DPR 1 (4× lebih sedikit piksel), opsi `image:false` bila hanya butuh
+  error konsol, dan log konsol diringkas (baris kembar digabung, error didahulukan, maks. 5k karakter;
+  dulu sampai 100×2000 karakter). `dev_logs` bawaan 4k karakter, maks. 20k.
+
+### Subagen: model ringan sungguhan
+- **Bug**: untuk model `cc/`, "model kecil" = model utama (`fastModelVariant` menurunkan effort ke
+  `-low`, lalu `resolveModelEffort` membuangnya). Subagen Explore/general-purpose berjalan di
+  Opus dengan effort penuh. Selain itu tanpa `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` subagen bawaan
+  memang selalu memakai model utama.
+- Kini `lightModel()` memilih **Claude Haiku 5.5** (prioritas 1 untuk model utama `cc/`) atau
+  **Gemini 3.8 Flash** (prioritas 1 untuk `ag/` dan lainnya, prioritas 2 untuk `cc/`), dari daftar
+  model router yang di-cache (tidak menahan prompt). Pilihan manual "model kecil" dihapus dari
+  setup, menu PC, dan RPC.
+- Subagen bawaan didefinisikan ulang (`daemon/agents.js`) dengan effort rendah (Explore `low`,
+  lainnya `medium`) dan prompt ringkas; tanpa ini subagen mewarisi effort model utama.
+
+### Latensi
+- **Pre-warm**: proses `claude` disiapkan saat sesi dibuka di HP/terminal; prompt pertama tidak
+  menunggu spawn + resume transcript.
+- **Ganti model/effort tanpa restart**: `setModel()` + `applyFlagSettings({ effortLevel })` di proses
+  yang hidup (dulu proses ditutup lalu dibuat ulang dengan `resume`).
+- Riwayat saat attach: potongan teks streaming (satu event per ~80 ms) digabung jadi satu event per
+  blok, jadi membuka ulang sesi panjang di HP lebih ringan.
+
+### Izin (lebih sedikit bolak-balik ke HP)
+- **Edit di worktree langsung diterapkan** (setiap prompt punya checkpoint & rewind). Mode
+  *Tinjau edit* (menu sesi / `/edits`) mengembalikan persetujuan per diff. Di luar worktree dan di
+  mode rencana tetap bertanya.
+- **"Selalu" per pola perintah**: memakai saran aturan Claude Code (mis. `Bash(npm test *)`), bukan
+  lagi seluruh Bash. Berlaku langsung (izin `session`) dan disimpan (`allowRules`) untuk proses
+  berikutnya. HP & terminal menampilkan cakupannya.
+- Hook `PreToolUse` memastikan tool yang mengubah file tetap menunggu checkpoint, dan push /
+  perintah yang menyentuh kredensial tetap meminta izin, termasuk yang lolos lewat aturan "Selalu"
+  (mis. `Bash(git *)`) tanpa melewati `canUseTool`.
+
+### Diagnostik biaya
+- Ringkasan selesai menampilkan **cache %** (`usage.cr` / `usage.cw`). Selalu 0% berarti provider
+  di 9router tidak meng-cache prompt, sehingga setiap langkah ditagih penuh.
+
 ## 2026-10-09 — Refactor PWA per layar, model event bersama, type checking, e2e UI
 
 ### Bug yang ditemukan uji browser

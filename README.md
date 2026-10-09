@@ -58,8 +58,10 @@ Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan
 ## ✨ Fitur utama
 
 **Agen & kolaborasi**
-- 🤖 **Claude Code Agent SDK** dengan model dari **9router** (Claude, Gemini, dan lainnya), termasuk subagen, TodoWrite, web search, dan tool lainnya.
-- ✅ **Izin 1-tap**: setiap perubahan file dan perintah shell meminta *Izinkan / Selalu / Tolak*, lengkap dengan cuplikan diff.
+- 🤖 **Claude Code Agent SDK** dengan model dari **9router** (Claude, Gemini, dan lainnya), termasuk subagen, web search, dan tool lainnya. Konfigurasi agen dirampingkan: setiap request ke model ±55% lebih kecil (±77 KB → ±35 KB per langkah).
+- 🪶 **Subagen hemat**: subagen (Explore, Plan, …) otomatis memakai **Claude Haiku 5.5** atau **Gemini 3.8 Flash** dengan effort rendah, bukan model utama.
+- ✅ **Izin 1-tap**: perintah shell meminta *Izinkan / Selalu / Tolak*. *Selalu* berlaku per pola perintah (mis. `npm test *`), bukan untuk semua Bash.
+- ✏️ **Edit langsung diterapkan** di worktree sesi (bisa di-rewind kapan saja). Nyalakan *Tinjau edit* (menu sesi / `/edits`) untuk menyetujui setiap diff.
 - ⚡ **Auto-izin**: biarkan agen bekerja mandiri. `git push` dan `gh pr create` tetap selalu meminta izin.
 - ☰ **Mode rencana**: agen hanya membaca lalu mengajukan rencana. Kamu bisa menyetujui atau meminta revisi.
 - ❓ **Agen bisa bertanya**: pertanyaan pilihan dijawab dengan sekali tap.
@@ -178,7 +180,7 @@ pocketcode autostart on
 
 `pocketcode setup` akan menanyakan:
 
-1. **API key 9router** (`https://router.gemz.space/v1`), lalu model utama dan model kecil.
+1. **API key 9router** (`https://router.gemz.space/v1`), lalu model utama (model ringan subagen dipilih otomatis).
 2. **Cara login GitHub** untuk clone, push, dan PR. Disarankan *login lewat browser/HP*.
 3. **Nama PC** dan **PIN** (6–12 huruf/angka, tidak peka huruf besar/kecil, misal `moon42`).
 4. Lalu tampil **satu link** (menautkan PC ke akun GitHub-mu) dan **satu kode** (login GitHub untuk PC). Keduanya boleh dibuka dari HP.
@@ -228,6 +230,9 @@ flowchart LR
 
 - Varian effort yang di 9router berupa ID terpisah (misal `ag/gemini-3.8-flash-low` / `-medium` / `-high`) digabung jadi **satu model dengan slider effort**.
 - Model Claude (`cc/claude-opus-5-5`, `cc/claude-sonnet-5-5`) mendapat slider virtual *auto · low · medium · high · max*.
+- Ganti model/effort di tengah sesi langsung berlaku di proses agen yang sama (tanpa restart).
+- **Model ringan (subagen)** dipilih otomatis dan tidak bisa diganti: model utama Claude (`cc/`) → Claude Haiku 5.5, lalu Gemini 3.8 Flash; model lain (`ag/`, …) → Gemini 3.8 Flash, lalu Claude Haiku 5.5. Bila keduanya tidak ada di router, subagen memakai model utama.
+- Ringkasan selesai menampilkan **cache %**: porsi input yang dibaca dari prompt cache. Selalu 0% berarti provider di 9router tidak meng-cache, sehingga setiap langkah ditagih penuh.
 - Setiap model yang dipilih **diuji otomatis** dengan satu pesan kecil. Ini menangkap model yang sudah dihentikan tapi masih membalas "sukses".
 - Hanya model yang mendukung tool calling yang ditampilkan.
 
@@ -264,7 +269,7 @@ pocketcode --pick              # pilih sesi lain (termasuk sesi dari HP)
 | `enter` | kirim; saat agen bekerja, pesan masuk antrean |
 | `\` + `enter` / `alt+enter` | baris baru |
 | `!` | mode shell (perintah langsung di folder sesi) |
-| `/` | perintah: `/model` `/sessions` `/new` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/update` `/help` … |
+| `/` | perintah: `/model` `/sessions` `/new` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/edits` `/update` `/help` … |
 | `esc` | hentikan agen |
 | `ctrl+o` | output lengkap tool terakhir |
 | `ctrl+c` ×2 | keluar (sesi tetap berjalan di PC) |

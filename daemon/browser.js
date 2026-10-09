@@ -147,8 +147,10 @@ export async function closeBrowser() {
 
 // Buka `url`, tunggu load (+ jeda agar framework selesai render), lalu ambil screenshot JPEG
 // dan log konsol/error. Request yang tidak pernah selesai (HMR, SSE) tidak membuatnya macet.
-/** @param {string} url @param {{ width?: number, height?: number, wait?: number, timeout?: number, fullPage?: boolean, cfg?: { browserExecutable?: string } }} [opts] */
-export async function capture(url, { width = 390, height = 844, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
+// `scale`: device pixel ratio. 2 = tajam di layar HP; 1 untuk agen (gambar 4× lebih sedikit piksel,
+// jadi jauh lebih sedikit token gambar yang menetap di konteks model).
+/** @param {string} url @param {{ width?: number, height?: number, scale?: number, wait?: number, timeout?: number, fullPage?: boolean, cfg?: { browserExecutable?: string } }} [opts] */
+export async function capture(url, { width = 390, height = 844, scale = 2, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
   const exe = findBrowser(cfg);
   if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.pocketcode/config.json.');
   const { cdp } = await acquire(exe);
@@ -174,7 +176,7 @@ export async function capture(url, { width = 390, height = 844, wait = 1500, tim
       } else if (m.method === 'Log.entryAdded' && p.entry.level === 'error') logs.push({ level: 'error', text: `${p.entry.text}${p.entry.url ? ' ' + p.entry.url : ''}`.slice(0, 2000) });
     });
     await Promise.all([S('Page.enable'), S('Runtime.enable'), S('Log.enable')]);
-    await S('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: width < 768 });
+    await S('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: width < 768 });
     const nav = await S('Page.navigate', { url });
     if (nav.errorText) throw new Error(`Gagal membuka ${url}: ${nav.errorText}`);
     await Promise.race([onLoad, sleep(timeout)]);

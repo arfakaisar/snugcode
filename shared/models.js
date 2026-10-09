@@ -29,15 +29,39 @@ export const nativeEffortModel = (provider, base) => provider === 'cc' || (provi
 // Effort native yang ditawarkan slider (semuanya diterima opsi `effort` Agent SDK).
 const NATIVE_EFFORTS = ['low', 'medium', 'high', 'max'];
 
-// Mengembalikan varian cepat (low/minimal effort) dari suatu model.
-// Berguna untuk smallModel (Haiku) dan subagent agar tidak menahan thinking ribuan token.
-export function fastModelVariant(id) {
-  if (!id) return id;
-  const p = parseModelId(id);
-  if (p.effort && ['medium', 'high', 'xhigh', 'max'].includes(p.effort)) {
-    return (p.provider ? p.provider + '/' : '') + p.base + '-low';
+// Model ringan untuk subagen (Explore, general-purpose, Plan) dan tugas utilitas Claude Code
+// (ringkasan WebFetch, dsb.). Hanya dua pilihan: Claude Haiku 5.5 atau Gemini 3.8 Flash.
+// Model utama Claude (cc/ atau claude-* tanpa provider): Haiku dulu, lalu Flash.
+// Model utama lain (ag/, gemini/, …): Flash dulu, lalu Haiku.
+export const LIGHT_HAIKU = 'claude-haiku-5-5';
+export const LIGHT_FLASH = 'gemini-3.8-flash';
+// Varian Flash yang paling cocok untuk subagen: cukup berpikir, tetap cepat.
+const FLASH_EFFORTS = ['low', null, 'minimal', 'extra-low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * @param {string} mainId model utama sesi
+ * @param {string[] | null} [ids] ID model di router; null = belum diketahui (pakai tebakan default)
+ * @returns {{ id: string, kind: 'haiku' | 'flash' | 'main' }} kind 'main' = keduanya tidak ada di router
+ */
+export function lightModel(mainId, ids = null) {
+  const main = parseModelId(mainId || '');
+  /** @type {('haiku' | 'flash')[]} */
+  const order = nativeEffortModel(main.provider, main.base) ? ['haiku', 'flash'] : ['flash', 'haiku'];
+  if (!ids) {
+    const kind = order[0];
+    if (kind === 'haiku') return { id: 'cc/' + LIGHT_HAIKU, kind };
+    return { id: main.provider === 'gemini' ? 'gemini/' + LIGHT_FLASH : `ag/${LIGHT_FLASH}-low`, kind };
   }
-  return id;
+  const parsed = ids.map((id) => ({ id, ...parseModelId(id) }));
+  for (const kind of order) {
+    const base = kind === 'haiku' ? LIGHT_HAIKU : LIGHT_FLASH;
+    const home = kind === 'haiku' ? 'cc' : 'ag';
+    const rank = (p) => (p.provider === main.provider ? 0 : p.provider === home ? 1 : 2) * 10 + (kind === 'flash' ? FLASH_EFFORTS.indexOf(p.effort) : p.effort === null ? 0 : 1);
+    const best = parsed.filter((p) => p.base === base).sort((a, b) => rank(a) - rank(b))[0];
+    // Haiku native: effort diatur per subagen (opsi `agents`), jadi pakai ID polosnya.
+    if (best) return { id: kind === 'haiku' ? resolveModelEffort(best.id).actualModel : best.id, kind };
+  }
+  return { id: resolveModelEffort(mainId).actualModel, kind: 'main' };
 }
 
 // Untuk model Claude native, pisahkan ID asli router dengan virtual effort.
