@@ -3,7 +3,7 @@ import * as M from '../../shared/models.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
-import { ago, busyButton, drawer, greeting, h, haptic, ic, onLongPress, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
+import { ago, busyButton, drawer, greeting, h, haptic, ic, onLongPress, pullToRefresh, renderIf, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { checkUpdateStatus, ghBad, modelItem, renderGhBanner, renderUpdateBanner, showMachineMenu } from './machine.js';
 import { pickModel } from './model-picker.js';
 import { accountMenu } from './push.js';
@@ -127,11 +127,14 @@ export function showSessionsMeta() {
   const el = document.getElementById('homeMeta');
   if (!info || app.current.session || !el) return;
   ui.sub('');
-  el.replaceChildren(
-    h('button', { class: 'metachip', onclick: showMachineMenu }, ic('cpu'), M.modelLabel(info.model) || 'pilih model'),
-    h('button', { class: 'metachip' + (ghBad() ? ' warn' : ''), onclick: showMachineMenu }, ic('github'), info.github && !ghBad() ? '@' + info.github : 'GitHub belum login'),
-    app.current.updateStatus?.updateAvailable ? h('span', { class: 'metachip on' }, ic('spark'), 'update tersedia') : null,
-  );
+  const model = M.modelLabel(info.model) || 'pilih model';
+  const gh = info.github && !ghBad() ? '@' + info.github : '';
+  const up = !!app.current.updateStatus?.updateAvailable;
+  renderIf(el, [model, gh, up].join('|'), () => [
+    h('button', { class: 'metachip', style: '--i:0', onclick: showMachineMenu }, ic('cpu'), model),
+    h('button', { class: 'metachip' + (gh ? '' : ' warn'), style: '--i:1', onclick: showMachineMenu }, ic('github'), gh || 'GitHub belum login'),
+    up ? h('span', { class: 'metachip on', style: '--i:2' }, ic('spark'), 'update tersedia') : null,
+  ]);
 }
 
 // ---------- Drawer: navigasi + sesi terbaru ----------

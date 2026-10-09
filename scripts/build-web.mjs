@@ -19,7 +19,7 @@ await build({
   outfile: path.join(out, 'app.js'),
   logLevel: 'info',
 });
-const shell = ['index.html', 'style.css', 'manifest.webmanifest', 'icon.svg'];
+const shell = ['index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
 // Nama cache service worker = hash isi aset: setiap deploy yang mengubah UI otomatis membuat
 // sw.js berbeda, sehingga HP memasang versi baru tanpa perlu menaikkan nomor versi manual.

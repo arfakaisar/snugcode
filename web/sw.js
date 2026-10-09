@@ -3,7 +3,7 @@
 // CACHE diganti hash aset oleh scripts/build-web.mjs saat build.
 const CACHE = 'snugcode-dev';
 // index.html tidak ikut: relay mengalihkannya (307) ke './'.
-const SHELL = ['./', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
+const SHELL = ['./', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
 // cache: 'reload' = selalu dari jaringan, bukan dari HTTP cache browser yang mungkin masih versi lama.
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
@@ -39,7 +39,7 @@ self.addEventListener('push', (e) => {
     self.clients.matchAll({ type: 'window' }).then((wins) => {
       // Aplikasi sedang dilihat: notifikasi in-app sudah cukup.
       if (wins.some((w) => w.visibilityState === 'visible')) return;
-      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon.svg', badge: 'icon.svg', data: { sid: d.sid, mid: d.mid } });
+      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon-192.png', badge: 'icon-192.png', data: { sid: d.sid, mid: d.mid } });
     }),
   );
 });

@@ -201,14 +201,14 @@ snugcode autostart on
 
 ```mermaid
 flowchart LR
-    A["Buka<br/>pocketcode-relay.arfak.workers.dev"] --> B["Login<br/>dengan GitHub"]
+    A["Buka<br/>snugcode.arfak.workers.dev"] --> B["Login<br/>dengan GitHub"]
     B --> C["Pilih PC"]
     C --> D["Masukkan PIN<br/><i>(sekali saja)</i>"]
     D --> E["+ Sesi baru<br/>pilih repo & branch"]
     E --> F["Ketik permintaan 🚀"]
 ```
 
-1. Buka **https://pocketcode-relay.arfak.workers.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
+1. Buka **https://snugcode.arfak.workers.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
 2. Pilih PC, lalu masukkan PIN.
 3. Menu browser → **Add to Home screen**, supaya terbuka layar penuh seperti aplikasi dan notifikasi push berjalan (wajib di iOS).
 
@@ -409,7 +409,7 @@ Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TO
 snugcode adalah nama baru pocketcode. Protokol, data, dan pairing tidak berubah:
 
 - **Folder data** `~/.pocketcode` tetap dipakai bila sudah ada (pairing HP, sesi, worktree, riwayat agen). Instalasi baru memakai `~/.snugcode`.
-- **Relay** tetap di `https://pocketcode-relay.arfak.workers.dev`: mengganti nama worker Cloudflare berarti worker & database baru (akun dan PC tertaut hilang, callback OAuth GitHub harus diubah).
+- **Alamat aplikasi** kini `https://snugcode.arfak.workers.dev`: worker alias `snugcode` menyajikan PWA dan meneruskan API & WebSocket ke worker relay lama lewat service binding, jadi akun, PC tertaut, dan data tidak berubah. PC yang masih memakai URL lama tetap tersambung. Di alamat lama, PWA menawarkan **Pindah sekarang** (login, pairing PC, dan tema ikut dipindahkan, tanpa login/PIN lagi) dan halaman login dialihkan ke alamat baru.
 - Env `POCKETCODE_*`, file `.pocketcode.json`, dan entri autostart lama tetap dikenali; autostart lama dipindahkan otomatis.
 
 Pembaruan jarak jauh dari daemon versi lama **tidak** bisa pindah sendiri ke paket baru, jadi tiap PC perlu dimigrasi sekali. Aplikasi HP menampilkan banner **"Pindahkan PC ini ke snugcode"** yang bisa menjalankannya lewat sesi, atau jalankan sendiri di terminal PC:
@@ -423,6 +423,9 @@ npm i -g github:arfakaisar/snugcode --include=optional && { pocketcode stop; npm
 # Windows (PowerShell)
 npm i -g github:arfakaisar/snugcode --include=optional; if ($?) { pocketcode stop; npm rm -g pocketcode; snugcode autostart on }
 ```
+
+> [!IMPORTANT]
+> **Callback OAuth App GitHub** harus menunjuk alamat baru: GitHub → Settings → Developer settings → OAuth Apps → (aplikasi snugcode) → *Authorization callback URL* = `https://snugcode.arfak.workers.dev/auth/callback`. OAuth App hanya mengizinkan satu host, karena itu login selalu dilakukan di alamat baru.
 
 > [!NOTE]
 > Repo GitHub perlu diganti namanya menjadi `snugcode` (Settings → Repository name). GitHub otomatis mengalihkan URL lama, jadi `git push` dan pembaruan dari PC yang belum dimigrasi tetap jalan.

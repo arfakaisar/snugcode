@@ -3,6 +3,29 @@
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — Alamat singkat, ikon baru, perbaikan beranda
+
+### Alamat: snugcode.arfak.workers.dev
+- Worker alias `snugcode` (`relay/wrangler.alias.jsonc`, `relay/src/alias.js`) menyajikan PWA dan
+  meneruskan semua API & WebSocket ke worker relay lewat service binding: tanpa migrasi data, PC
+  dengan URL lama tetap tersambung. `npm run deploy` kini men-deploy keduanya.
+- Host lama: `/auth/login` dialihkan ke alamat utama (callback OAuth App hanya boleh satu host) dan
+  PWA menawarkan **Pindah sekarang**: isi localStorage (login, pairing PC, tema) dibawa lewat
+  fragmen URL `#import=` — tidak pernah dikirim ke server — dan hanya diterima bila alamat tujuan
+  belum login. `/api/health` memberi tahu PWA bila ia dibuka dari host lama.
+- PC baru memakai alamat utama secara bawaan.
+
+### Ikon aplikasi
+- Maskot lebih besar dan dipusatkan secara optis; PNG 192/512, ikon maskable (zona aman untuk
+  potongan lingkaran/squircle launcher Android), dan `apple-touch-icon.png` untuk iOS (iOS tidak
+  memakai SVG untuk ikon layar utama). Dibuat dengan `npm run icons`.
+
+### Perbaikan
+- Celah di bawah kotak input: shell kini mengisi layar penuh (`innerHeight`) saat keyboard tertutup,
+  dan jarak bawah = safe-area − 12px (minimal 8px) agar kartu input tepat di atas home indicator.
+- Pil model/GitHub dan banner beranda tidak lagi "memantul dua kali": isinya hanya digambar ulang
+  bila berubah (`renderIf`), dan animasinya mengikuti sapaan di atasnya.
+
 ## 2026-10-09 — Ganti nama: pocketcode → snugcode, maskot "Snug"
 
 ### Nama baru

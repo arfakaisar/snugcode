@@ -55,7 +55,8 @@ await page.locator('text=' + path.basename(repo)).first().click();
 await page.waitForSelector('#input');
 
 // Prompt lewat UI: izin Write muncul di dok -> Izinkan -> jawaban tampil
-await page.fill('#input', 'tolong WRITE file');
+// Prompt panjang = judul sesi panjang: dipakai di bawah untuk memastikan kartu tidak melebar keluar layar.
+await page.fill('#input', 'tolong WRITE file ' + 'dan tambahkan dark mode di halaman pengaturan beserta penyimpanan pilihan tema '.repeat(3));
 await page.click('#send');
 await page.waitForSelector('#dock .perm', { timeout: 30000 });
 await shot('3-izin');
@@ -120,6 +121,9 @@ await page.locator('#drawerPanel button', { hasText: 'Beranda' }).click();
 await page.waitForSelector('#drawer', { state: 'hidden' });
 await page.waitForSelector('#view >> text=' + path.basename(repo));
 ok('drawer: sesi aktif ditandai, Beranda kembali ke daftar sesi');
+const overflow = await page.evaluate(() => [...document.querySelectorAll('#view *')].filter((el) => el.getBoundingClientRect().right > innerWidth + 1).map((el) => el.className || el.tagName));
+assert.deepEqual(overflow, [], 'elemen melewati lebar layar');
+ok('judul sesi panjang terpotong rapi, tidak ada elemen keluar layar');
 await page.locator('#view >> text=' + path.basename(repo)).first().click();
 await page.locator('text=' + path.basename(repo)).first().click();
 await page.waitForFunction(() => document.querySelectorAll('.donel').length === 3, null, { timeout: 20000 });
