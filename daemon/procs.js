@@ -36,7 +36,7 @@ export function freePort() {
     srv.unref();
     srv.on('error', reject);
     srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address();
+      const { port } = /** @type {import('node:net').AddressInfo} */ (srv.address());
       srv.close(() => resolve(port));
     });
   });

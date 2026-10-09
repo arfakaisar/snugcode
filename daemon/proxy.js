@@ -120,7 +120,7 @@ export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
   });
 
   server.listen(0, '127.0.0.1', () => {
-    const addr = server.address();
+    const addr = /** @type {import('node:net').AddressInfo | null} */ (server.address());
     resolveReady(addr ? `http://127.0.0.1:${addr.port}` : null);
   });
 
@@ -128,12 +128,12 @@ export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
     server,
     token: localToken,
     ready() {
-      const addr = server.address();
+      const addr = /** @type {import('node:net').AddressInfo | null} */ (server.address());
       if (addr) return Promise.resolve(`http://127.0.0.1:${addr.port}`);
       return readyPromise;
     },
     get url() {
-      const addr = server.address();
+      const addr = /** @type {import('node:net').AddressInfo | null} */ (server.address());
       return addr ? `http://127.0.0.1:${addr.port}` : null;
     },
     close() {

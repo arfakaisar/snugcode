@@ -21,7 +21,7 @@ export function encrypt(sub, payload) {
   const ecdh = crypto.createECDH('prime256v1');
   const asPublic = ecdh.generateKeys();
   const secret = ecdh.computeSecret(uaPublic);
-  const ikm = crypto.hkdfSync('sha256', secret, unb64u(sub.keys.auth), Buffer.concat([Buffer.from('WebPush: info\0'), uaPublic, asPublic]), 32);
+  const ikm = Buffer.from(crypto.hkdfSync('sha256', secret, unb64u(sub.keys.auth), Buffer.concat([Buffer.from('WebPush: info\0'), uaPublic, asPublic]), 32));
   const salt = crypto.randomBytes(16);
   const cek = crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16);
   const nonce = crypto.hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12);

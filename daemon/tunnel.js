@@ -85,6 +85,7 @@ export function startGate(target, token) {
     res.end(page('Link preview tidak valid', 'Buka preview lewat tombol Preview di aplikasi pocketcode.'));
   };
 
+  /** @type {http.Server & { retarget?: (port: number) => void }} */
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     const t = url.searchParams.get(TOKEN_PARAM);
@@ -95,7 +96,7 @@ export function startGate(target, token) {
       return res.end();
     }
     if (!valid(cookie(req))) return deny(res);
-    const up = http.request({ host: 'localhost', port: target, method: req.method, path: req.url, headers: forwardHeaders(req), agent, autoSelectFamily: true }, (upRes) => {
+    const up = http.request(/** @type {http.RequestOptions} */ ({ host: 'localhost', port: target, method: req.method, path: req.url, headers: forwardHeaders(req), agent, autoSelectFamily: true }), (upRes) => {
       const h = { ...upRes.headers };
       if (h.location) h.location = h.location.replace(LOCAL_ORIGIN_RE, '') || '/';
       res.writeHead(upRes.statusCode, h);
@@ -158,6 +159,7 @@ async function waitReady(url, ms = 30000) {
 }
 
 // Buka tunnel ke `port`. Hasil: { url, link (dengan token), close() }.
+/** @param {number} port @param {{ cfg?: object, onExit?: () => void }} [opts] */
 export async function openTunnel(port, { cfg, onExit } = {}) {
   const token = randomBytes(24).toString('base64url');
   const gate = await startGate(port, token);
@@ -169,7 +171,7 @@ export async function openTunnel(port, { cfg, onExit } = {}) {
   };
   try {
     const exe = await cloudflaredPath(cfg);
-    child = spawn(exe, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${gate.address().port}`], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    child = spawn(exe, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (gate.address()).port}`], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
     const url = await new Promise((resolve, reject) => {
       let log = '';
       let found = null;

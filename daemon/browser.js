@@ -147,6 +147,7 @@ export async function closeBrowser() {
 
 // Buka `url`, tunggu load (+ jeda agar framework selesai render), lalu ambil screenshot JPEG
 // dan log konsol/error. Request yang tidak pernah selesai (HMR, SSE) tidak membuatnya macet.
+/** @param {string} url @param {{ width?: number, height?: number, wait?: number, timeout?: number, fullPage?: boolean, cfg?: { browserExecutable?: string } }} [opts] */
 export async function capture(url, { width = 390, height = 844, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
   const exe = findBrowser(cfg);
   if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.pocketcode/config.json.');

@@ -367,7 +367,8 @@ class RpcConn {
     this.visible = true; // HP mengabarkan saat PWA ke latar belakang (untuk Web Push)
   }
 
-  push() {
+  /** Kirim pesan ke klien (diimplementasikan LocalConn/PhoneConn). @param {object} msg */
+  push(msg) {
     throw new Error('not implemented');
   }
 
