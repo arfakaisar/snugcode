@@ -4,11 +4,12 @@
 import { store, token } from './conn.js';
 import { app } from './ui/state.js';
 import { showLogin, showMachines } from './ui/auth.js';
-import { toast } from './ui/dom.js';
+import { applyTheme, toast } from './ui/dom.js';
 import { showSession } from './ui/session.js';
 
 // ---------- start ----------
 function boot() {
+  applyTheme();
   const m = location.hash.match(/login=([^&]+)/);
   if (m) store.set('token', decodeURIComponent(m[1]));
   // Dibuka dari notifikasi push: #open=<mid>:<sid>

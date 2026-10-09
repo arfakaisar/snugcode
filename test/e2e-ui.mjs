@@ -104,14 +104,23 @@ await page.click('[aria-label="Menu sesi"]');
 await page.waitForSelector('#sheet:not([hidden])');
 await shot('8-menu');
 await closeSheet();
-await page.click('[aria-label="Aksi cepat"]');
-await page.waitForSelector('#sheet:not([hidden])');
+await page.click('[aria-label="Lampiran & alat"]');
+await page.waitForSelector('#sheet:not([hidden]) >> text=Mode rencana');
+await page.waitForSelector('#sheet:not([hidden]) >> text=Jelaskan repo ini');
+await shot('9-alat');
 await closeSheet();
-ok('sheet git (file hasil.txt terlihat), model, run, menu sesi, aksi cepat terbuka & tertutup');
+ok('sheet git (file hasil.txt terlihat), model, run, menu sesi, lampiran & alat terbuka & tertutup');
 
-// Kembali ke daftar sesi lalu buka lagi: riwayat diputar ulang tanpa duplikat
-await page.click('#back');
-await page.waitForSelector('text=' + path.basename(repo));
+// Drawer: daftar sesi terbaru, lalu Beranda -> buka lagi: riwayat diputar ulang tanpa duplikat
+await page.click('#menuBtn');
+await page.waitForSelector('#drawerPanel .dsess.on');
+await page.waitForTimeout(500);
+await shot('10-drawer');
+await page.locator('#drawerPanel button', { hasText: 'Beranda' }).click();
+await page.waitForSelector('#drawer', { state: 'hidden' });
+await page.waitForSelector('#view >> text=' + path.basename(repo));
+ok('drawer: sesi aktif ditandai, Beranda kembali ke daftar sesi');
+await page.locator('#view >> text=' + path.basename(repo)).first().click();
 await page.locator('text=' + path.basename(repo)).first().click();
 await page.waitForFunction(() => document.querySelectorAll('.donel').length === 3, null, { timeout: 20000 });
 const replay = await page.evaluate(() => ({ done: document.querySelectorAll('.donel').length, todo: document.querySelectorAll('#term .col > .todo').length, h3: document.querySelectorAll('.ln.txt h3').length }));

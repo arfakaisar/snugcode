@@ -51,7 +51,7 @@ Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan
 
 <p align="center"><img src="docs/images/tui.jpg" alt="Terminal UI pocketcode" width="720"><br><sub><b>Terminal UI</b> (<code>pocketcode</code>) — pengalaman seperti <code>claude</code>, dengan sesi yang sama seperti di HP</sub></p>
 
-> Gambar di atas adalah mockup dengan data contoh, dirender dari stylesheet asli aplikasi (`web/style.css`). Sumbernya ada di [`docs/mockups/`](docs/mockups).
+> Gambar di atas adalah mockup dengan data contoh dari tampilan versi sebelumnya; sumbernya ada di [`docs/mockups/`](docs/mockups). Tampilan PWA kini bergaya aplikasi chat (tema terang/gelap, drawer, composer kartu).
 
 ---
 
@@ -214,17 +214,18 @@ flowchart LR
 
 | Kontrol | Fungsi |
 |---|---|
-| **❯ / $** | Ganti mode agen ↔ shell. Pesan berawalan `!` juga dijalankan sebagai perintah shell. |
-| **🖼** | Lampirkan gambar dari kamera, galeri, atau clipboard |
-| **◆ model** | Ganti model & effort di tengah sesi (berlaku mulai pesan berikutnya) |
-| **▶ run** | Run & Preview: dev server, log, screenshot, link preview |
-| **⎇ git** | Status, diff, commit, push, Pull Request (badge = jumlah file berubah) |
-| **⚡ auto-izin** | Agen jalan tanpa bertanya, kecuali push/PR |
-| **☰ rencana** | Mode rencana: agen menyusun rencana dulu |
-| **✦ aksi cepat** | "Jelaskan repo ini", "Review perubahan", "Jalankan & perbaiki test", … |
-| **↺** (di prompt) | Rewind semua file ke sebelum prompt itu |
+| **☰** (kiri atas) atau geser dari tepi kiri | Drawer: sesi baru, beranda, sesi terbaru, ganti PC, akun & tema |
+| **Judul sesi ▾** | Menu sesi: rincian branch/model, git, run, ganti model, simpan `.env`, hapus sesi |
+| **▶ / 🌐** (kanan atas) | Run & Preview: dev server, log, screenshot, link preview (titik hijau = preview aktif) |
+| **⎇** (kanan atas) | Git: status, diff, commit, push, Pull Request (badge = jumlah file berubah) |
+| **+** (composer) | Lampiran & alat: kamera, galeri, mode rencana, mode shell, auto-izin, tinjau edit, aksi cepat |
+| **Nama model ▾** (composer) | Ganti model & effort di tengah sesi (berlaku mulai pesan berikutnya) |
+| **Pil mode** di atas input | Mode yang aktif (Rencana / Shell / Auto-izin); ketuk untuk mematikan |
+| **!** di awal pesan | Jalankan sebagai perintah shell |
+| **↺ rewind** (di bawah pesanmu) | Kembalikan semua file ke sebelum prompt itu |
 | **■** | Hentikan agen |
-| **⋯ menu PC** | Update pocketcode, restart daemon, model default, login ulang GitHub |
+| Tekan lama sesi (beranda) | Buka / hapus sesi |
+| Tarik ke bawah (daftar) | Muat ulang |
 
 ### Model & effort
 
@@ -238,7 +239,7 @@ flowchart LR
 
 ### Run & Preview
 
-Ketuk **▶ run → Jalankan**. Perintah setup (`npm ci`, `pnpm install`, …) dan dev (`npm run dev`, …) terdeteksi otomatis, atau bisa ditetapkan per repo lewat `.pocketcode.json`:
+Ketuk **▶** di kanan atas → **Jalankan**. Perintah setup (`npm ci`, `pnpm install`, …) dan dev (`npm run dev`, …) terdeteksi otomatis, atau bisa ditetapkan per repo lewat `.pocketcode.json`:
 
 ```json
 { "setup": "pnpm install", "dev": "pnpm dev --port {port}" }
