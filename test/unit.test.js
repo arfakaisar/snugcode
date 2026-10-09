@@ -135,14 +135,15 @@ test('groupModels: cc/claude-opus-5-5 menghasilkan virtual slider effort', async
 });
 
 // Upstream tiruan: handler(req, res) menentukan cara membalas.
-async function withProxy(handler, fn) {
+// `fn(url, headers)`: headers berisi token lokal proxy (seperti yang dipegang proses claude).
+async function withProxy(handler, fn, { key = 'router-key-asli' } = {}) {
   const http = await import('node:http');
   const { startRouterProxy } = await import('../daemon/proxy.js');
   const up = http.createServer(handler);
   await new Promise((r) => up.listen(0, '127.0.0.1', r));
-  const proxy = startRouterProxy(`http://127.0.0.1:${up.address().port}/v1`);
+  const proxy = startRouterProxy(`http://127.0.0.1:${up.address().port}/v1`, { getKey: () => key });
   try {
-    return await fn(await proxy.ready());
+    return await fn(await proxy.ready(), { authorization: 'Bearer ' + proxy.token });
   } finally {
     proxy.close();
     up.closeAllConnections?.();
@@ -150,7 +151,7 @@ async function withProxy(handler, fn) {
   }
 }
 
-test('loopback proxy: sanitasi header, tanpa menyuntikkan API key', async () => {
+test('loopback proxy: sanitasi header, key asli hanya disuntikkan untuk pemegang token lokal', async () => {
   const { stripIdeToolSuffix } = await import('../daemon/proxy.js');
   assert.equal(stripIdeToolSuffix('{"name":"Bash_ide"}'), '{"name":"Bash"}');
   assert.equal(stripIdeToolSuffix('{"name": "Read_ide"}'), '{"name":"Read"}');
@@ -163,15 +164,28 @@ test('loopback proxy: sanitasi header, tanpa menyuntikkan API key', async () => 
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end('event: content_block_start\ndata: {"content_block":{"name":"Bash_ide"}}\n\n');
     },
-    (url) => fetch(url + '/v1/messages', { headers: { 'user-agent': 'claude-cli/1.0.0', 'x-app': 'cli', other: 'keep' } }).then((r) => r.text()),
+    (url, auth) => fetch(url + '/v1/messages', { headers: { ...auth, 'user-agent': 'claude-cli/1.0.0', 'x-app': 'cli', other: 'keep' } }).then((r) => r.text()),
   );
   assert.ok(text.includes('"name":"Bash"') && !text.includes('Bash_ide'));
   assert.equal(seen['user-agent'], 'pocketcode/0.1');
   assert.equal(seen['x-app'], undefined);
   assert.equal(seen.other, 'keep');
-  // Request tanpa kredensial (mis. dari program lain di PC) tidak boleh mendapat key 9router.
+  // Router menerima key asli; token lokal tidak pernah keluar dari PC.
+  assert.equal(seen.authorization, 'Bearer router-key-asli');
   assert.equal(seen['x-api-key'], undefined);
-  assert.equal(seen.authorization, undefined);
+
+  // Request tanpa token lokal (mis. program lain di PC, atau key 9router mentah) ditolak, tidak diteruskan.
+  seen = null;
+  const statuses = await withProxy(
+    (req, res) => ((seen = req.headers), res.end('{}')),
+    async (url) => [
+      (await fetch(url + '/v1/messages')).status,
+      (await fetch(url + '/v1/messages', { headers: { 'x-api-key': 'router-key-asli' } })).status,
+      (await fetch(url + '/v1/messages', { headers: { authorization: 'Bearer pc-local-salah' } })).status,
+    ],
+  );
+  assert.deepEqual(statuses, [401, 401, 401]);
+  assert.equal(seen, null);
 });
 
 test('loopback proxy: _ide terbelah di batas chunk & UTF-8 multi-byte tetap utuh', async () => {
@@ -188,7 +202,7 @@ test('loopback proxy: _ide terbelah di batas chunk & UTF-8 multi-byte tetap utuh
         res.write(payload.subarray(0, cut));
         setTimeout(() => res.end(payload.subarray(cut)), 20);
       },
-      (url) => fetch(url + '/v1/messages').then((r) => r.text()),
+      (url, auth) => fetch(url + '/v1/messages', { headers: auth }).then((r) => r.text()),
     );
     assert.ok(!text.includes('Bash_ide'), 'potongan di byte ' + cut);
     assert.ok(text.includes('"name":"Bash"'), 'potongan di byte ' + cut);
@@ -203,8 +217,8 @@ test('loopback proxy: koneksi router putus di tengah stream -> klien tidak mengg
       res.write('data: {"type":"message_start"}\n\n');
       setTimeout(() => req.socket.destroy(), 30);
     },
-    (url) =>
-      fetch(url + '/v1/messages', { signal: AbortSignal.timeout(4000) })
+    (url, auth) =>
+      fetch(url + '/v1/messages', { headers: auth, signal: AbortSignal.timeout(4000) })
         .then((r) => r.text())
         .then(() => 'selesai', (e) => (e.name === 'TimeoutError' ? 'menggantung' : 'error')),
   );
@@ -218,8 +232,8 @@ test('loopback proxy: router tidak bisa dihubungi -> 502 berformat error Anthrop
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const port = srv.address().port;
   await new Promise((r) => srv.close(r)); // port kosong
-  const proxy = startRouterProxy(`http://127.0.0.1:${port}`);
-  const res = await fetch((await proxy.ready()) + '/v1/messages', { method: 'POST', body: '{}' });
+  const proxy = startRouterProxy(`http://127.0.0.1:${port}`, { getKey: () => 'k' });
+  const res = await fetch((await proxy.ready()) + '/v1/messages', { method: 'POST', body: '{}', headers: { 'x-api-key': proxy.token } });
   proxy.close();
   assert.equal(res.status, 502);
   const j = await res.json();
@@ -307,10 +321,34 @@ test('cleaner: hapus orphan worktree, repo tak terpakai, dan log basi', async ()
       { id: 'act1', repo: 'arfakaisar/myrepo', cwd: actWt },
     ];
 
+    // Repo sedang dipakai membuat sesi baru: tidak boleh disentuh walau belum terdaftar.
+    const busyRepoDir = path.join(wsDir, 'user__creating');
+    fs.mkdirSync(path.join(busyRepoDir, 's-new1'), { recursive: true });
+    // Repo tak terpakai tapi baru dipakai: clone dasar disimpan (TTL), worktree yatimnya tetap dibersihkan.
+    const recentRepoDir = path.join(wsDir, 'user__recent');
+    fs.mkdirSync(path.join(recentRepoDir, '_base'), { recursive: true });
+    fs.mkdirSync(path.join(recentRepoDir, 's-old2'), { recursive: true });
+    fs.writeFileSync(path.join(recentRepoDir, '.last-used'), '');
+    const old = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+    fs.utimesSync(path.join(unusedRepoDir), old, old);
+
+    const ttl = await cleanupWorkspaces(activeSessions, { workspacesDir: wsDir, sessionsDir: sessDir, minAgeMs: 0, busy: (d) => d === 'user__creating' });
+    assert.ok(fs.existsSync(path.join(busyRepoDir, 's-new1')), 'repo yang sedang dibuat tidak disentuh');
+    assert.ok(fs.existsSync(path.join(recentRepoDir, '_base')), 'clone yang baru dipakai disimpan (TTL)');
+    assert.ok(!fs.existsSync(path.join(recentRepoDir, 's-old2')), 'worktree yatim tetap dihapus');
+    assert.ok(ttl.removedRepos.includes(unusedRepoDir), 'clone yang lama tidak dipakai dihapus');
+    fs.mkdirSync(path.join(unusedRepoDir, '_base'), { recursive: true });
+    fs.mkdirSync(orpWt, { recursive: true });
+    fs.writeFileSync(path.join(orpWt, 'orphan.js'), 'orphan');
+    fs.writeFileSync(path.join(sessDir, 'old9.jsonl'), 'log9');
+    safeRm(busyRepoDir);
+    safeRm(recentRepoDir);
+
     const res = await cleanupWorkspaces(activeSessions, {
       workspacesDir: wsDir,
       sessionsDir: sessDir,
       minAgeMs: 0,
+      repoTtlMs: 0,
     });
 
     assert.equal(res.removedWorktrees.length, 1);
@@ -482,5 +520,158 @@ test('toolchain: folder shim pnpm/yarn ditambahkan di akhir PATH (tanpa variabel
     assert.equal(env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
   } finally {
     if (!had) fs.rmSync(path.join(dir, 'pnpm'), { force: true });
+  }
+});
+
+test('kanal biner: pesan besar dipecah & disusun ulang, anti replay, seq bersama frame teks', () => {
+  const secret = C.randomBytes(32);
+  const a = C.authStartPhone();
+  const b = C.authRespondMachine(secret, a.msg);
+  const fin = C.authFinishPhone(secret, a.state, b.msg);
+  const pc = C.authVerifyMachine(b.state, fin.msg);
+  const hp = fin.channel;
+  const big = { id: 1, r: { diff: 'é'.repeat(700_000) } }; // ±1,4MB UTF-8 -> beberapa frame
+  const frames = pc.sealBin(big);
+  assert.ok(frames.length >= 6, 'frames: ' + frames.length);
+  assert.ok(frames.every((f) => f.length <= C.BIN_CHUNK + 64));
+  const got = frames.map((f) => hp.openBin(f.slice().buffer));
+  assert.deepEqual(got.slice(0, -1), Array(frames.length - 1).fill(undefined));
+  assert.deepEqual(got.at(-1), big);
+  assert.throws(() => hp.openBin(frames[0]), /replay/);
+  // Frame teks & biner berbagi nomor urut: urutan campuran tetap diterima.
+  assert.deepEqual(hp.open(pc.seal({ t: 1 })), { t: 1 });
+  assert.deepEqual(hp.openBin(pc.sealBin({ t: 2 })[0]), { t: 2 });
+  // Ukuran: frame biner jauh lebih kecil dari frame teks (base64 + JSON berlapis).
+  const msg = { ev: 'events', es: [{ k: 'text', d: 'x'.repeat(30_000) }] };
+  const textLen = JSON.stringify({ t: 'd', cid: 'abcdefghijkl', d: JSON.stringify(pc.seal(msg)) }).length;
+  const binLen = C.frameWithCid('abcdefghijkl', pc.sealBin(msg)[0]).length;
+  assert.ok(binLen < textLen * 0.8, `${binLen} vs ${textLen}`);
+  const { cid, payload } = C.splitCid(C.frameWithCid('abcdefghijkl', new Uint8Array([1, 2, 3])));
+  assert.equal(cid, 'abcdefghijkl');
+  assert.deepEqual([...payload], [1, 2, 3]);
+});
+
+test('git status porcelain v2: branch, ahead, file baru/ubah/rename/untracked', async () => {
+  const { gitStatus, parseStatusV2 } = await import('../daemon/github.js');
+  await withRepo(async (dir, fs, path, git) => {
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+    await git(dir, ['add', 'b.txt']);
+    await git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'b']);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'diubah');
+    await git(dir, ['mv', 'b.txt', 'c d.txt']);
+    fs.writeFileSync(path.join(dir, 'baru x.txt'), 'x');
+    const st = await gitStatus(dir);
+    assert.ok(st.branch && st.branch !== 'HEAD');
+    const by = Object.fromEntries(st.files.map((f) => [f.path, f.st]));
+    assert.equal(by['a.txt'], ' M');
+    assert.equal(by['b.txt -> c d.txt'], 'R ');
+    assert.equal(by['baru x.txt'], '??');
+    assert.equal(st.hasUpstream, false);
+    assert.equal(st.ahead, 2, 'tanpa remote: semua commit belum di-push');
+    assert.equal(st.log.length, 2);
+  });
+  const p = parseStatusV2('# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +3 -1\n1 .M N... 100644 100644 100644 a a x.js\n');
+  assert.deepEqual({ ...p, files: p.files }, { branch: 'main', ahead: 3, behind: 1, upstream: true, files: [{ st: ' M', path: 'x.js' }] });
+  assert.equal(parseStatusV2('# branch.head (detached)\n').branch, 'HEAD');
+});
+
+test('markdown: render bertahap hanya membekukan blok yang sudah selesai', async () => {
+  const { md, stableCut, esc } = await import('../web/md.js');
+  assert.equal(esc('<a href="x">'), '&lt;a href=&quot;x&quot;&gt;');
+  assert.equal(md('**b** <i>'), '<p><b>b</b> &lt;i&gt;</p>');
+  const src = 'Paragraf satu.\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\n\nList:\n- a\n- b';
+  // Blok kode yang belum ditutup tidak boleh dipotong di baris kosong di dalamnya.
+  const partial = src.slice(0, src.indexOf('const b'));
+  assert.equal(stableCut(partial), 'Paragraf satu.\n\n'.length);
+  // Hasil render potongan-potongan sama dengan render utuh.
+  let done = 0;
+  let html = '';
+  for (let i = 1; i <= src.length; i += 7) {
+    const cut = stableCut(src.slice(0, i), done);
+    if (cut > done) (html += md(src.slice(done, cut))), (done = cut);
+  }
+  html += md(src.slice(done));
+  assert.equal(html, md(src));
+});
+
+test('izin: path sensitif & tool baca di luar worktree', async () => {
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const { HOME, WORKSPACES } = await import('../daemon/config.js');
+  const { isSensitivePath, toolPaths, Session } = await import('../daemon/sessions.js');
+  assert.ok(isSensitivePath(path.join(HOME, 'secrets.json')));
+  assert.ok(isSensitivePath(path.join(HOME, 'env', 'x', '.env')));
+  assert.ok(isSensitivePath(HOME));
+  assert.ok(!isSensitivePath(path.join(WORKSPACES, 'a__b', 's-1', 'x.js')));
+  assert.ok(!isSensitivePath(path.join(HOME + '-lain', 'x')));
+  // Output tool besar disimpan Claude Code di folder config-nya: boleh dibaca, tidak boleh ditulis.
+  const { CLAUDE_DIR } = await import('../daemon/config.js');
+  assert.ok(!isSensitivePath(path.join(CLAUDE_DIR, 'projects', 'p', 'tool-results', 'x.txt')));
+  assert.ok(isSensitivePath(path.join(CLAUDE_DIR, 'settings.json'), { write: true }));
+  assert.deepEqual(toolPaths('Glob', { pattern: path.join(HOME, '**', '*.json') }, '/w'), [path.join(HOME, path.sep)].map((p) => path.resolve(p)));
+
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-perm-'));
+  const mgr = { config: {}, secrets: {}, log() {}, notify() {}, saveIndex() {}, trimAgents() {} };
+  const s = new Session({ id: 'tperm', cwd, repo: 'a/b', model: 'm' }, mgr);
+  const settled = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r('menunggu'), 50))]);
+  try {
+    assert.equal((await s.askPermission('Read', { file_path: path.join(cwd, 'a.js') })).behavior, 'allow');
+    assert.equal((await s.askPermission('Grep', { pattern: 'x' })).behavior, 'allow');
+    assert.equal((await s.askPermission('Read', { file_path: path.join(CLAUDE_DIR, 'projects', 'x', 'tool-results', 'o.txt') })).behavior, 'allow');
+    assert.equal((await s.askPermission('Read', { file_path: path.join(HOME, 'secrets.json') })).behavior, 'deny');
+    assert.equal(await settled(s.askPermission('Read', { file_path: '/etc/hosts' })), 'menunggu');
+    assert.equal(await settled(s.askPermission('WebFetch', { url: 'https://x.y/?q=1' })), 'menunggu');
+    assert.equal((await s.askPermission('mcp__pocketcode__preview_screenshot', { url: 'http://localhost:5173/' })).behavior, 'allow');
+    assert.equal(await settled(s.askPermission('mcp__pocketcode__preview_screenshot', { url: 'file:///etc/passwd' })), 'menunggu');
+    s.meta.auto = true;
+    assert.equal((await s.askPermission('WebFetch', { url: 'https://x.y' })).behavior, 'allow');
+    assert.equal((await s.askPermission('Write', { file_path: path.join(HOME, 'config.json'), content: '' })).behavior, 'deny');
+    assert.equal((await s.askPermission('Edit', { file_path: path.join(CLAUDE_DIR, 'settings.json') })).behavior, 'deny');
+    assert.equal(await settled(s.askPermission('Bash', { command: 'cat ~/.pocketcode/secrets.json' })), 'menunggu');
+    // Izin yang tertunda: "Selalu" tidak berlaku untuk perintah yang menyentuh kredensial.
+    const pending = [...s.perms.entries()].find(([, p]) => p.tool === 'Bash');
+    s.answerPermission(pending[0], 'always');
+    assert.ok(!s.alwaysAllow.has('Bash'));
+  } finally {
+    s.endTurn();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('index sesi rusak: sesi dipulihkan dari worktree & tidak ada yang dihapus', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-idx-'));
+  try {
+    const wt = path.join(home, 'workspaces', 'octo__repo', 's-ab12');
+    fs.mkdirSync(path.join(home, 'workspaces', 'octo__repo', '_base'), { recursive: true });
+    fs.mkdirSync(wt, { recursive: true });
+    fs.writeFileSync(path.join(wt, 'kerja.txt'), 'belum di-push');
+    const old = new Date(Date.now() - 3600_000);
+    fs.utimesSync(wt, old, old);
+    fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'sessions', 'index.json'), '[{"id":"ab12","cwd":'); // terpotong
+    fs.writeFileSync(path.join(home, 'sessions', 'ab12.jsonl'), JSON.stringify({ k: 'user', d: 'perbaiki login', seq: 1 }) + '\n');
+    const script = `
+      const { SessionManager } = await import(${JSON.stringify(new URL('../daemon/sessions.js', import.meta.url).href)});
+      const m = new SessionManager({ config: { routerUrl: 'http://127.0.0.1:9/v1', model: 'm' }, secrets: {}, log() {} });
+      await new Promise((r) => setTimeout(r, 2500)); // pembersih otomatis berjalan 1,5 detik setelah start
+      console.log(JSON.stringify(m.list()));
+      await m.close();
+      process.exit(0);`;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, POCKETCODE_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const list = JSON.parse(out.trim().split('\n').at(-1));
+    assert.equal(list.length, 1);
+    assert.equal(list[0].id, 'ab12');
+    assert.equal(list[0].repo, 'octo/repo');
+    assert.equal(list[0].title, 'perbaiki login');
+    assert.ok(fs.existsSync(path.join(wt, 'kerja.txt')), 'worktree tidak dihapus');
+    assert.ok(fs.readdirSync(path.join(home, 'sessions')).some((f) => f.startsWith('index.json.broken-')), 'file rusak disimpan');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'sessions', 'index.json'), 'utf8'))[0].id, 'ab12');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

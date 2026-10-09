@@ -3,10 +3,13 @@
 //    parameter yang tidak valid pada router upstream (seperti reasoning_effort pada Anthropic).
 // 2. Menetralkan suffix `_ide` pada nama tool yang dihasilkan router upstream / Claude Code IDE
 //    (misal "Bash_ide" -> "Bash", "Read_ide" -> "Read") agar cocok dengan registri tool bawaan SDK.
-// Proxy tidak menambahkan kredensial apa pun: SDK sudah mengirim API key-nya sendiri, jadi
-// program lain yang memanggil port ini tidak bisa memakai key 9router milik pengguna.
+// 3. Key 9router asli tidak pernah masuk ke proses claude (dan Bash agen yang mewarisi env-nya):
+//    proses itu hanya memegang token lokal acak milik proxy ini. Proxy menukarnya dengan key asli.
+//    Request tanpa token lokal yang benar (program lain di PC) ditolak 401, jadi port ini tidak
+//    bisa dipakai untuk menumpang key pengguna, dan token yang bocor tidak berguna di luar PC.
 import http from 'node:http';
 import https from 'node:https';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 
 export function stripIdeToolSuffix(text) {
@@ -42,7 +45,14 @@ export function createToolNameRewriter() {
   };
 }
 
-export function startRouterProxy(routerUrl) {
+// `getKey()`: key 9router terkini (dibaca setiap request agar `pocketcode setup` langsung berlaku).
+export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
+  const localToken = 'pc-local-' + randomBytes(24).toString('hex');
+  const want = Buffer.from(localToken);
+  const authorized = (req) => {
+    const got = String(req.headers['x-api-key'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    return got.length === want.length && timingSafeEqual(Buffer.from(got), want);
+  };
   const target = new URL(routerUrl.replace(/\/+$/, '').replace(/\/v1$/, ''));
   const transport = target.protocol === 'https:' ? https : http;
   const agent =
@@ -52,7 +62,15 @@ export function startRouterProxy(routerUrl) {
 
   const server = http.createServer((req, res) => {
     req.socket?.setNoDelay?.(true);
+    if (!authorized(req)) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'pocketcode proxy: token lokal tidak valid' } }));
+    }
     const headers = { ...req.headers, host: target.host };
+    delete headers['x-api-key'];
+    const key = getKey();
+    if (key) headers.authorization = 'Bearer ' + key;
+    else delete headers.authorization;
     delete headers['accept-encoding'];
     delete headers['x-app'];
     delete headers.connection;
@@ -108,6 +126,7 @@ export function startRouterProxy(routerUrl) {
 
   return {
     server,
+    token: localToken,
     ready() {
       const addr = server.address();
       if (addr) return Promise.resolve(`http://127.0.0.1:${addr.port}`);

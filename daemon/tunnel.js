@@ -64,11 +64,12 @@ export function cloudflaredPath(cfg = {}) {
 const page = (title, text) =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="background:#07090d;color:#dbe2ea;font:15px/1.6 ui-monospace,monospace;padding:32px 18px;max-width:560px;margin:auto"><h2 style="color:#5ee6a0">${title}</h2><p>${text}</p>`;
 
+// `target` bisa diganti (gate.retarget) tanpa membuat tunnel baru: URL & cookie tetap sama.
 export function startGate(target, token) {
   const want = Buffer.from(token);
   const valid = (t) => typeof t === 'string' && t.length === token.length && timingSafeEqual(Buffer.from(t), want);
   const cookie = (req) => (req.headers.cookie || '').match(/(?:^|;\s*)pc_gate=([^;]+)/)?.[1];
-  const local = `localhost:${target}`;
+  let local = `localhost:${target}`;
   const forwardHeaders = (req) => {
     const h = { ...req.headers, host: local };
     if (h.origin) h.origin = 'http://' + local;
@@ -122,6 +123,13 @@ export function startGate(target, token) {
     up.on('error', () => sock.destroy());
     sock.on('error', () => up.destroy());
   });
+
+  server.retarget = (port) => {
+    target = port;
+    local = `localhost:${port}`;
+    // Koneksi keep-alive / HMR lama masih menunjuk dev server sebelumnya.
+    server.closeIdleConnections?.();
+  };
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -177,7 +185,17 @@ export async function openTunnel(port, { cfg, onExit } = {}) {
     });
     await waitReady(url);
     child.once('exit', () => (gate.close(), onExit?.()));
-    return { url, link: `${url}/?${TOKEN_PARAM}=${token}`, port, close };
+    const t = {
+      url,
+      link: `${url}/?${TOKEN_PARAM}=${token}`,
+      port,
+      close,
+      retarget(p) {
+        gate.retarget(p);
+        t.port = p;
+      },
+    };
+    return t;
   } catch (e) {
     close();
     throw e;

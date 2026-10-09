@@ -58,6 +58,29 @@ export function procName(cmd) {
   return (m?.[1] || 'proc').slice(0, 32);
 }
 
+// Log per proses sebagai ring buffer potongan: menambah output tidak menyalin ulang 256KB
+// log lama setiap chunk (dulu `log = (log + text).slice(-LOG_MAX)` saat npm install membanjir).
+class LogBuffer {
+  constructor(max = LOG_MAX) {
+    this.max = max;
+    this.chunks = [];
+    this.size = 0;
+  }
+  push(text) {
+    if (!text) return;
+    this.chunks.push(text);
+    this.size += text.length;
+    while (this.size - this.chunks[0].length >= this.max) this.size -= this.chunks.shift().length;
+  }
+  tail(n = this.max) {
+    const s = this.chunks.join('');
+    if (this.chunks.length > 1) {
+      this.chunks = [s];
+    }
+    return s.slice(-Math.min(n, this.max));
+  }
+}
+
 export class ProcManager {
   constructor({ cwd, onChange, onOut }) {
     this.cwd = cwd;
@@ -94,7 +117,13 @@ export class ProcManager {
     busy(); // start lain dengan nama sama bisa menyelip selama menunggu di atas
     const child = shellSpawn(cmd.replaceAll('{port}', port), { cwd: this.cwd, detached: !isWin, env });
     let exited;
-    const p = { name, cmd, child, status: 'running', code: null, port: null, hintPort: port, startedAt: Date.now(), endedAt: null, log: '', buf: '', waiters: [], done: new Promise((r) => (exited = r)) };
+    const out = new LogBuffer();
+    const p = {
+      name, cmd, child, status: 'running', code: null, port: null, hintPort: port, startedAt: Date.now(), endedAt: null, buf: '', waiters: [], done: new Promise((r) => (exited = r)),
+      get log() {
+        return out.tail();
+      },
+    };
     this.procs.set(name, p);
     const flush = () => {
       p.timer = null;
@@ -103,7 +132,7 @@ export class ProcManager {
     };
     const onData = (d) => {
       const text = stripAnsi(d.toString());
-      p.log = (p.log + text).slice(-LOG_MAX);
+      out.push(text);
       // Banjir output (npm install, build): kirim bagian terbarunya saja ke klien.
       p.buf = (p.buf + text).slice(-32 * 1024);
       if (!p.timer) p.timer = setTimeout(flush, 150);

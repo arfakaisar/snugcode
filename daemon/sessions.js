@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { SESSIONS_DIR, CLAUDE_DIR, anthropicBaseUrl } from './config.js';
-import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch } from './github.js';
+import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, anthropicBaseUrl, writeJson, readSessionIndex } from './config.js';
+import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startRouterProxy } from './proxy.js';
 import { resolveModelEffort, fastModelVariant } from '../shared/models.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
@@ -18,16 +18,59 @@ import { shellSpawn, toolchainEnv } from './toolchain.js';
 import { openTunnel } from './tunnel.js';
 import { snapshot, rewind } from './checkpoint.js';
 import { restoreEnv, detectProject } from './project.js';
-import { devToolsServer, SAFE_DEV_TOOLS, DEV_START } from './devtools.js';
+import { devToolsServer, SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtools.js';
+import { closeBrowser } from './browser.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const INDEX = path.join(SESSIONS_DIR, 'index.json');
 // Diteruskan ke SDK lewat settings.plansDirectory, jadi lokasinya pasti (bukan ~/.claude milik pengguna).
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const OUT_LIMIT = 4000;
 
-// Tool yang tidak pernah butuh izin di sesi ini.
-const SAFE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'TodoWrite', 'Task', 'Agent', 'WebSearch', 'WebFetch', 'NotebookRead', 'ToolSearch', 'BashOutput', ...SAFE_DEV_TOOLS]);
+// Proses claude dibiarkan hidup di antara prompt (streaming input): prompt berikutnya langsung
+// diproses tanpa spawn ulang + resume transcript. Dimatikan setelah menganggur selama ini, dan
+// paling banyak MAX_IDLE_AGENTS proses menganggur dibiarkan hidup bersamaan (hemat RAM).
+const AGENT_IDLE_MS = 5 * 60 * 1000;
+const MAX_IDLE_AGENTS = 3;
+// Riwayat sesi yang tidak dibuka siapa pun dilepas dari memori setelah selama ini.
+const HISTORY_IDLE_MS = 30 * 60 * 1000;
+// Saat memuat riwayat dari .jsonl, cukup baca bagian akhirnya (yang lebih lama tetap di file).
+const LOAD_TAIL_BYTES = 8 * 1024 * 1024;
+
+// Tool yang tidak pernah butuh izin di sesi ini. Tool baca (Read/Glob/Grep/LS) hanya lolos tanpa
+// bertanya bila sasarannya di dalam worktree; WebFetch tidak termasuk karena bisa dipakai
+// mengirim isi file ke luar (prompt injection dari README/issue).
+const SAFE_TOOLS = new Set(['TodoWrite', 'Task', 'Agent', 'WebSearch', 'ToolSearch', 'BashOutput', ...SAFE_DEV_TOOLS]);
+const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
+const FILE_TOOLS = new Set([...READ_TOOLS, 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+// Folder data pocketcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
+// dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
+// Pengecualian: worktree sesi, folder plans, dan BACA folder config Claude milik agen sendiri
+// (output tool besar disimpan Claude Code di sana lalu dibaca kembali). Menulis ke folder config
+// Claude tetap ditolak: settings.json di sana bisa memasang hook yang lolos dari sistem izin.
+const isInside = (p, dir) => {
+  const rel = path.relative(dir, p);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+export const isSensitivePath = (p, { write = false } = {}) =>
+  isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
+const SECRET_CMD_RE = /secrets\.json|\.pocketcode[\\/]+(?:secrets|config|sessions|claude|env|bin|tools)\b/i;
+
+// Path yang disentuh tool file (Glob dengan pola absolut: bagian sebelum karakter glob pertama).
+export function toolPaths(tool, input = {}, cwd) {
+  const out = [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === 'string' && p);
+  if (tool === 'Glob' && typeof input.pattern === 'string' && path.isAbsolute(input.pattern)) out.push(input.pattern.split(/[*?[{]/)[0] || input.pattern);
+  return out.map((p) => path.resolve(cwd, p));
+}
+
+const isLocalUrl = (u) => {
+  try {
+    const url = new URL(u);
+    return /^https?:$/.test(url.protocol) && /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+};
 
 // Perintah yang menulis ke remote selalu meminta izin, termasuk saat auto-izin aktif.
 // Opsi global git di depan subcommand ikut dikenali: `git -C dir push`, `git -c k=v push`.
@@ -131,6 +174,36 @@ function toolDetail(name, input = {}) {
   return undefined;
 }
 
+
+// Antrean pesan user untuk query() dalam mode streaming input: satu proses claude per sesi
+// menerima prompt demi prompt lewat iterator ini.
+function inputQueue() {
+  const items = [];
+  let wake = null;
+  let done = false;
+  const poke = () => {
+    wake?.();
+    wake = null;
+  };
+  return {
+    push(m) {
+      items.push(m);
+      poke();
+    },
+    end() {
+      done = true;
+      poke();
+    },
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        while (items.length) yield items.shift();
+        if (done) return;
+        await new Promise((r) => (wake = r));
+      }
+    },
+  };
+}
+
 export class Session extends EventEmitter {
   constructor(meta, manager) {
     super();
@@ -140,13 +213,16 @@ export class Session extends EventEmitter {
     this.trimmed = false;
     this._lastSeq = 0;
     this.status = 'idle';
-    this.query = null;
+    this.agent = null; // proses claude yang hidup (lihat ensureAgent)
+    this.turn = null; // prompt yang sedang dikerjakan: { resolve, agent }
+    this.cpReady = null; // checkpoint prompt berjalan; tool yang mengubah file menunggunya
     this.perms = new Map(); // pid -> { resolve, tool, input }
     // "Selalu izinkan" disimpan di meta agar tetap berlaku setelah daemon restart.
     this.alwaysAllow = new Set(meta.alwaysAllow || []);
     this.textBuf = '';
     this.textTimer = null;
     this.logFile = path.join(SESSIONS_DIR, meta.id + '.jsonl');
+    this.logStream = null;
     this.procs = new ProcManager({ cwd: meta.cwd, onChange: (p) => this.onProc(p), onOut: (name, d) => this.live({ k: 'procOut', name, d }) });
     this.tunnel = null;
   }
@@ -183,11 +259,18 @@ export class Session extends EventEmitter {
     this.opening = (async () => {
       const port = await this.procs.waitPort(name, 60000);
       if (!port) throw new Error(`Port "${name}" belum terdeteksi. Cek log prosesnya.`);
-      if (this.tunnel?.port === port) return this.previewInfo();
-      this.closeTunnel();
-      const t = await openTunnel(port, { cfg: this.mgr.config, onExit: () => this.tunnel === t && this.closeTunnel() });
-      t.name = name;
-      this.tunnel = t;
+      const t = this.tunnel;
+      if (t?.port === port && t.name === name) return this.previewInfo();
+      if (t) {
+        // Tunnel yang sudah ada cukup diarahkan ke port baru: URL & cookie HP tetap berlaku,
+        // tanpa menunggu cloudflared + DNS subdomain baru (5–15 detik).
+        t.retarget(port);
+        t.name = name;
+      } else {
+        const nt = await openTunnel(port, { cfg: this.mgr.config, onExit: () => this.tunnel === nt && this.closeTunnel() });
+        nt.name = name;
+        this.tunnel = nt;
+      }
       this.live({ k: 'preview', ...this.previewInfo() });
       return this.previewInfo();
     })().finally(() => (this.opening = null));
@@ -220,10 +303,30 @@ export class Session extends EventEmitter {
     return this._lastSeq;
   }
 
+  // Hanya bagian akhir file yang dibaca: riwayat panjang tidak perlu dimuat seluruhnya.
   load() {
     this._history = [];
-    if (!fs.existsSync(this.logFile)) return;
-    for (const line of fs.readFileSync(this.logFile, 'utf8').split('\n')) {
+    this.trimmed = false;
+    let text;
+    try {
+      const fd = fs.openSync(this.logFile, 'r');
+      try {
+        const size = fs.fstatSync(fd).size;
+        const start = Math.max(0, size - LOAD_TAIL_BYTES);
+        const buf = Buffer.alloc(size - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        text = buf.toString('utf8');
+        if (start > 0) {
+          text = text.slice(text.indexOf('\n') + 1);
+          this.trimmed = true;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return;
+    }
+    for (const line of text.split('\n')) {
       if (!line) continue;
       try {
         const e = JSON.parse(line);
@@ -240,6 +343,31 @@ export class Session extends EventEmitter {
     this.trimmed = true;
   }
 
+  // Lepaskan riwayat dari memori (dimuat ulang dari file saat dibutuhkan lagi).
+  unload() {
+    if (!this._history || this.logStream?.writableLength) return false;
+    this._history = null;
+    this.closeLog();
+    return true;
+  }
+
+  appendLog(e) {
+    if (!this.logStream) {
+      this.logStream = fs.createWriteStream(this.logFile, { flags: 'a' });
+      this.logStream.on('error', (err) => {
+        this.mgr.log('! gagal menulis riwayat sesi: ' + err.message);
+        this.logStream = null;
+      });
+    }
+    this.logStream.write(JSON.stringify(e) + '\n');
+  }
+
+  closeLog() {
+    const s = this.logStream;
+    this.logStream = null;
+    return s ? new Promise((r) => s.end(r)) : Promise.resolve();
+  }
+
   summary() {
     const m = this.meta;
     // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
@@ -254,7 +382,7 @@ export class Session extends EventEmitter {
     e.ts = Date.now();
     events.push(e);
     if (events.length > MEM_EVENTS + 500) this.trim();
-    if (persist) fs.appendFileSync(this.logFile, JSON.stringify(e) + '\n');
+    if (persist) this.appendLog(e);
     this.emit('event', e);
     return e;
   }
@@ -299,7 +427,11 @@ export class Session extends EventEmitter {
   }
 
   since(seq) {
-    return this.events.filter((e) => e.seq > seq);
+    const ev = this.events;
+    // Event berurutan menurut seq: cari batasnya dari belakang (umumnya hanya beberapa event baru).
+    let i = ev.length;
+    while (i > 0 && ev[i - 1].seq > seq) i--;
+    return ev.slice(i);
   }
 
   // true bila event setelah `seq` sebagian sudah dibuang dari memori.
@@ -328,7 +460,7 @@ export class Session extends EventEmitter {
     const u = this.emitEvent({ k: 'user', d: text, img: images.length || undefined });
     this.run(text, images, u.seq).catch((err) => {
       this.emitEvent({ k: 'error', d: String(err?.message || err) });
-      this.setStatus('idle');
+      this.endTurn(true);
     });
   }
 
@@ -350,37 +482,40 @@ export class Session extends EventEmitter {
   setPlan(on) {
     this.meta.plan = !!on;
     this.mgr.saveIndex();
-    this.query?.setPermissionMode(on ? 'plan' : 'default').catch(() => {});
+    this.agent?.q.setPermissionMode(on ? 'plan' : 'default').catch(() => {});
     this.live({ k: 'mode', plan: !!on });
   }
 
-  async run(prompt, images = [], userSeq) {
+  // Proses claude untuk sesi ini: dipakai ulang antar prompt selama pengaturannya sama (model,
+  // effort, binary, URL). Berubah (mis. ganti model) → proses lama ditutup, yang baru melanjutkan
+  // percakapan lewat `resume`.
+  async ensureAgent() {
     const cfg = this.mgr.config;
     const sec = this.mgr.secrets;
     const claudeExe = claudeExecutable(cfg);
-    this.setStatus('running');
-    if (userSeq) {
-      const tree = await snapshot(this.meta.cwd).catch((e) => this.mgr.log('! checkpoint gagal: ' + e.message));
-      if (tree) this.emitEvent({ k: 'cp', of: userSeq, tree });
-    }
-    if (this.meta.note) {
-      prompt = this.meta.note + '\n\n' + prompt;
-      delete this.meta.note;
-      this.mgr.saveIndex();
-    }
-    const env = { ...process.env };
-    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
-
     const { actualModel, effort } = resolveModelEffort(this.meta.model);
     // Tugas haiku / deskripsi tool / subagent selalu memakai varian cepat (low effort),
     // agar prompt tidak tertahan thinking berlebih.
     const smallCandidate = cfg.smallModel || fastModelVariant(this.meta.model);
     const actualSmallModel = resolveModelEffort(fastModelVariant(smallCandidate)).actualModel || actualModel;
-    const baseUrl = (await this.mgr.proxy?.ready()) || anthropicBaseUrl(cfg.routerUrl);
+    const proxy = this.mgr.proxy;
+    const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
+    const baseUrl = proxyUrl || anthropicBaseUrl(cfg.routerUrl);
+    // Lewat proxy, proses claude hanya memegang token lokal; key asli disuntikkan oleh proxy.
+    const authToken = proxyUrl ? proxy.token : sec.routerKey;
+    const key = [claudeExe, actualModel, effort, actualSmallModel, baseUrl, authToken].join('|');
+    if (this.agent && !this.agent.dead && this.agent.key === key) {
+      clearTimeout(this.agent.idle);
+      this.agent.idle = null;
+      return this.agent;
+    }
+    this.closeAgent();
 
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH)/.test(k)) delete env[k];
     Object.assign(env, {
       ANTHROPIC_BASE_URL: baseUrl,
-      ANTHROPIC_AUTH_TOKEN: sec.routerKey,
+      ANTHROPIC_AUTH_TOKEN: authToken,
       ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
       ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
       ANTHROPIC_DEFAULT_HAIKU_MODEL: actualSmallModel,
@@ -395,12 +530,9 @@ export class Session extends EventEmitter {
     // pnpm/yarn tetap ada untuk Bash agen walau tidak terpasang global (bila shim sudah disiapkan).
     Object.assign(env, await toolchainEnv('', env));
 
-    const streamed = new Set();
-    let currentMsgId = null;
-    // Gambar dikirim sebagai blok konten pesan user (butuh input streaming SDK).
-    const content = [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(prompt ? [{ type: 'text', text: prompt }] : [])];
+    const input = inputQueue();
     const q = query({
-      prompt: images.length ? (async function* () { yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null }; })() : prompt,
+      prompt: input,
       options: {
         cwd: this.meta.cwd,
         env,
@@ -418,93 +550,175 @@ export class Session extends EventEmitter {
         disallowedTools: ['EnterPlanMode'],
         mcpServers: { pocketcode: devToolsServer(this) },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: POCKETCODE_SYSTEM_PROMPT },
-        canUseTool: (tool, input, opts) => this.askPermission(tool, input, opts),
+        canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
       },
     });
-    this.query = q;
+    const agent = { key, q, input, actualModel, streamed: new Set(), currentMsgId: null, dead: false, idle: null, lastUsed: Date.now() };
+    this.agent = agent;
+    agent.loop = this.consume(agent);
+    return agent;
+  }
+
+  async consume(agent) {
     try {
-      for await (const m of q) {
-        if (m.type === 'system' && m.subtype === 'init') {
-          if (this.meta.claudeSessionId !== m.session_id) {
-            this.meta.claudeSessionId = m.session_id;
-            this.mgr.saveIndex();
-          }
-        } else if (m.type === 'system' && m.subtype === 'api_retry') {
-          this.emitEvent({ k: 'retry', attempt: m.attempt, max: m.max_retries, status: m.error_status });
-        } else if (m.type === 'stream_event') {
-          const ev = m.event;
-          if (ev.type === 'message_start') {
-            currentMsgId = ev.message?.id;
-            // Isi konteks = token input request terakhir (termasuk cache), untuk indikator konteks.
-            const u = ev.message?.usage;
-            if (u && !m.parent_tool_use_id) this.lastCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-          }
-          else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-            this.clearThinking();
-            this.flushText();
-            this.emitEvent({ k: 'toolStart', name: shortName(ev.content_block.name) }, { persist: false });
-          } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
-            this.pushThinking(ev.delta.thinking);
-          } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-            this.clearThinking();
-            streamed.add(currentMsgId);
-            this.pushText(ev.delta.text);
-          } else if (ev.type === 'content_block_stop') {
-            this.clearThinking();
-            this.flushText();
-          }
-        } else if (m.type === 'assistant') {
-          if (m.parent_tool_use_id) continue; // isi subagent tidak ditampilkan rinci
-          for (const b of m.message.content || []) {
-            if (b.type === 'text' && !streamed.has(m.message.id) && b.text) this.emitEvent({ k: 'text', d: b.text });
-            if (b.type === 'tool_use') this.emitEvent({ k: 'tool', id: b.id, name: shortName(b.name), s: toolSummary(b.name, b.input, this.meta.cwd), x: toolDetail(b.name, b.input) });
-          }
-        } else if (m.type === 'user' && !m.parent_tool_use_id) {
-          const content = m.message?.content;
-          if (Array.isArray(content))
-            for (const b of content) {
-              if (b.type === 'tool_result') this.emitEvent({ k: 'result', id: b.tool_use_id, ok: !b.is_error, d: cut(toolResultText(b.content)) });
-            }
-        } else if (m.type === 'result') {
-          this.flushText();
-          const u = m.usage;
-          // modelUsage juga memuat model kecil (subagen/utility); ambil milik model utama.
-          const ctxMax = m.modelUsage?.[actualModel]?.contextWindow;
-          this.emitEvent({
-            k: 'done',
-            ok: m.subtype === 'success' && !m.is_error,
-            turns: m.num_turns,
-            ms: m.duration_ms,
-            usage: u ? { in: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), out: u.output_tokens } : undefined,
-            cost: m.total_cost_usd || undefined,
-            ctx: ctxMax && this.lastCtx ? Math.round((this.lastCtx / ctxMax) * 100) : undefined,
-            err: m.subtype !== 'success' ? m.subtype : m.is_error ? cut(m.result || '', 600) : undefined,
-          });
-          const ok = m.subtype === 'success' && !m.is_error;
-          this.mgr.notify(this, ok ? `✓ selesai · ${String(m.result || '').replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(m.result || m.subtype).slice(0, 140)}`);
-        }
+      for await (const m of agent.q) {
+        if (agent.dead) break;
+        this.onAgentMessage(agent, m);
       }
+    } catch (err) {
+      if (!agent.dead && this.turn?.agent === agent) this.emitEvent({ k: 'error', d: String(err?.message || err) });
     } finally {
-      this.clearThinking();
-      this.flushText();
-      this.query = null;
-      for (const p of this.perms.values()) p.resolve({ behavior: 'deny', message: 'Sesi dihentikan' });
-      this.perms.clear();
-      this.setStatus('idle');
+      agent.dead = true;
+      clearTimeout(agent.idle);
+      if (this.agent === agent) this.agent = null;
+      // Proses mati di tengah prompt (crash / ditutup): prompt itu selesai, sesi kembali idle.
+      // Prompt milik proses lain (mis. proses baru setelah ganti model) tidak disentuh.
+      if (this.turn?.agent === agent) this.endTurn();
     }
+  }
+
+  onAgentMessage(agent, m) {
+    // Agen bisa memulai giliran sendiri (mis. notifikasi tugas latar belakang selesai).
+    if (!this.turn && (m.type === 'assistant' || m.type === 'stream_event') && !m.parent_tool_use_id) {
+      this.turn = { resolve() {}, agent };
+      this.setStatus('running');
+    }
+    if (m.type === 'system' && m.subtype === 'init') {
+      if (this.meta.claudeSessionId !== m.session_id) {
+        this.meta.claudeSessionId = m.session_id;
+        this.mgr.saveIndex();
+      }
+    } else if (m.type === 'system' && m.subtype === 'api_retry') {
+      this.emitEvent({ k: 'retry', attempt: m.attempt, max: m.max_retries, status: m.error_status });
+    } else if (m.type === 'stream_event') {
+      const ev = m.event;
+      if (ev.type === 'message_start') {
+        agent.currentMsgId = ev.message?.id;
+        // Isi konteks = token input request terakhir (termasuk cache), untuk indikator konteks.
+        const u = ev.message?.usage;
+        if (u && !m.parent_tool_use_id) this.lastCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      } else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+        this.clearThinking();
+        this.flushText();
+        this.emitEvent({ k: 'toolStart', name: shortName(ev.content_block.name) }, { persist: false });
+      } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+        this.pushThinking(ev.delta.thinking);
+      } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        this.clearThinking();
+        agent.streamed.add(agent.currentMsgId);
+        this.pushText(ev.delta.text);
+      } else if (ev.type === 'content_block_stop') {
+        this.clearThinking();
+        this.flushText();
+      }
+    } else if (m.type === 'assistant') {
+      if (m.parent_tool_use_id) return; // isi subagent tidak ditampilkan rinci
+      for (const b of m.message.content || []) {
+        if (b.type === 'text' && !agent.streamed.has(m.message.id) && b.text) this.emitEvent({ k: 'text', d: b.text });
+        if (b.type === 'tool_use') this.emitEvent({ k: 'tool', id: b.id, name: shortName(b.name), s: toolSummary(b.name, b.input, this.meta.cwd), x: toolDetail(b.name, b.input) });
+      }
+    } else if (m.type === 'user' && !m.parent_tool_use_id) {
+      const content = m.message?.content;
+      if (Array.isArray(content))
+        for (const b of content) {
+          if (b.type === 'tool_result') this.emitEvent({ k: 'result', id: b.tool_use_id, ok: !b.is_error, d: cut(toolResultText(b.content)) });
+        }
+    } else if (m.type === 'result') {
+      this.flushText();
+      const u = m.usage;
+      // modelUsage juga memuat model kecil (subagen/utility); ambil milik model utama.
+      const ctxMax = m.modelUsage?.[agent.actualModel]?.contextWindow;
+      const ok = m.subtype === 'success' && !m.is_error;
+      this.emitEvent({
+        k: 'done',
+        ok,
+        turns: m.num_turns,
+        ms: m.duration_ms,
+        usage: u ? { in: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), out: u.output_tokens } : undefined,
+        cost: m.total_cost_usd || undefined,
+        ctx: ctxMax && this.lastCtx ? Math.round((this.lastCtx / ctxMax) * 100) : undefined,
+        err: m.subtype !== 'success' ? m.subtype : m.is_error ? cut(m.result || '', 600) : undefined,
+      });
+      this.mgr.notify(this, ok ? `✓ selesai · ${String(m.result || '').replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(m.result || m.subtype).slice(0, 140)}`);
+      agent.streamed.clear();
+      agent.lastUsed = Date.now();
+      if (this.turn?.agent === agent) this.endTurn();
+      if (!agent.dead) {
+        agent.idle = setTimeout(() => this.closeAgent(agent), AGENT_IDLE_MS);
+        agent.idle.unref?.();
+        this.mgr.trimAgents();
+      }
+    }
+  }
+
+  // Akhiri prompt yang berjalan: izin yang masih menunggu ditolak, status kembali idle.
+  endTurn(force = false) {
+    this.clearThinking();
+    this.flushText();
+    for (const p of this.perms.values()) p.resolve({ behavior: 'deny', message: 'Sesi dihentikan' });
+    this.perms.clear();
+    const t = this.turn;
+    this.turn = null;
+    if (t || (force && this.status === 'running')) this.setStatus('idle');
+    t?.resolve();
+  }
+
+  closeAgent(agent = this.agent) {
+    if (!agent) return;
+    agent.dead = true;
+    clearTimeout(agent.idle);
+    agent.input.end();
+    try {
+      agent.q.close();
+    } catch {}
+    if (this.agent === agent) this.agent = null;
+    if (this.turn?.agent === agent) this.endTurn();
+  }
+
+  async run(prompt, images = [], userSeq) {
+    this.setStatus('running');
+    this.turn = { resolve() {} };
+    // Checkpoint berjalan paralel dengan start-up agen; tool yang mengubah file menunggu
+    // checkpoint ini selesai (askPermission), jadi rewind tetap mendapat kondisi sebelum prompt.
+    if (userSeq)
+      this.cpReady = snapshot(this.meta.cwd).then(
+        (tree) => tree && this.emitEvent({ k: 'cp', of: userSeq, tree }),
+        (e) => this.mgr.log('! checkpoint gagal: ' + e.message),
+      );
+    if (this.meta.note) {
+      prompt = this.meta.note + '\n\n' + prompt;
+      delete this.meta.note;
+      this.mgr.saveIndex();
+    }
+    const agent = await this.ensureAgent();
+    const done = new Promise((resolve) => (this.turn = { resolve, agent }));
+    // Gambar dikirim sebagai blok konten pesan user.
+    const content = images.length ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(prompt ? [{ type: 'text', text: prompt }] : [])] : prompt;
+    agent.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+    return done;
   }
 
   // Pertanyaan pilihan (AskUserQuestion) dan persetujuan rencana (ExitPlanMode) selalu
   // menunggu pengguna, termasuk saat auto-izin aktif.
-  askPermission(tool, input, opts) {
+  async askPermission(tool, input, opts) {
+    const cwd = this.meta.cwd;
+    const allow = { behavior: 'allow', updatedInput: input };
+    const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
+    const write = FILE_TOOLS.has(tool) && !READ_TOOLS.has(tool);
+    if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'Folder data pocketcode (~/.pocketcode) berisi kredensial dan tidak boleh diakses agen.' };
     const isPush = isRemoteWrite(tool, input);
-    const needsUser = isPush || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
+    const secretCmd = (tool === 'Bash' || tool === DEV_START) && SECRET_CMD_RE.test(input?.command || '');
+    const shotUrl = tool === SCREENSHOT ? input?.url : null;
+    const shotFile = shotUrl && !/^https?:/i.test(shotUrl);
+    const needsUser = isPush || secretCmd || shotFile || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
     // Mode rencana: agen menulis draf rencananya ke folder plans milik Claude (bukan worktree).
     const planFile = this.meta.plan && ['Write', 'Edit'].includes(tool) && path.resolve(String(input?.file_path || '')).startsWith(PLANS_DIR + path.sep);
-    if (!needsUser && (planFile || SAFE_TOOLS.has(tool) || this.meta.auto || this.alwaysAllow.has(tool))) {
-      return Promise.resolve({ behavior: 'allow', updatedInput: input });
-    }
+    const readInside = READ_TOOLS.has(tool) && paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR));
+    const safe = (SAFE_TOOLS.has(tool) && !(shotUrl && !isLocalUrl(shotUrl))) || readInside;
+    // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
+    if (!safe && this.cpReady) await this.cpReady;
+    if (!needsUser && (planFile || safe || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
     const pid = randomBytes(6).toString('hex');
     return new Promise((resolve) => {
       const p = { resolve, tool, input, title: opts?.title };
@@ -523,8 +737,9 @@ export class Session extends EventEmitter {
     const p = this.perms.get(pid);
     if (!p) return false;
     this.perms.delete(pid);
-    // Push tidak pernah bisa "selalu diizinkan".
-    if (decision === 'always' && !isRemoteWrite(p.tool, p.input) && !['AskUserQuestion', 'ExitPlanMode'].includes(p.tool)) {
+    // Push & perintah yang menyentuh kredensial tidak pernah bisa "selalu diizinkan".
+    const never = isRemoteWrite(p.tool, p.input) || SECRET_CMD_RE.test(p.input?.command || '') || ['AskUserQuestion', 'ExitPlanMode'].includes(p.tool);
+    if (decision === 'always' && !never) {
       this.alwaysAllow.add(p.tool);
       this.meta.alwaysAllow = [...this.alwaysAllow];
       this.mgr.saveIndex();
@@ -548,17 +763,23 @@ export class Session extends EventEmitter {
 
   async interrupt() {
     if (this.shellProc) this.shellProc.kill();
-    if (this.query) await this.query.interrupt().catch(() => {});
+    const agent = this.agent;
+    const turn = this.turn;
+    if (!agent || turn?.agent !== agent) return;
+    await agent.q.interrupt().catch(() => {});
+    // Normalnya agen membalas dengan `result`; bila tidak dalam 8 detik, matikan prosesnya.
+    setTimeout(() => this.turn === turn && this.closeAgent(agent), 8000).unref?.();
   }
 
   // Matikan proses claude(.exe), dev server, dan tunnel sepenuhnya, mis. sebelum update/hapus sesi.
   async close() {
     if (this.shellProc) this.shellProc.kill();
-    try {
-      this.query?.close();
-    } catch {}
+    // Tunggu (maks. 3 detik) proses claude benar-benar keluar: di Windows claude.exe yang masih
+    // hidup mengunci file binary (update) dan file worktree (hapus sesi).
+    const exited = this.agent?.loop;
+    this.closeAgent();
     this.closeTunnel();
-    await this.procs.stopAll();
+    await Promise.all([this.procs.stopAll(), this.closeLog(), exited && Promise.race([exited, new Promise((r) => setTimeout(r, 3000))])]);
   }
 
   // "!perintah" -> jalankan langsung di worktree (seperti ! di Claude Code).
@@ -602,27 +823,76 @@ export class Session extends EventEmitter {
   }
 }
 
+// Bangun ulang daftar sesi dari worktree di disk bila index.json rusak: tanpa ini sesi (dan
+// pekerjaan yang belum di-push) hilang dari aplikasi, dan pembersih akan menganggapnya yatim.
+function recoverIndex(defaultModel) {
+  const out = [];
+  let repos = [];
+  try {
+    repos = fs.readdirSync(WORKSPACES);
+  } catch {
+    return out;
+  }
+  for (const dir of repos) {
+    const repoDir = path.join(WORKSPACES, dir);
+    let base = '';
+    try {
+      base = fs.readFileSync(path.join(repoDir, '_base', '.git', 'refs', 'remotes', 'origin', 'HEAD'), 'utf8').trim().replace(/^ref: refs\/remotes\/origin\//, '');
+    } catch {}
+    let subs = [];
+    try {
+      subs = fs.readdirSync(repoDir).filter((s) => /^s-[\w-]+$/.test(s));
+    } catch {}
+    for (const sub of subs) {
+      const cwd = path.join(repoDir, sub);
+      const id = sub.slice(2);
+      let st;
+      try {
+        st = fs.statSync(cwd);
+      } catch {
+        continue;
+      }
+      let title = '';
+      try {
+        const first = fs.readFileSync(path.join(SESSIONS_DIR, id + '.jsonl'), 'utf8').split('\n').find((l) => l.includes('"k":"user"'));
+        if (first) title = String(JSON.parse(first).d || '').slice(0, 80);
+      } catch {}
+      const branch = currentBranch(cwd) || 'pocket/' + id;
+      out.push({ id, repo: dir.replace('__', '/'), cwd, branch, base: base || 'main', model: defaultModel, title, createdAt: st.birthtimeMs || st.mtimeMs, updatedAt: st.mtimeMs, auto: false });
+    }
+  }
+  return out;
+}
+
 export class SessionManager {
   constructor({ config, secrets, log, notify }) {
     this.config = config;
     this.secrets = secrets;
-    this.log = log;
+    this.log = log || (() => {});
     this.notify = notify || (() => {});
     this.sessions = new Map();
+    this.busyRepos = new Map(); // folder repo (huruf kecil) -> jumlah sesi yang sedang dibuat
     try {
-      this.proxy = startRouterProxy(config.routerUrl);
+      this.proxy = startRouterProxy(config.routerUrl, { getKey: () => this.secrets.routerKey });
     } catch (e) {
-      this.log?.('! gagal memulai loopback proxy: ' + e.message);
+      this.log('! gagal memulai loopback proxy: ' + e.message);
     }
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-    let index = [];
-    try {
-      index = JSON.parse(fs.readFileSync(INDEX, 'utf8'));
-    } catch {}
-    for (const meta of index) if (fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
+    const idx = readSessionIndex({ quarantine: true });
+    let index = idx.list;
+    if (!idx.ok) {
+      index = recoverIndex(config.model);
+      console.error(`! sessions/index.json rusak (disimpan sebagai index.json.broken-*); ${index.length} sesi dipulihkan dari worktree.`);
+    }
+    for (const meta of index) if (meta?.id && meta.cwd && fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
+    if (!idx.ok) this.saveIndex();
     // Pindai dan bersihkan folder yatim secara otomatis di latar belakang
-    setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500);
-    this.cleanupTimer = setInterval(() => this.cleanupOrphans().catch(() => {}), 30 * 60 * 1000);
+    setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500).unref?.();
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupOrphans().catch(() => {});
+      this.unloadIdle();
+    }, 30 * 60 * 1000);
+    this.cleanupTimer.unref?.();
   }
 
   // Dev server & tunnel milik sesi tidak boleh tertinggal saat daemon berhenti (di Windows
@@ -630,14 +900,27 @@ export class SessionManager {
   close() {
     this.proxy?.close();
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
-    return Promise.all([...this.sessions.values()].map((s) => s.close()));
+    return Promise.all([...this.sessions.values()].map((s) => s.close()).concat(closeBrowser()));
+  }
+
+  // Riwayat sesi yang lama tidak dibuka dilepas dari memori.
+  unloadIdle(now = Date.now()) {
+    for (const s of this.sessions.values()) {
+      if (s.status === 'idle' && !s.agent && !s.listenerCount('event') && now - (s.meta.updatedAt || 0) > HISTORY_IDLE_MS) s.unload();
+    }
+  }
+
+  // Batasi jumlah proses claude menganggur: yang paling lama tidak dipakai ditutup lebih dulu.
+  trimAgents() {
+    const idle = [...this.sessions.values()].filter((s) => s.agent && !s.turn).sort((a, b) => b.agent.lastUsed - a.agent.lastUsed);
+    for (const s of idle.slice(MAX_IDLE_AGENTS)) s.closeAgent();
   }
 
   async cleanupOrphans(opts) {
     if (this.cleaning) return { removedWorktrees: [], removedRepos: [], removedLogs: [] };
     this.cleaning = true;
     try {
-      return await cleanupWorkspaces(this.sessions, opts);
+      return await cleanupWorkspaces(this.sessions, { ...opts, busy: (dir) => this.busyRepos.has(dir.toLowerCase()) });
     } finally {
       this.cleaning = false;
     }
@@ -646,16 +929,20 @@ export class SessionManager {
   // Di Windows claude.exe yang masih jalan mengunci file-nya sehingga npm gagal
   // menimpanya (dan diam-diam melewati paket binary). Tutup semua sesi dulu.
   async stopAll({ wait = 1500 } = {}) {
-    const active = [...this.sessions.values()].filter((s) => s.query || s.shellProc || s.procs.running() || s.tunnel);
-    for (const s of active) s.emitEvent({ k: 'note', d: '◆ dihentikan untuk memasang pembaruan' });
+    const active = [...this.sessions.values()].filter((s) => s.agent || s.shellProc || s.procs.running() || s.tunnel);
+    for (const s of active) if (s.turn || s.shellProc || s.procs.running()) s.emitEvent({ k: 'note', d: '◆ dihentikan untuk memasang pembaruan' });
     await Promise.all(active.map((s) => s.close()));
     if (active.length) await new Promise((r) => setTimeout(r, wait));
     return active.length;
   }
 
+  // Atomik: gagal menulis (mis. disk penuh) membiarkan index lama tetap utuh, tidak memutus alur agen.
   saveIndex() {
-    const data = [...this.sessions.values()].map((s) => s.meta);
-    fs.writeFileSync(INDEX, JSON.stringify(data, null, 2));
+    try {
+      writeJson(SESSION_INDEX, [...this.sessions.values()].map((s) => s.meta), 0o644);
+    } catch (e) {
+      console.error('! gagal menyimpan daftar sesi: ' + e.message);
+    }
   }
 
   list() {
@@ -684,13 +971,23 @@ export class SessionManager {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('Format repo harus owner/nama');
     const id = randomBytes(4).toString('hex');
     branch = (branch || '').trim() || 'pocket/' + id;
-    const wt = await prepareWorktree(this.secrets.githubToken, repo, { base: base || undefined, branch, sessionId: id });
-    const meta = { id, repo, ...wt, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
-    const s = new Session(meta, this);
-    this.sessions.set(id, s);
-    this.saveIndex();
+    // Selama clone/worktree disiapkan, pembersih tidak boleh menyentuh repo ini.
+    const busyKey = repoDirName(repo).toLowerCase();
+    this.busyRepos.set(busyKey, (this.busyRepos.get(busyKey) || 0) + 1);
+    let s;
+    try {
+      const wt = await prepareWorktree(this.secrets.githubToken, repo, { base: base || undefined, branch, sessionId: id });
+      const meta = { id, repo, ...wt, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
+      s = new Session(meta, this);
+      this.sessions.set(id, s);
+      this.saveIndex();
+    } finally {
+      const n = this.busyRepos.get(busyKey) - 1;
+      if (n > 0) this.busyRepos.set(busyKey, n);
+      else this.busyRepos.delete(busyKey);
+    }
     // Template .env repo (disimpan dari sesi sebelumnya) agar dev server langsung bisa jalan.
-    const env = restoreEnv(repo, wt.cwd);
+    const env = restoreEnv(repo, s.meta.cwd);
     if (env.length) s.emitEvent({ k: 'note', d: `◆ env dipulihkan: ${env.join(', ')}` });
     return s;
   }
@@ -708,7 +1005,7 @@ export class SessionManager {
     if (!s.meta.local) {
       await removeWorktree(s.meta.cwd).catch(() => {});
     }
-    // Bersihkan repositori atau folder yatim yang sudah tidak terpakai
+    // Bersihkan worktree / log yatim (clone dasar repo disimpan beberapa hari untuk sesi berikutnya)
     await this.cleanupOrphans({ minAgeMs: 0 }).catch(() => {});
   }
 }

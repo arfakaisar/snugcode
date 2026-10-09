@@ -8,8 +8,14 @@ import { git } from './github.js';
 // node_modules tanpa .gitignore bisa berisi ratusan ribu file: jangan pernah di-snapshot.
 const PATHSPEC = ['--', '.', ':(exclude,glob)**/node_modules/**'];
 
+// Lokasi index sementara per worktree tidak berubah: cukup tanya git sekali.
+const indexFiles = new Map();
 async function indexEnv(cwd) {
-  const file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'])).trim());
+  let file = indexFiles.get(cwd);
+  if (!file) {
+    file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'])).trim());
+    indexFiles.set(cwd, file);
+  }
   fs.rmSync(file + '.lock', { force: true });
   return { GIT_INDEX_FILE: file };
 }

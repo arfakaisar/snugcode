@@ -297,6 +297,8 @@ button.card:active, .card.tap:active { transform: scale(.985); border-color: var
 .txt { margin: 8px 0; line-height: 1.65; color: var(--fg); }
 .txt p { margin: 0 0 .7em; }
 .txt p:last-child { margin-bottom: 0; }
+/* Teks agen dirender bertahap: [blok selesai][blok terakhir]; jarak antar keduanya tetap seperti satu dokumen. */
+.txt > div:first-child:not(:empty):has(+ div:not(:empty)) > p:last-child { margin-bottom: .7em; }
 .txt h3 { font-size: 14.5px; margin: 1em 0 .4em; color: var(--blue); }
 .txt ul, .txt ol { margin: .2em 0 .8em; padding-left: 1.4em; }
 .txt li { margin: .2em 0; }
