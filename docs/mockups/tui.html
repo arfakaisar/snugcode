@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<style>
+  body { margin: 0; background: #07090d; font: 15px/1.5 'Cascadia Mono', Consolas, monospace; color: #dbe2ea; }
+  .win { margin: 24px; border: 1px solid #222a36; border-radius: 12px; overflow: hidden; background: #0b0e14; box-shadow: 0 30px 60px -30px #000; }
+  .tb { height: 36px; background: #141a22; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: #6f7a8a; font-size: 12px; }
+  .tb i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  pre { margin: 0; padding: 16px 20px 20px; font: inherit; white-space: pre; }
+  .g { color: #5ee6a0 } .c { color: #59d6e6 } .b { color: #7cb7ff } .p { color: #c7a2ff } .y { color: #f2c14e } .r { color: #ff6b6b }
+  .k { color: #6f7a8a } .s { color: #aab4c2 } .l { color: #3a4352 } .B { font-weight: 700 }
+  .grad { background: linear-gradient(90deg, #5ee6a0, #59d6e6); -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 700 }
+  .u { background: #1b222d }
+.box{border:1px solid #3a4352;border-radius:8px;padding:6px 14px;margin:4px 0;width:640px;white-space:pre}
+.box+*{}</style></head>
+<body><div class="win"><div class="tb"><i style="background:#ff6b6b"></i><i style="background:#f2c14e"></i><i style="background:#5ee6a0"></i><span style="margin-left:10px">~/proyek/landing — pocketcode</span></div>
+<pre><div class="box"><span class="grad">❯_ pocketcode</span>  <span class="k">— Claude Code harness · 9router</span>
+
+  <span class="k">/help</span> bantuan  <span class="k">/model</span> model &amp; effort  <span class="k">!</span> shell
+
+  <span class="k">folder </span> ~/proyek/landing
+  <span class="k">repo   </span> arfakaisar/landing<span class="k"> · </span><span class="b">main</span>
+  <span class="k">model  </span> <span class="p">◆ </span>claude-opus-5-5 · high
+  <span class="k">PC     </span> PC-Rumah<span class="k"> · @arfakaisar · bisa dilanjutkan di HP</span>
+</div>
+<span class="u"> <span class="g B">❯</span> jalankan test lalu perbaiki yang gagal                                 </span>
+
+<span class="g">●</span> <span class="B">Bash</span><span class="s">(npm test)</span>
+<span class="l">  ⎿  </span><span class="s">✗ useTheme › menyimpan pilihan ke localStorage</span>
+<span class="s">     Tests: 1 failed, 23 passed</span>
+
+<span class="g">●</span> <span class="B">Read</span><span class="s">(src/hooks/useTheme.ts)</span>
+<span class="l">  ⎿  </span><span class="k">24 baris dibaca</span>
+
+<span class="g">●</span> <span class="B">Edit</span><span class="s">(src/hooks/useTheme.ts)</span>
+<span class="l">  ⎿  </span>Diubah: <span class="g">+2</span> <span class="r">−1</span>
+<span class="r">     - const saved = localStorage.theme</span>
+<span class="g">     + const saved = typeof window !== 'undefined'</span>
+<span class="g">     +   ? localStorage.getItem('theme') : null</span>
+
+<span class="g">●</span> Test yang gagal sudah diperbaiki: <span class="p">useTheme</span> membaca localStorage saat SSR.
+  Semua <span class="B">24 test lulus</span>.
+
+<span class="g">✻</span> <span class="k">Selesai · 6 langkah · 38s · 21.4k↑ 1.2k↓ token</span>
+
+<div class="box"><span class="g B">❯ </span><span class="k">Minta sesuatu…  (/ perintah · ! shell · \ + enter baris baru)</span>
+</div>  <span class="p">◆ </span><span class="s">claude-opus-5-5 · high</span><span class="k">  ·  </span><span class="b">git </span><span class="s">main</span><span class="y"> +1</span><span class="k">  ·  ~/proyek/landing</span>       <span class="k">? bantuan</span></pre>
+</div></body></html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<style>
+  body { margin: 0; width: 1280px; height: 640px; overflow: hidden; font-family: 'Cascadia Mono', Consolas, monospace; color: #dbe2ea;
+    background: radial-gradient(900px 500px at 85% -10%, #0f2a20 0%, transparent 60%), radial-gradient(700px 400px at -10% 110%, #0b1d26 0%, transparent 55%), #07090d; }
+  .wrap { display: flex; height: 100%; align-items: center; padding: 0 56px; gap: 40px; }
+  .txt { flex: 1; }
+  .logo { display: flex; align-items: center; gap: 18px; font-size: 64px; font-weight: 700; letter-spacing: -.03em; }
+  .logo img { width: 76px; height: 76px; }
+  .grad { background: linear-gradient(135deg, #5ee6a0, #59d6e6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tag { font-size: 23px; color: #aab4c2; margin: 22px 0 28px; line-height: 1.45; }
+  .tag b { color: #fff; }
+  .pills { display: flex; flex-wrap: wrap; gap: 10px; max-width: 560px; }
+  .pills span { font-size: 15px; padding: 8px 14px; border-radius: 99px; border: 1px solid #2d3746; background: #141a22; color: #aab4c2; }
+  .pills span.on { color: #5ee6a0; border-color: #2fbf7166; background: #2fbf7112; }
+  .phones { display: flex; gap: 22px; align-items: center; }
+  .phone { width: 220px; border-radius: 30px; padding: 7px; background: #1b222d; border: 1px solid #2d3746; box-shadow: 0 30px 60px -20px #000; }
+  .phone img { display: block; width: 100%; border-radius: 24px; }
+  .phone.mid { transform: translateY(-18px); width: 240px; }
+</style></head>
+<body><div class="wrap">
+  <div class="txt">
+    <div class="logo"><img src="../../web/icon.svg" alt=""><span class="grad">pocketcode</span></div>
+    <div class="tag">Claude Code di <b>PC-mu</b>, dikendalikan dari <b>HP</b>.<br>Edit, test, preview, commit &amp; PR — dari mana saja.</div>
+    <div class="pills"><span class="on">E2EE relay</span><span>tanpa VPS / port</span><span>git worktree per sesi</span><span>izin 1-tap + diff</span><span>Run &amp; Preview</span><span>PWA + terminal</span></div>
+  </div>
+  <div class="phones">
+    <div class="phone"><img src="../images/sessions.jpg"></div>
+    <div class="phone mid"><img src="../images/session.jpg"></div>
+  </div>
+</div></body></html>

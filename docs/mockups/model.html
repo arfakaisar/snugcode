@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../web/style.css">
+<style>body{font-family:'Cascadia Mono',Consolas,monospace} #sheetBackdrop,#sheetPanel{animation:none!important}</style></head>
+<body>
+<div id="app">
+  <header id="bar"><button class="iconbtn"><i data-ic="back"></i></button><div id="title"><div id="titleRow"><span id="dot" class="on"></span><span id="titleText">Tambah dark mode</span></div></div></header>
+  <main id="view"></main>
+</div>
+<div id="sheet"><div id="sheetBackdrop"></div><div id="sheetPanel"><div id="sheetGrab"><span></span></div><div id="sheetBody">
+  <div class="sheethead"><h2>Model sesi ini<span class="sub">sekarang: claude-sonnet-5-5</span></h2><button class="iconbtn small"><i data-ic="x"></i></button></div>
+  <div class="search"><i data-ic="search"></i><input class="field" placeholder="Cari model…"></div>
+  <div class="mlist">
+    <div class="mprov">Claude Code · cc/</div>
+    <div class="model sel"><div class="row"><span class="mname">claude-opus-5-5</span></div><div class="sub">1M konteks · 5 tingkat effort · gambar</div>
+      <div class="effort"><div class="row"><span class="dim">effort</span><b>high</b><span style="flex:1"></span><button class="effchip">auto</button></div>
+        <input type="range" min="0" max="3" value="2"><div class="ticks"><button>low</button><button>medium</button><button class="on">high</button><button>max</button></div>
+        <div class="hint">← cepat &amp; hemat   ·   berpikir lebih dalam →</div></div></div>
+    <div class="model"><div class="row"><span class="mname">claude-sonnet-5-5</span><span class="tag on">dipakai</span></div><div class="sub">1M konteks · 5 tingkat effort · gambar</div></div>
+    <div class="mprov">Antigravity · ag/</div>
+    <div class="model"><div class="row"><span class="mname">gemini-3.8-flash</span></div><div class="sub">1M konteks · 4 tingkat effort · gambar</div></div>
+    <div class="model"><div class="row"><span class="mname">gemini-3.1-pro</span></div><div class="sub">1M konteks · effort low</div></div>
+  </div>
+  <div class="sheetfoot"><div class="probe"><span class="ok">✓ siap · 1.2s</span><button class="linkbtn">uji ulang</button></div><button class="btn primary">Pakai claude-opus-5-5 · high</button></div>
+</div></div></div>
+<script src="mock.js"></script>
+</body></html>
