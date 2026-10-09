@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../web/style.css">
+<style>body{font-family:'Cascadia Mono',Consolas,monospace} #sheetBackdrop,#sheetPanel{animation:none!important}</style></head>
+<body>
+<div id="app">
+  <header id="bar"><button class="iconbtn"><i data-ic="back"></i></button><div id="title"><div id="titleRow"><span id="dot" class="on"></span><span id="titleText">Tambah dark mode</span></div><div id="subText">arfakaisar/landing · pocket/k3x9</div></div></header>
+  <main id="view"></main>
+</div>
+<div id="sheet"><div id="sheetBackdrop"></div><div id="sheetPanel"><div id="sheetGrab"><span></span></div><div id="sheetBody">
+  <div class="sheethead"><h2>Git<span class="sub">arfakaisar/landing</span></h2><button class="iconbtn small"><i data-ic="x"></i></button></div>
+  <div class="gitstat"><span class="tag"><i data-ic="branch"></i>pocket/k3x9</span><span class="tag">belum ada di GitHub</span></div>
+  <div class="label">Perubahan <span class="count">3</span></div>
+  <div class="files">
+    <div class="f"><span class="st M">M</span><span class="p">src/components/Navbar.tsx</span></div>
+    <div class="f"><span class="st A">A</span><span class="p">src/hooks/useTheme.ts</span></div>
+    <div class="f"><span class="st M">M</span><span class="p">src/styles/globals.css</span></div>
+  </div>
+  <div class="difffile" style="margin-top:12px"><div class="dfh"><span class="p">src/components/Navbar.tsx</span><span class="dstat"><span class="a">+4</span> <span class="d">−1</span></span></div>
+    <div class="dfb"><span class="hunk">@@ -12,7 +12,10 @@ export function Navbar()</span><span class="ctx">   return (</span><span class="ctx">     &lt;nav className="nav"&gt;</span><span class="del">-      &lt;Logo /&gt;</span><span class="add">+      &lt;Logo /&gt;</span><span class="add">+      &lt;button onClick={toggle}&gt;</span><span class="add">+        {dark ? &lt;Sun /&gt; : &lt;Moon /&gt;}</span><span class="add">+      &lt;/button&gt;</span></div></div>
+  <div class="label">Commit</div>
+  <input class="field" value="feat: toggle dark mode di navbar">
+  <div style="margin-top:10px"><button class="btn"><i data-ic="commit"></i>Commit semua</button></div>
+  <div class="label">Kirim ke GitHub</div>
+  <button class="btn primary"><i data-ic="push"></i>Push ke origin/pocket/k3x9</button>
+  <div style="height:10px"></div>
+  <button class="btn"><i data-ic="pr"></i>Buat Pull Request</button>
+</div></div></div>
+<script src="mock.js"></script>
+</body></html>
