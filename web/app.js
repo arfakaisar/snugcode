@@ -109,6 +109,13 @@ const P = {
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/>',
   bug: '<rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 20v-9M3 13h5M16 13h5M4 7l4 2M20 7l-4 2M4 19l4-2M20 19l-4-2M9 4l1.5 2M15 4l-1.5 2"/>',
   flask: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
+  save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/>',
   github: '<path fill="currentColor" stroke="none" d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.3 4.8 18.3 5 18.3 5c.7 1.6.3 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/>',
 };
 function ic(name, cls = '') {
@@ -569,11 +576,54 @@ async function showMachines({ resume = false } = {}) {
   );
 }
 
+// ---------- Notifikasi & Web Push ----------
+// Kunci VAPID dibuat di HP lalu dibagikan ke tiap PC lewat kanal E2EE: satu langganan push
+// per HP bisa dipakai semua PC-nya, dan layanan push tidak bisa membaca isi notifikasi.
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const pushOn = () => !!store.get('vapid') && window.Notification?.permission === 'granted';
+
+// Notifikasi dari halaman sendiri hanya dipakai bila Web Push belum aktif (agar tidak dobel).
+function localNotify(title, body) {
+  if (document.visibilityState !== 'visible' && !pushOn() && window.Notification?.permission === 'granted') new Notification(title, { body });
+}
+
+async function pushSubscription(create) {
+  const reg = 'serviceWorker' in navigator && (await navigator.serviceWorker.getRegistration());
+  if (!reg?.pushManager || window.Notification?.permission !== 'granted') return null;
+  let vapid = store.get('vapid');
+  let sub = await reg.pushManager.getSubscription();
+  if (!vapid) {
+    if (!create) return null;
+    await sub?.unsubscribe(); // dibuat dengan kunci lain yang sudah hilang
+    sub = null;
+    const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+    const { kty, crv, d, x, y } = await crypto.subtle.exportKey('jwk', k.privateKey);
+    store.set('vapid', (vapid = { kty, crv, d, x, y }));
+  }
+  if (!sub && create) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from([4, ...unb64u(vapid.x), ...unb64u(vapid.y)]) });
+  return sub ? { sub: sub.toJSON(), vapid } : null;
+}
+
+async function syncPush(create) {
+  const p = await pushSubscription(create).catch(() => null);
+  if (p && conn?.channel) await conn.call('pushSub', p).catch(() => {});
+  return p;
+}
+
+async function enableNotifications() {
+  if (!window.Notification) return toast('Browser ini tidak mendukung notifikasi', true);
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return toast('Notifikasi: ' + perm, true);
+  const p = await syncPush(true);
+  if (p) toast('Notifikasi aktif — tetap muncul walau aplikasi ditutup');
+  else toast(/iPhone|iPad/.test(navigator.userAgent) ? 'Tambahkan ke Home Screen dulu agar notifikasi tetap jalan saat aplikasi ditutup' : 'Notifikasi aktif saat aplikasi terbuka', false, 5000);
+}
+
 function accountMenu() {
   ui.sheet(
     ui.head('Akun', { sub: me ? '@' + me.login : '' }),
     h('div', { class: 'group' },
-      menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: () => Notification?.requestPermission().then((p) => toast('Notifikasi: ' + p)) }),
+      menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
       menuItem({ icon: 'logout', t1: 'Keluar', danger: true, chev: false, onclick: () => (store.set('token', null), (me = null), ui.closeSheet(), showLogin()) }),
     ),
   );
@@ -615,6 +665,8 @@ function openMachine(m, { sid } = {}) {
     clearInterval(current.updateTimer);
     current.updateTimer = setInterval(() => checkUpdateStatus(true), 90000);
     checkUpdateStatus(false);
+    syncPush(false);
+    if (document.visibilityState !== 'visible') conn.call('visible', { on: false }).catch(() => {});
     if (first) showSessions();
     else if (current.session) (reattach(), ui.sub(sessionSub(current.session)));
     else showSessionsMeta();
@@ -625,7 +677,7 @@ function openMachine(m, { sid } = {}) {
   conn.on('notice', (msg) => {
     if (current?.session?.id === msg.sid && document.visibilityState === 'visible') return;
     toast(`${msg.title}: ${msg.msg}`);
-    if (document.visibilityState !== 'visible' && window.Notification?.permission === 'granted') new Notification('pocketcode', { body: `${msg.title}: ${msg.msg}` });
+    localNotify('pocketcode', `${msg.title}: ${msg.msg}`);
   });
   conn.connect();
 }
@@ -983,7 +1035,7 @@ function showMachineMenu() {
     ),
     h('div', { class: 'label' }, 'Perangkat'),
     h('div', { class: 'group' },
-      menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: () => Notification?.requestPermission().then((p) => toast('Notifikasi: ' + p)) }),
+      menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
       menuItem({ icon: 'unlink', t1: 'Lupakan pairing HP ini', t2: 'Perlu PIN lagi untuk tersambung', danger: true, chev: false, onclick: () => (store.set('dev.' + current.m.id, null), ui.closeSheet(), openMachine(current.m)) }),
     ),
   );
@@ -1389,20 +1441,77 @@ function showSession(s) {
   const send = h('button', { id: 'send', class: 'idle', 'aria-label': 'Kirim' }, ic('send'));
   const modeBtn = h('button', { class: 'modebtn', 'aria-label': 'Ganti mode agen / shell' }, '❯');
   const modelChip = h('button', { class: 'chip model', 'aria-label': 'Ganti model' });
+  const runChip = h('button', { class: 'chip', 'aria-label': 'Jalankan & preview' }, ic('play'), 'run');
   const gitChip = h('button', { class: 'chip', 'aria-label': 'Git' }, ic('branch'), 'git');
   const autoChip = h('button', { class: 'chip', 'aria-label': 'Auto-izin' });
+  const planChip = h('button', { class: 'chip', 'aria-label': 'Mode rencana' }, ic('list'), 'rencana');
   const quickChip = h('button', { class: 'chip', 'aria-label': 'Aksi cepat' }, ic('spark'), 'aksi cepat');
+  const attachBtn = h('button', { class: 'modebtn attach', 'aria-label': 'Lampirkan gambar' }, ic('image'));
+  const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  const thumbs = h('div', { id: 'thumbs', hidden: true });
   ui.set(s.title || s.repo.split('/')[1], { sub: sessionSub(s), back: () => (conn.call('detach').catch(() => {}), showSessions()), dot: 'on', actions: [{ icon: 'dots', label: 'Menu sesi', onclick: () => sessionMenu() }] });
   ui.view(
     h('div', { class: 'session' },
       h('div', { style: 'flex:1;min-height:0;position:relative;display:flex;flex-direction:column' }, term, working, toBottom),
       dock,
-      h('div', { id: 'composer' }, h('div', { class: 'inner' }, h('div', { id: 'chips' }, modelChip, gitChip, autoChip, quickChip), h('div', { id: 'inputRow' }, modeBtn, input, send))),
+      h('div', { id: 'composer' }, h('div', { class: 'inner' }, h('div', { id: 'chips' }, modelChip, runChip, gitChip, autoChip, planChip, quickChip), thumbs, h('div', { id: 'inputRow' }, modeBtn, attachBtn, fileIn, input, send))),
     ),
   );
 
   const r = new Renderer(term, col, dock);
   current.renderer = r;
+  current.procs = new Map();
+  current.preview = null;
+
+  // --- run & preview: badge jumlah proses berjalan ---
+  current.syncRun = () => {
+    const n = [...current.procs.values()].filter((p) => p.status === 'running').length;
+    runChip.className = 'chip' + (current.preview ? ' on' : '');
+    runChip.replaceChildren(ic(current.preview ? 'globe' : 'play'), current.preview ? 'preview' : 'run', n ? h('span', { class: 'badge' }, n) : '');
+    current.runSheet?.();
+  };
+  runChip.onclick = () => showRun();
+
+  // --- mode rencana: agen hanya membaca & menyusun rencana, lalu meminta persetujuan ---
+  current.setPlan = (on) => {
+    current.session.plan = on;
+    planChip.className = 'chip' + (on ? ' on' : '');
+    input.placeholder = on ? 'Rencanakan apa?' : shellMode ? 'Perintah shell di worktree…' : 'Minta sesuatu ke agen…';
+  };
+  planChip.onclick = async () => {
+    haptic();
+    try {
+      current.setPlan((await conn.call('plan', { id: s.id, on: !current.session.plan })).plan);
+      toast(current.session.plan ? 'Mode rencana: agen menyusun rencana dulu, tanpa mengubah file' : 'Mode rencana mati');
+    } catch (e) {
+      toast(isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk mode rencana.' : e.message, true);
+    }
+  };
+
+  // --- lampiran gambar (kamera, galeri, atau tempel dari clipboard) ---
+  let images = [];
+  const renderThumbs = () => {
+    thumbs.hidden = !images.length;
+    thumbs.replaceChildren(...images.map((im, i) => h('button', { class: 'thumb', 'aria-label': 'Hapus gambar', onclick: () => ((images = images.filter((_, j) => j !== i)), renderThumbs(), syncSend()) }, h('img', { src: `data:${im.mime};base64,${im.data}`, alt: '' }), ic('x'))));
+  };
+  const addImages = async (files) => {
+    for (const f of [...files].filter((f) => f.type.startsWith('image/'))) {
+      if (images.length >= 4) return toast('Maksimal 4 gambar', true);
+      try {
+        images.push(await compressImage(f));
+      } catch {
+        toast('Gambar tidak bisa dibaca', true);
+      }
+    }
+    renderThumbs();
+    syncSend();
+  };
+  attachBtn.onclick = () => fileIn.click();
+  fileIn.onchange = () => (addImages(fileIn.files), (fileIn.value = ''));
+  input.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) (e.preventDefault(), addImages(files));
+  });
   r.onUnread = (n) => {
     toBottom.hidden = n === 0 && r.stick;
     toBottom.replaceChildren(ic('arrowdown'), n ? h('span', { class: 'n' }, n) : '');
@@ -1470,10 +1579,11 @@ function showSession(s) {
     modeBtn.textContent = sh ? '$' : '❯';
     modeBtn.classList.toggle('shell', sh);
     input.classList.toggle('shell', sh);
-    input.placeholder = sh ? 'Perintah shell di worktree…' : 'Minta sesuatu ke agen…';
     input.autocapitalize = sh ? 'off' : 'sentences';
+    current.setPlan(!!current.session.plan);
   };
   modeBtn.onclick = () => (setMode(!shellMode), haptic(), input.focus());
+  setMode(false);
 
   quickChip.onclick = () =>
     ui.sheet(
@@ -1509,7 +1619,7 @@ function showSession(s) {
     }
   };
   const syncSend = () => {
-    const has = input.value.trim().length > 0;
+    const has = input.value.trim().length > 0 || images.length > 0;
     send.className = current.running ? 'stop' : has ? '' : 'idle';
   };
   current.setRunning = setRunning;
@@ -1517,6 +1627,10 @@ function showSession(s) {
     if (msg.sid !== s.id) return;
     for (const e of msg.es) {
       if (e.k === 'status') setRunning(e.s === 'running');
+      else if (e.k === 'proc') onProc(e);
+      else if (e.k === 'procOut') current.procOut?.(e);
+      else if (e.k === 'preview') (current.preview = e.url ? e : null), current.syncRun();
+      else if (e.k === 'mode') current.setPlan(e.plan);
       else r.add(e);
       if (e.seq) current.lastSeq = Math.max(current.lastSeq, e.seq);
       if (e.k === 'done') (haptic(e.ok ? 15 : 50), e.ok || toast('Agen berhenti: ' + (e.err || 'error'), true));
@@ -1540,18 +1654,23 @@ function showSession(s) {
       return;
     }
     let text = input.value.trim();
-    if (!text) return input.focus();
-    if (shellMode && !text.startsWith('!')) text = '!' + text;
+    const imgs = images;
+    if (!text && !imgs.length) return input.focus();
+    if (shellMode && !imgs.length && !text.startsWith('!')) text = '!' + text;
     input.value = '';
+    images = [];
+    renderThumbs();
     autosize();
     syncSend();
     haptic(10);
     r.scroll(true);
     try {
-      await conn.call('send', { id: s.id, text });
+      await conn.call('send', { id: s.id, text, ...(imgs.length ? { images: imgs } : {}) });
     } catch (e) {
       toast(e.message, true);
       input.value = text;
+      images = imgs;
+      renderThumbs();
       syncSend();
     }
   };
@@ -1585,12 +1704,156 @@ async function reattach(fresh) {
     });
     for (const p of res.perms) r.add({ k: 'perm', ...p });
     current.setRunning(res.session.status === 'running');
+    current.setPlan(!!res.session.plan);
+    current.procs = new Map((res.procs || []).map((p) => [p.name, p]));
+    current.preview = res.preview || null;
+    current.syncRun();
     if (fresh && !res.events.length) r.welcome(s);
     r.scroll(true);
     current.refreshGit?.();
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Kecilkan gambar (sisi terpanjang 1568px, JPEG) agar hemat token dan 4 gambar tetap muat satu
+// frame relay (1 MiB; payload terenkripsi membesar ±4/3 karena base64).
+async function compressImage(file) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bmp.width * k);
+  cv.height = Math.round(bmp.height * k);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  bmp.close?.();
+  for (const q of [0.8, 0.65, 0.5, 0.35]) {
+    const data = cv.toDataURL('image/jpeg', q).split(',')[1];
+    if (data.length < 170_000) return { mime: 'image/jpeg', data };
+  }
+  throw new Error('terlalu besar');
+}
+
+// ---------- Run & Preview ----------
+function onProc(p) {
+  const was = current.procs.get(p.name);
+  current.procs.set(p.name, { ...was, ...p });
+  if (was?.status === 'running' && p.status === 'exited' && !p.killed) toast(`${p.name} berhenti (exit ${p.code})`, p.code !== 0);
+  if (!was?.port && p.port) toast(`${p.name} siap di port ${p.port}`);
+  current.syncRun();
+}
+
+function showRun() {
+  const s = current.session;
+  const body = h('div', {});
+  const cmdIn = h('input', { class: 'field', placeholder: 'mis. npm run dev (kosongkan = otomatis)', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go' });
+  let detected = null;
+  const act = (b, fn) => async () => {
+    const done = busyButton(b, 'Memproses…');
+    try {
+      await fn();
+    } catch (e) {
+      toast(isOldDaemon(e) ? 'Perbarui pocketcode di PC untuk fitur Run & Preview.' : e.message, true);
+    }
+    if (b.isConnected) done();
+  };
+  const startBtn = h('button', { class: 'btn primary' }, ic('play'), 'Jalankan');
+  startBtn.onclick = act(startBtn, async () => {
+    const r = await conn.call('runDev', { id: s.id, cmd: cmdIn.value.trim() || undefined });
+    haptic(15);
+    toast(r.setup ? `Memasang dependency (${r.setup}), lalu ${r.dev}` : `Menjalankan ${r.dev}`);
+    cmdIn.value = '';
+  });
+  cmdIn.onkeydown = (e) => e.key === 'Enter' && startBtn.click();
+
+  const procCard = (p) => {
+    const run = p.status === 'running';
+    const pv = current.preview?.name === p.name ? current.preview : null;
+    const btns = h('div', { class: 'btnrow' });
+    if (run && p.port) {
+      // Tab baru dibuka dari ketukan langsung pada link: popup setelah await diblokir iOS.
+      const prev = pv
+        ? h('a', { class: 'btn primary', href: pv.link, target: '_blank', rel: 'noopener', onclick: () => haptic() }, ic('globe'), 'Buka preview')
+        : h('button', { class: 'btn primary' }, ic('globe'), 'Preview di HP');
+      if (!pv)
+        prev.onclick = act(prev, async () => {
+          toast('Membuka tunnel aman… (±10 detik)');
+          current.preview = await conn.call('preview', { id: s.id, name: p.name });
+          current.syncRun();
+          haptic(20);
+          toast('Preview siap — ketuk "Buka preview"');
+        });
+      const shot = h('button', { class: 'btn' }, ic('camera'), 'Screenshot');
+      shot.onclick = act(shot, async () => showShot(await conn.call('screenshot', { id: s.id, name: p.name, width: Math.round(innerWidth), height: Math.round(innerHeight) })));
+      btns.append(prev, shot);
+    }
+    const logBtn = h('button', { class: 'btn' }, ic('term'), 'Log');
+    logBtn.onclick = () => showLogs(p.name);
+    const stop = h('button', { class: 'btn danger' }, run ? 'Stop' : 'Hapus');
+    stop.onclick = act(stop, async () => {
+      await conn.call('procStop', { id: s.id, name: p.name });
+      if (!run) current.procs.delete(p.name), current.syncRun();
+    });
+    btns.append(logBtn, stop);
+    const closePv = pv && h('button', { class: 'linkbtn' }, 'tutup');
+    if (closePv) closePv.onclick = act(closePv, () => conn.call('previewClose', { id: s.id }));
+    return h('div', { class: 'proc' + (run ? ' on' : '') },
+      h('div', { class: 'ph' }, h('span', { class: 'pdot' }), h('b', {}, p.name), h('span', { class: 'dim small grow' }, run ? (p.port ? `port ${p.port}` : 'menunggu port…') : `berhenti · exit ${p.code ?? '-'}`)),
+      h('code', { class: 'pcmd' }, p.cmd),
+      pv ? h('div', { class: 'purl' }, ic('lock'), h('span', {}, pv.url.replace(/^https:\/\//, '')), closePv) : null,
+      btns,
+    );
+  };
+
+  const render = () => {
+    const ps = [...current.procs.values()].sort((a, b) => (b.status === 'running') - (a.status === 'running') || b.startedAt - a.startedAt);
+    body.replaceChildren(
+      ps.length ? h('div', {}, ...ps.map(procCard)) : h('div', { class: 'dim small' }, 'Belum ada proses. Dev server berjalan di PC, lalu bisa dibuka di HP lewat tunnel terenkripsi khusus untukmu.'),
+      h('div', { class: 'label' }, 'Jalankan'),
+      cmdIn,
+      detected ? h('div', { class: 'dim small', style: 'margin:8px 2px 0' }, detected.dev ? `Otomatis: ${detected.setup ? detected.setup + ' → ' : ''}${detected.dev}` : 'Perintah dev tidak terdeteksi — isi manual.') : null,
+      h('div', { style: 'margin-top:10px' }, startBtn),
+      h('div', { class: 'fine', style: 'margin-top:14px' }, 'Preview memakai Cloudflare Tunnel dengan token rahasia yang hanya dikirim ke perangkatmu: tanpa token, link ditolak. Tunnel tertutup otomatis saat proses berhenti.'),
+    );
+  };
+  current.runSheet = () => body.isConnected ? render() : (current.runSheet = null);
+  ui.sheet(ui.head('Run & Preview', { sub: s.repo }), body);
+  render();
+  conn.call('project', { id: s.id }).then((r) => {
+    detected = r;
+    for (const p of r.procs) current.procs.set(p.name, p);
+    current.preview = r.preview;
+    current.syncRun();
+  }, () => {});
+}
+
+function showLogs(name) {
+  const s = current.session;
+  const pre = h('pre', { class: 'shout logview' }, 'memuat…');
+  const stick = () => pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+  const append = (d) => {
+    const end = stick();
+    pre.textContent = (pre.textContent + d).slice(-200_000);
+    if (end) pre.scrollTop = pre.scrollHeight;
+  };
+  current.procOut = (e) => (pre.isConnected ? e.name === name && append(e.d) : (current.procOut = null));
+  ui.sheet(ui.head('Log ' + name, { back: showRun }), pre);
+  conn.call('procLogs', { id: s.id, name }).then((t) => ((pre.textContent = t || '(belum ada output)'), (pre.scrollTop = pre.scrollHeight)), (e) => (pre.textContent = e.message));
+}
+
+function showShot(r) {
+  const errs = r.logs.filter((l) => /error|exception/.test(l.level));
+  const s = current.session;
+  ui.sheet(
+    ui.head('Screenshot', { sub: r.title || '', back: showRun }),
+    h('img', { class: 'shot', src: `data:${r.mime};base64,${r.data}`, alt: 'screenshot' }),
+    r.logs.length ? h('div', {}, h('div', { class: 'label' }, 'Console', errs.length ? h('span', { class: 'tag warn' }, errs.length + ' error') : null), h('pre', { class: 'shout' }, r.logs.map((l) => `[${l.level}] ${l.text}`).join('\n'))) : h('div', { class: 'dim small' }, 'Console bersih.'),
+    errs.length
+      ? h('div', { class: 'sheetfoot' }, h('button', { class: 'btn primary', onclick: async () => {
+          ui.closeSheet();
+          await conn.call('send', { id: s.id, text: `Halaman preview menampilkan error berikut di console browser. Perbaiki, lalu verifikasi dengan preview_screenshot:\n\n${errs.map((l) => l.text).join('\n').slice(0, 6000)}` }).catch((e) => toast(e.message, true));
+        } }, ic('bug'), 'Suruh agen perbaiki'))
+      : null,
+  );
 }
 
 function sessionMenu() {
@@ -1600,7 +1863,19 @@ function sessionMenu() {
     h('div', { class: 'tags', style: 'margin:0 0 12px' }, h('span', { class: 'tag' }, ic('branch'), s.branch), h('span', { class: 'tag' }, 'base ' + s.base), h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model))),
     h('div', { class: 'group' },
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
+      menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
       menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => (ui.closeSheet(), $('.chip.model')?.click()) }),
+      s.local ? null : menuItem({
+        icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',
+        onclick: async () => {
+          try {
+            const f = await conn.call('envSave', { id: s.id });
+            toast(f.length ? 'Disimpan: ' + f.join(', ') : 'Tidak ada file .env di worktree', !f.length);
+          } catch (e) {
+            toast(e.message, true);
+          }
+        },
+      }),
     ),
     h('div', { class: 'group' },
       menuItem({
@@ -1742,8 +2017,8 @@ function diffLines(lines) {
 }
 
 // ---------- Renderer event agen ----------
-const TOOL_KIND = { Bash: ['bash', '$'], Read: ['read', '◱'], NotebookRead: ['read', '◱'], Edit: ['edit', '✎'], MultiEdit: ['edit', '✎'], NotebookEdit: ['edit', '✎'], Write: ['write', '+'], Grep: ['search', '⌕'], Glob: ['search', '⌕'], LS: ['search', '⌕'], WebFetch: ['web', '⊕'], WebSearch: ['web', '⊕'], Task: ['agent', '◈'], Agent: ['agent', '◈'] };
-const ACTIVITY = { Bash: 'menjalankan', Read: 'membaca', Edit: 'mengedit', MultiEdit: 'mengedit', Write: 'menulis', Grep: 'mencari', Glob: 'mencari', WebFetch: 'membuka', WebSearch: 'mencari web', Task: 'subagen', Agent: 'subagen' };
+const TOOL_KIND = { Bash: ['bash', '$'], dev_start: ['bash', '▶'], dev_stop: ['bash', '■'], dev_logs: ['read', '≡'], dev_list: ['read', '≡'], preview_screenshot: ['web', '◐'], Read: ['read', '◱'], NotebookRead: ['read', '◱'], Edit: ['edit', '✎'], MultiEdit: ['edit', '✎'], NotebookEdit: ['edit', '✎'], Write: ['write', '+'], Grep: ['search', '⌕'], Glob: ['search', '⌕'], LS: ['search', '⌕'], WebFetch: ['web', '⊕'], WebSearch: ['web', '⊕'], Task: ['agent', '◈'], Agent: ['agent', '◈'], AskUserQuestion: ['agent', '?'], ExitPlanMode: ['agent', '☰'] };
+const ACTIVITY = { Bash: 'menjalankan', dev_start: 'menyalakan', dev_logs: 'membaca log', preview_screenshot: 'melihat halaman', Read: 'membaca', Edit: 'mengedit', MultiEdit: 'mengedit', Write: 'menulis', Grep: 'mencari', Glob: 'mencari', WebFetch: 'membuka', WebSearch: 'mencari web', Task: 'subagen', Agent: 'subagen', AskUserQuestion: 'bertanya', ExitPlanMode: 'menyusun rencana' };
 
 class Renderer {
   constructor(term, col, dock) {
@@ -1751,6 +2026,7 @@ class Renderer {
     this.el = col;
     this.dock = dock;
     this.tools = new Map();
+    this.users = new Map(); // seq prompt -> tombol rewind
     this.permQueue = [];
     this.textEl = null;
     this.textSrc = '';
@@ -1834,8 +2110,19 @@ class Renderer {
         this.textEl = null;
         this.outEl = null;
         this.activity = 'berpikir…';
-        return this.append(h('div', { class: 'ln u' }, h('span', { class: 'pr' }, '❯'), e.d));
+        const undo = h('button', { class: 'rw', 'aria-label': 'Kembalikan file ke sebelum prompt ini', hidden: true, onclick: () => rewindTo(e) }, ic('undo'));
+        this.users.set(e.seq, undo);
+        return this.append(h('div', { class: 'ln u' }, h('span', { class: 'pr' }, '❯'), h('span', { class: 'grow' }, e.d, e.img ? h('span', { class: 'tag', style: 'margin-left:8px' }, ic('image'), e.img) : null), undo));
       }
+      case 'cp': {
+        // Checkpoint tersedia: tampilkan tombol rewind pada prompt terkait.
+        const b = this.users.get(e.of);
+        if (b) b.hidden = false;
+        return;
+      }
+      case 'shot':
+        this.textEl = null;
+        return this.append(h('figure', { class: 'shotmsg' }, h('img', { src: `data:${e.mime};base64,${e.data}`, alt: 'screenshot', loading: 'lazy', onclick: (ev) => ev.currentTarget.classList.toggle('big') }), h('figcaption', {}, e.url)));
       case 'text':
         if (!this.textEl) {
           this.textSrc = '';
@@ -1871,7 +2158,9 @@ class Renderer {
         return this.line('note', `↻ 9router error ${e.status ?? ''} — mencoba lagi (${e.attempt}/${e.max})…`);
       case 'done': {
         this.activity = '';
-        const txt = e.ok ? `selesai · ${e.turns} langkah · ${(e.ms / 1000).toFixed(1)}s${e.usage ? ` · ${fmtTok(e.usage.in)}→${fmtTok(e.usage.out)} tok` : ''}` : `berhenti · ${e.err || 'error'}`;
+        const extra = `${e.usage ? ` · ${fmtTok(e.usage.in)}→${fmtTok(e.usage.out)} tok` : ''}${e.ctx != null ? ` · konteks ${e.ctx}%` : ''}${e.cost ? ` · $${e.cost.toFixed(e.cost < 1 ? 3 : 2)}` : ''}`;
+        const txt = e.ok ? `selesai · ${e.turns} langkah · ${(e.ms / 1000).toFixed(1)}s${extra}` : `berhenti · ${e.err || 'error'}`;
+        if (e.ctx >= 80 && !this.quiet) toast(`Konteks ${e.ctx}% penuh — kirim /compact agar agen tetap fokus`, false, 6000);
         this.textEl = null;
         return this.append(h('div', { class: 'donel' + (e.ok ? '' : ' bad') }, (e.ok ? '✓ ' : '✗ ') + txt));
       }
@@ -1963,7 +2252,7 @@ class Renderer {
     this.renderDock();
     if (!this.quiet) {
       haptic([40, 60, 40]);
-      if (document.visibilityState !== 'visible' && window.Notification?.permission === 'granted') new Notification('pocketcode — butuh izin', { body: `${e.tool}: ${String(e.s || '').slice(0, 120)}` });
+      localNotify('pocketcode — butuh izin', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
     }
   }
   permAnswer(e) {
@@ -1975,16 +2264,19 @@ class Renderer {
     const e = this.permQueue[0];
     if (!e) return this.dock.replaceChildren();
     const buttons = h('div', { class: 'btnrow' });
-    const answer = async (decision) => {
-      buttons.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    const answer = async (decision, extra = {}) => {
+      this.dock.querySelectorAll('button').forEach((b) => (b.disabled = true));
       haptic(12);
       try {
-        await conn.call('perm', { id: current.session.id, pid: e.pid, decision });
+        await conn.call('perm', { id: current.session.id, pid: e.pid, decision, ...extra });
       } catch (x) {
         toast(x.message, true);
-        buttons.querySelectorAll('button').forEach((b) => (b.disabled = false));
+        this.dock.querySelectorAll('button').forEach((b) => (b.disabled = false));
       }
     };
+    const more = this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} permintaan lagi`) : null;
+    if (e.ask) return this.dock.replaceChildren(askPanel(e, answer, more));
+    if (e.plan) return this.dock.replaceChildren(planPanel(e, answer, more));
     buttons.append(
       h('button', { class: 'btn danger', onclick: () => answer('deny') }, 'Tolak'),
       e.push ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Selalu'),
@@ -1997,10 +2289,72 @@ class Renderer {
         h('pre', {}, e.summary || e.s || ''),
         e.x ? miniDiff(e.x).el : null,
         buttons,
-        this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} permintaan lagi`) : null,
+        more,
       ),
     );
     requestAnimationFrame(() => this.keepBottom());
+  }
+}
+
+// Pertanyaan pilihan dari agen (AskUserQuestion): 1–4 pertanyaan, opsi tap + jawaban bebas.
+function askPanel(e, answer, more) {
+  const picks = e.ask.map(() => new Set());
+  const others = e.ask.map(() => h('input', { class: 'field', placeholder: 'Jawaban lain (opsional)', autocapitalize: 'sentences' }));
+  const ok = h('button', { class: 'btn primary' }, 'Kirim jawaban');
+  const sync = () => (ok.disabled = !e.ask.every((_, i) => picks[i].size || others[i].value.trim()));
+  const qs = e.ask.map((q, i) =>
+    h('div', { class: 'askq' },
+      h('div', { class: 'qt' }, q.header ? h('span', { class: 'tag' }, q.header) : null, q.question),
+      h('div', { class: 'opts' }, ...q.options.map((o) => {
+        const b = h('button', { class: 'opt' }, h('b', {}, o.label), o.description ? h('span', {}, o.description) : null);
+        b.onclick = () => {
+          haptic(8);
+          if (!q.multiSelect) picks[i].clear(), b.parentNode.querySelectorAll('.opt').forEach((x) => x.classList.remove('on'));
+          picks[i].has(o.label) ? picks[i].delete(o.label) : picks[i].add(o.label);
+          b.classList.toggle('on', picks[i].has(o.label));
+          sync();
+        };
+        return b;
+      })),
+      others[i],
+    ),
+  );
+  others.forEach((o) => (o.oninput = sync));
+  sync();
+  ok.onclick = () => answer('allow', { answers: Object.fromEntries(e.ask.map((q, i) => [q.question, [...picks[i], others[i].value.trim()].filter(Boolean).join(', ')])) });
+  return h('div', { class: 'perm ask' },
+    h('div', { class: 'q' }, ic('spark'), 'Agen bertanya'),
+    ...qs,
+    h('div', { class: 'btnrow' }, h('button', { class: 'btn danger', onclick: () => answer('deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' }) }, 'Lewati'), ok),
+    more,
+  );
+}
+
+// Rencana dari mode rencana (ExitPlanMode): setujui lalu agen mulai mengerjakan, atau minta revisi.
+function planPanel(e, answer, more) {
+  const note = h('textarea', { class: 'field', rows: 2, placeholder: 'Catatan revisi (opsional)', autocapitalize: 'sentences' });
+  return h('div', { class: 'perm ask' },
+    h('div', { class: 'q' }, ic('list'), 'Rencana siap — setujui?'),
+    h('div', { class: 'plan txt', html: md(String(e.summary || e.s || '')) }),
+    note,
+    h('div', { class: 'btnrow' },
+      h('button', { class: 'btn', onclick: () => answer('deny', { message: note.value.trim() ? 'Revisi rencananya: ' + note.value.trim() : 'Pengguna ingin merevisi rencana. Berhenti sekarang dan tunggu arahan revisinya.' }) }, 'Revisi'),
+      h('button', { class: 'btn primary', onclick: () => answer('allow') }, 'Setujui & kerjakan'),
+    ),
+    more,
+  );
+}
+
+async function rewindTo(e) {
+  const label = String(e.d || 'gambar').slice(0, 60);
+  if (!confirm(`Kembalikan SEMUA file worktree ke kondisi sebelum prompt:\n\n"${label}"\n\nPerubahan setelahnya (oleh agen maupun manual) akan hilang.`)) return;
+  try {
+    const n = await conn.call('rewind', { id: current.session.id, seq: e.seq });
+    haptic(20);
+    toast(n ? `${n} file dikembalikan` : 'Tidak ada file yang berubah');
+    current.refreshGit?.();
+  } catch (x) {
+    toast(x.message, true);
   }
 }
 // Cuplikan perubahan Edit/MultiEdit/Write ({ old?, new? } atau { edits: [...] }).
@@ -2019,16 +2373,33 @@ const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' 
 // ---------- start ----------
 function boot() {
   const m = location.hash.match(/login=([^&]+)/);
-  if (m) {
-    store.set('token', decodeURIComponent(m[1]));
-    history.replaceState(null, '', location.pathname);
-  }
+  if (m) store.set('token', decodeURIComponent(m[1]));
+  // Dibuka dari notifikasi push: #open=<mid>:<sid>
+  const o = location.hash.match(/open=([\w-]+)(?::([\w-]+))?/);
+  if (o) store.set('last', { mid: o[1], sid: o[2] });
+  if (m || o) history.replaceState(null, '', location.pathname);
   if (!token()) return showLogin();
   showMachines({ resume: true }).catch((e) => toast(e.message, true));
 }
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Notifikasi diketuk saat aplikasi masih hidup di latar belakang.
+  navigator.serviceWorker.addEventListener('message', async (ev) => {
+    const o = ev.data?.open;
+    if (!o?.mid) return;
+    if (current?.m.id !== o.mid || !current.ready) {
+      store.set('last', { mid: o.mid, sid: o.sid });
+      return showMachines({ resume: true });
+    }
+    const s = o.sid && (await conn.call('sessions').catch(() => [])).find((x) => x.id === o.sid);
+    if (s && current.session?.id !== s.id) showSession(s);
+  });
+}
 document.addEventListener('visibilitychange', () => {
+  const on = document.visibilityState === 'visible';
   // Saat aplikasi dibuka lagi, sambung ulang segera bila koneksi putus.
-  if (document.visibilityState === 'visible' && conn && conn.ws?.readyState > 1 && !conn.closedByUser) conn.connect();
+  if (on && conn && conn.ws?.readyState > 1 && !conn.closedByUser) conn.connect();
+  // PC mengirim Web Push hanya saat aplikasi tidak sedang dilihat.
+  if (conn?.channel) conn.call('visible', { on }).catch(() => {});
 });
 boot();

@@ -212,14 +212,14 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
 }
 
 export function restartDaemon(daemon, { delay = 1000 } = {}) {
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
       if (fs.existsSync(PID_FILE)) {
         try {
           if (+fs.readFileSync(PID_FILE, 'utf8') === process.pid) fs.rmSync(PID_FILE, { force: true });
         } catch {}
       }
-      daemon?.stop();
+      await daemon?.stop();
     } catch {}
 
     const helper = 'setTimeout(() => { const { spawn } = require("node:child_process"); const p = spawn(process.argv[1], [process.argv[2], "start", "--log"], { detached: true, stdio: "ignore", windowsHide: true }); p.unref(); }, 1800);';

@@ -11,6 +11,9 @@ import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, TOKEN_
 import { GithubAuth } from './ghauth.js';
 import { getInstallInfo, checkUpdate, performUpdate, restartDaemon } from './updater.js';
 import { startKeepAwake } from './keepawake.js';
+import { detectProject, saveEnv } from './project.js';
+import { capture } from './browser.js';
+import { checkPush, sendPush } from './webpush.js';
 
 const MAX_PIN_FAILS = 5;
 
@@ -22,7 +25,7 @@ export class Daemon {
     this.updaterMeta = getInstallInfo(config);
     this.keepAwake = startKeepAwake({ log: (m) => this.log(m) });
     this.conns = new Map();
-    this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => process.env.POCKETCODE_DEBUG && log(m), notify: (s, msg) => this.notify(s, msg) });
+    this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => process.env.POCKETCODE_DEBUG && log(m), notify: (s, msg, o) => this.notify(s, msg, o) });
     this.backoff = 1000;
     this.stopped = false;
     this.lastPairAttempt = 0;
@@ -45,14 +48,15 @@ export class Daemon {
     this.startUpdateChecks();
   }
 
+  // Menunggu (singkat) dev server & tunnel milik sesi benar-benar mati.
   stop() {
     this.stopped = true;
     this.keepAwake?.stop();
-    this.sessions?.close();
     clearInterval(this.ping);
     clearInterval(this.updateTimer);
     this.ws?.close();
     this.ipc?.close();
+    return this.sessions?.close();
   }
 
   broadcast(obj) {
@@ -144,8 +148,21 @@ export class Daemon {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'x', cid, reason }));
   }
 
-  notify(session, msg) {
-    for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title: session.meta.title || session.meta.repo });
+  notify(session, msg, { perm = false } = {}) {
+    const title = session.meta.title || session.meta.repo;
+    for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title });
+    // HP yang sedang membuka sesi ini sudah melihatnya langsung; sisanya dapat Web Push.
+    const watching = new Set([...this.conns.values()].filter((c) => c.ready && c.visible && c.sub?.session === session).map((c) => c.deviceId));
+    for (const [id, dev] of Object.entries(this.secrets.devices)) {
+      if (!dev.push || watching.has(id)) continue;
+      sendPush(dev.push, { title: `pocketcode · ${title}`, body: msg, tag: session.id + (perm ? ':perm' : ''), sid: session.id, mid: this.config.machineId })
+        .then((alive) => {
+          if (alive) return;
+          delete dev.push;
+          this.saveSecrets();
+        })
+        .catch((e) => this.log('! push gagal: ' + e.message));
+    }
   }
 }
 
@@ -156,6 +173,7 @@ class RpcConn {
     this.ready = false;
     this.sub = null; // { session, listener }
     this.queue = [];
+    this.visible = true; // HP mengabarkan saat PWA ke latar belakang (untuk Web Push)
   }
 
   push() {
@@ -217,6 +235,12 @@ class RpcConn {
         restartDaemon(d, { delay: 1000 });
         return { ok: true, message: 'Daemon sedang me-restart...' };
       }
+      // `pocketcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
+      // (di Windows, process.kill tidak menjalankan handler apa pun).
+      case 'shutdown':
+        if (!(this instanceof LocalConn)) throw new Error('Hanya dari terminal PC');
+        setTimeout(() => Promise.resolve(d.stop()).finally(() => process.exit(0)), 50);
+        return true;
       case 'githubStatus':
         return p.check ? d.github.check() : d.github.status();
       case 'githubLogin':
@@ -273,19 +297,69 @@ class RpcConn {
           size += JSON.stringify(all[i]).length;
           events.unshift(all[i]);
         }
-        return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms() };
+        return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo() };
       }
       case 'detach':
         this.unsubscribe();
         return true;
       case 'send':
-        await S.get(p.id).send(String(p.text || ''));
+        await S.get(p.id).send(String(p.text || ''), p.images);
         return true;
       case 'interrupt':
         await S.get(p.id).interrupt();
         return true;
       case 'perm':
-        return S.get(p.id).answerPermission(p.pid, p.decision);
+        return S.get(p.id).answerPermission(p.pid, p.decision, { answers: p.answers, message: p.message });
+      case 'plan':
+        S.get(p.id).setPlan(p.on);
+        return S.get(p.id).summary();
+      case 'rewind':
+        return S.get(p.id).rewindTo(+p.seq);
+      // ---------- proses latar belakang & preview ----------
+      case 'project': {
+        const s = S.get(p.id);
+        return { ...detectProject(s.meta.cwd), procs: s.procs.list(), preview: s.previewInfo() };
+      }
+      case 'runDev':
+        return S.get(p.id).runDev(p.cmd);
+      case 'procStart':
+        return S.get(p.id).procs.start(p.cmd, p.name || undefined);
+      case 'procStop':
+        S.get(p.id).procs.stop(p.name);
+        return true;
+      case 'procLogs':
+        return S.get(p.id).procs.logs(p.name, 64 * 1024);
+      case 'preview':
+        return S.get(p.id).preview(p.name);
+      case 'previewClose':
+        S.get(p.id).closeTunnel();
+        return true;
+      case 'screenshot': {
+        const s = S.get(p.id);
+        const port = s.procs.list().find((x) => x.name === p.name)?.port;
+        if (!port) throw new Error('Port dev server belum terdeteksi');
+        const clamp = (v, def) => Math.min(1600, Math.max(240, +v || def));
+        const r = await capture(`http://localhost:${port}${String(p.path || '/').replace(/^(?!\/)/, '/')}`, { width: clamp(p.width, 390), height: clamp(p.height, 844), cfg: d.config });
+        if (r.data.length > 450_000) throw new Error('Screenshot terlalu besar untuk dikirim; perkecil viewport.');
+        return { data: r.data, mime: r.mime, title: r.title, logs: r.logs };
+      }
+      case 'envSave': {
+        const s = S.get(p.id);
+        if (s.meta.local) throw new Error('Sesi terminal memakai folder aslinya; .env sudah ada di sana.');
+        return saveEnv(s.meta.repo, s.meta.cwd);
+      }
+      // ---------- Web Push (HP) ----------
+      case 'pushSub': {
+        const dev = sec.devices[this.deviceId];
+        if (!dev) throw new Error('Hanya untuk HP yang dipasangkan');
+        if (p.sub) dev.push = checkPush(p);
+        else delete dev.push;
+        d.saveSecrets();
+        return true;
+      }
+      case 'visible':
+        this.visible = !!p.on;
+        return true;
       case 'auto': {
         const s = S.get(p.id);
         s.meta.auto = !!p.on;

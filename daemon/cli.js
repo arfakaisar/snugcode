@@ -258,10 +258,11 @@ function runningPid() {
   }
 }
 
-function stop() {
+async function stop() {
   const pid = runningPid();
   if (!pid) return console.log('Daemon tidak sedang berjalan.');
-  process.kill(pid);
+  const { stopDaemon } = await import('./tui.js');
+  await stopDaemon(pid);
   fs.rmSync(PID_FILE, { force: true });
   console.log(c.g(`✓ Daemon (pid ${pid}) dihentikan.`));
 }
@@ -324,10 +325,7 @@ async function start() {
   if (sec.pinFails >= 5) console.log(c.r('! Pairing terkunci karena PIN salah berkali-kali. Jalankan `pocketcode pin`.'));
   const d = new Daemon(cfg);
   d.start();
-  const bye = () => {
-    d.stop();
-    process.exit(0);
-  };
+  const bye = () => Promise.resolve(d.stop()).finally(() => process.exit(0));
   process.on('SIGINT', bye);
   process.on('SIGTERM', bye);
 }
@@ -371,12 +369,7 @@ async function login() {
   const me = await gh(token, 'GET', '/user');
   // Daemon menyimpan secrets di memori: hentikan dulu agar token baru tidak tertimpa.
   const pid = runningPid();
-  if (pid) {
-    try {
-      process.kill(pid);
-    } catch {}
-    for (let i = 0; i < 40 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
-  }
+  if (pid) await (await import('./tui.js')).stopDaemon(pid);
   const cfg = loadConfig();
   const sec = loadSecrets();
   sec.githubToken = token;
@@ -414,17 +407,7 @@ async function cliRestart() {
     const newPid = spawnDetached();
     return console.log(c.g(`✓ Daemon dijalankan (pid ${newPid}).`));
   }
-  try {
-    process.kill(pid);
-  } catch {}
-  for (let i = 0; i < 40; i++) {
-    try {
-      process.kill(pid, 0);
-      await new Promise((r) => setTimeout(r, 100));
-    } catch {
-      break;
-    }
-  }
+  await (await import('./tui.js')).stopDaemon(pid);
   fs.rmSync(PID_FILE, { force: true });
   const newPid = spawnDetached();
   console.log(c.g(`✓ Daemon di-restart (pid ${newPid}).`));
@@ -455,12 +438,9 @@ async function cliUpdate() {
 async function stopAndWait() {
   const pid = runningPid();
   if (!pid) return false;
-  // Windows: matikan juga claude.exe anak daemon (/T), tanpa menyentuh claude.exe lain.
+  await (await import('./tui.js')).stopDaemon(pid);
+  // Windows: matikan juga claude.exe anak daemon (/T) yang mungkin tertinggal, tanpa menyentuh claude.exe lain.
   if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-  try {
-    process.kill(pid);
-  } catch {}
-  for (let i = 0; i < 50 && runningPid(); i++) await new Promise((r) => setTimeout(r, 100));
   fs.rmSync(PID_FILE, { force: true });
   // Proses claude.exe anak daemon bisa tertinggal sebentar setelah daemon mati.
   await new Promise((r) => setTimeout(r, 1500));
