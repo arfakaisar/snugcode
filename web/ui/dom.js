@@ -180,13 +180,12 @@ export let kbOpen = false;
 export function syncViewport() {
   const vh = vv ? vv.height : window.innerHeight;
   const open = vv ? window.innerHeight - vv.height > 140 || (document.activeElement?.matches?.('input,textarea') && screen.height - vh > 260) : false;
-  // Keyboard tertutup: shell mengisi seluruh layar (innerHeight). Di sebagian HP (PWA layar penuh,
-  // navigasi gestur) visualViewport sedikit lebih pendek dan meninggalkan strip kosong di bawah.
-  const hgt = open ? vh : window.innerHeight;
-  const top = open && vv ? Math.max(0, vv.offsetTop) : 0;
+  // --app-h/--app-top hanya dipakai saat keyboard terbuka (html.kb); selain itu shell menempel ke tepi
+  // layar lewat CSS, karena di PWA iOS innerHeight/visualViewport bisa kurang sebesar status bar.
+  const hgt = vh;
   const root = document.documentElement.style;
-  root.setProperty('--app-h', hgt + 'px');
-  root.setProperty('--app-top', top + 'px');
+  root.setProperty('--app-h', vh + 'px');
+  root.setProperty('--app-top', (open && vv ? Math.max(0, vv.offsetTop) : 0) + 'px');
   if (open !== kbOpen) {
     kbOpen = open;
     document.documentElement.classList.toggle('kb', open);

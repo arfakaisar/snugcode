@@ -21,8 +21,11 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   memakai SVG untuk ikon layar utama). Dibuat dengan `npm run icons`.
 
 ### Perbaikan
-- Celah di bawah kotak input: shell kini mengisi layar penuh (`innerHeight`) saat keyboard tertutup,
-  dan jarak bawah = safe-area − 12px (minimal 8px) agar kartu input tepat di atas home indicator.
+- Celah di bawah kotak input (PWA iOS): `innerHeight`/`visualViewport` di sana bisa kurang sebesar
+  status bar, sehingga shell berakhir ±60pt sebelum dasar layar. Shell, drawer, dan sheet kini menempel
+  ke tepi layar lewat CSS; tinggi dari JS hanya dipakai saat keyboard terbuka. Jarak bawah ±safe-area
+  dan kontrol composer berupa pil abu-abu, seperti aplikasi Claude.
+- Sesi kosong: sambutan di tengah layar dan tidak lagi terpotong di bawah header.
 - Pil model/GitHub dan banner beranda tidak lagi "memantul dua kali": isinya hanya digambar ulang
   bila berubah (`renderIf`), dan animasinya mengikuti sapaan di atasnya.
 
