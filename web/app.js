@@ -893,11 +893,10 @@ async function updateMachineSheet() {
               onclick: async (btnEv) => {
                 const done = busyButton(btnEv.currentTarget, 'Mengirim perintah update…');
                 try {
-                  const list = await conn.call('sessions');
-                  let target = list[0];
-                  if (!target) {
-                    target = await conn.call('create', { local: true });
-                  }
+                  // Perintah dijalankan lewat sesi yang sedang tidak sibuk. Daemon lama tidak bisa
+                  // membuat sesi tanpa repo, jadi tanpa sesi pengguna diarahkan ke perintah manual.
+                  const target = (await conn.call('sessions')).find((s) => s.status !== 'running');
+                  if (!target) throw new Error('tidak ada sesi yang sedang menganggur. Buat sesi dulu, atau jalankan perintah di bawah langsung di terminal PC.');
                   await conn.call('send', { id: target.id, text: '!' + upCmd });
                   toast('Perintah update dikirim ke PC. Daemon akan me-restart…', false, 7000);
                   ui.closeSheet();

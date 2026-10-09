@@ -19,6 +19,7 @@
     "setup": "node daemon/cli.js setup",
     "build:web": "node scripts/build-web.mjs",
     "test": "node --test test/unit.test.js",
+    "test:e2e": "node test/e2e-agent.mjs",
     "dev:relay": "npm run build:web && cd relay && npx wrangler dev --var DEV_AUTH:1",
     "deploy": "npm run build:web && cd relay && npx wrangler deploy"
   },
