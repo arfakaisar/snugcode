@@ -3,6 +3,14 @@
 Riwayat perubahan penting pocketcode. Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-09 — pnpm/yarn tanpa instalasi global (`daemon/toolchain.js`)
+- **Bug**: Run di repo pnpm/yarn gagal dengan `pnpm : The term 'pnpm' is not recognized` bila
+  PC tidak punya pnpm. Sejak Node 25, corepack juga tidak lagi ikut terpasang dengan Node.
+- Sekarang, saat perintah butuh pnpm/yarn yang tidak ada, corepack dipasang sekali ke
+  `~/.pocketcode/tools`, dan shim pnpm/yarn-nya ke `~/.pocketcode/bin/pm`. Versinya mengikuti
+  `packageManager` di package.json proyek. Folder shim ditaruh di akhir PATH, jadi pnpm/yarn milik
+  pengguna tetap diutamakan. Berlaku untuk Run, `!perintah`, dan Bash agen.
+
 ## 2026-10-09 — Run & Preview, agen bisa melihat hasil UI, dan fitur remote coding lain
 
 ### Run & Preview (`daemon/procs.js`, `daemon/tunnel.js`, `daemon/project.js`)

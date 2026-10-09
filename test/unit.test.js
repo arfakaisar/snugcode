@@ -462,3 +462,25 @@ test('webpush: payload aes128gcm bisa didekripsi penerima (RFC 8291)', async () 
   assert.equal(checkPush({ sub, vapid }).sub.endpoint, sub.endpoint);
   assert.throws(() => checkPush({ sub: { ...sub, endpoint: 'http://x' }, vapid }), /tidak valid/);
 });
+
+test('toolchain: folder shim pnpm/yarn ditambahkan di akhir PATH (tanpa variabel PATH ganda)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { HOME } = await import('../daemon/config.js');
+  const { toolchainEnv } = await import('../daemon/toolchain.js');
+  const dir = path.join(HOME, 'bin', 'pm');
+  const had = fs.existsSync(path.join(dir, 'pnpm'));
+  // Tanpa shim & perintah tidak butuh pnpm/yarn: env tidak berubah, tidak ada instalasi.
+  if (!had) assert.deepEqual(await toolchainEnv('npm run dev', { Path: 'a' }), { Path: 'a' });
+  fs.mkdirSync(dir, { recursive: true });
+  if (!had) fs.writeFileSync(path.join(dir, 'pnpm'), '');
+  try {
+    const env = await toolchainEnv('pnpm install', { Path: 'a', X: '1' });
+    assert.equal(env.Path, 'a' + path.delimiter + dir);
+    assert.equal(env.PATH, undefined);
+    assert.equal(env.X, '1');
+    assert.equal(env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
+  } finally {
+    if (!had) fs.rmSync(path.join(dir, 'pnpm'), { force: true });
+  }
+});

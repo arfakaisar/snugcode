@@ -2,19 +2,13 @@
 // dari agen tanpa batas waktu, log disimpan di ring buffer, port terdeteksi otomatis.
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import { shellSpawn, toolchainEnv } from './toolchain.js';
 
 const LOG_MAX = 256 * 1024;
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 // "Local: http://localhost:5173/" (Vite), "- Local: http://localhost:3000" (Next), dst.
 const URL_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{2,5})\b/i;
 const isWin = process.platform === 'win32';
-
-// Shell untuk `!perintah` dan proses latar belakang: PowerShell di Windows, $SHELL di macOS/Linux.
-// ExecutionPolicy default Windows memblokir npm.ps1/npx.ps1 ("running scripts is disabled");
-// Bypass hanya berlaku untuk proses ini, setelan sistem tidak berubah.
-export function shellSpawn(cmd, opts) {
-  return spawn(isWin ? 'powershell.exe' : process.env.SHELL || 'bash', isWin ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd] : ['-lc', cmd], { windowsHide: true, ...opts });
-}
 
 export const stripAnsi = (s) => s.replace(ANSI_RE, '');
 
@@ -89,15 +83,16 @@ export class ProcManager {
   async start(cmd, name = procName(cmd)) {
     cmd = String(cmd || '').trim();
     if (!cmd) throw new Error('Perintah kosong');
-    if (this.procs.get(name)?.status === 'running') throw new Error(`Proses "${name}" masih berjalan. Stop dulu.`);
+    const busy = () => {
+      if (this.procs.get(name)?.status === 'running') throw new Error(`Proses "${name}" masih berjalan. Stop dulu.`);
+    };
+    busy();
     // PORT: dipakai Next/Express/CRA/Remix dkk. Vite mengabaikannya, tapi port-nya terbaca dari log.
     // "{port}" di perintah diganti port yang sama (lintas shell, tanpa sintaks env var).
     const port = await freePort();
-    const child = shellSpawn(cmd.replaceAll('{port}', port), {
-      cwd: this.cwd,
-      detached: !isWin,
-      env: { ...process.env, PORT: String(port), BROWSER: 'none', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-    });
+    const env = await toolchainEnv(cmd, { ...process.env, PORT: String(port), BROWSER: 'none', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+    busy(); // start lain dengan nama sama bisa menyelip selama menunggu di atas
+    const child = shellSpawn(cmd.replaceAll('{port}', port), { cwd: this.cwd, detached: !isWin, env });
     let exited;
     const p = { name, cmd, child, status: 'running', code: null, port: null, hintPort: port, startedAt: Date.now(), endedAt: null, log: '', buf: '', waiters: [], done: new Promise((r) => (exited = r)) };
     this.procs.set(name, p);
