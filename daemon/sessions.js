@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, anthropicBaseUrl, writeJson, readSessionIndex } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startRouterProxy } from './proxy.js';
-import { resolveModelEffort, lightModel } from '../shared/models.js';
+import { resolveModelEffort, lightModel, parseModelId, nativeEffortModel } from '../shared/models.js';
 import { knownModelIds } from './router.js';
 import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
@@ -56,6 +56,49 @@ export const AGENT_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Ag
 // Tool yang bisa mengubah file: baru boleh jalan setelah checkpoint prompt tersimpan (hook PreToolUse),
 // termasuk yang lolos tanpa canUseTool lewat aturan "Selalu" (mis. Bash(npm test *)).
 const MUTATING_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|' + DEV_START;
+
+// Setiap langkah agen = satu request model (1–10 detik lewat router), jadi jumlah langkah yang
+// menentukan kecepatan. Model non-Claude (Gemini) membaca file 40–120 baris per langkah dan
+// mencari nama file dulu lalu mencari ulang isinya: 4–9× lebih banyak request untuk tugas yang
+// sama. Hook ini melebarkan Read potongan menjadi satu file utuh (bila muat sekali baca) dan
+// Grep tanpa output_mode menjadi baris yang cocok + nomor baris. Izin tetap lewat canUseTool.
+const WIDEN_MATCHER = 'Read|Grep';
+const WIDEN_MAX_BYTES = 64 * 1024; // ±16k token: jauh di bawah batas token Read Claude Code
+const WIDEN_MAX_LINES = 2000; // batas baris bawaan Read tanpa limit
+const GREP_HEAD_LIMIT = 100;
+const NO_WIDEN_EXT = /\.(pdf|ipynb|png|jpe?g|gif|webp|bmp|ico|svg)$/i;
+// Model Claude: cc/…, claude-… tanpa provider, atau claude-… lewat provider lain (ag/claude-sonnet-4-6).
+const isClaudeModel = (id) => {
+  const p = parseModelId(id || '');
+  return nativeEffortModel(p.provider, p.base) || p.base.startsWith('claude-');
+};
+
+/** Input tool yang dilebarkan, atau null bila dibiarkan apa adanya. */
+export function widenToolInput(tool, input, cwd) {
+  if (!input || typeof input !== 'object') return null;
+  if (tool === 'Read') {
+    if (input.offset == null && input.limit == null) return null;
+    if (typeof input.file_path !== 'string' || NO_WIDEN_EXT.test(input.file_path)) return null;
+    const file = path.resolve(cwd, input.file_path);
+    if (isSensitivePath(file)) return null;
+    let buf;
+    try {
+      if (fs.statSync(file).size > WIDEN_MAX_BYTES) return null;
+      buf = fs.readFileSync(file);
+    } catch {
+      return null;
+    }
+    if (buf.includes(0)) return null; // biner
+    let lines = 1;
+    for (const b of buf) if (b === 10 && ++lines > WIDEN_MAX_LINES) return null;
+    const { offset, limit, ...rest } = input;
+    return rest;
+  }
+  if (tool === 'Grep' && !input.output_mode) {
+    return { ...input, output_mode: 'content', '-n': true, head_limit: input.head_limit ?? GREP_HEAD_LIMIT };
+  }
+  return null;
+}
 
 // Folder data snugcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
 // dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
@@ -618,7 +661,12 @@ export class Session extends EventEmitter {
         mcpServers: { snugcode: devToolsServer(this) },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: snugcodePrompt({ computer: !!this.meta.computer }) },
         canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
-        hooks: { PreToolUse: [{ matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] }] },
+        hooks: {
+          PreToolUse: [
+            { matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] },
+            { matcher: WIDEN_MATCHER, hooks: [async (h) => this.widenTool(h)] },
+          ],
+        },
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
       },
     });
@@ -636,6 +684,15 @@ export class Session extends EventEmitter {
     const input = /** @type {any} */ (h)?.tool_input;
     if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'snugcode: selalu butuh persetujuan pengguna' } };
     return {};
+  }
+
+  // Hook PreToolUse Read/Grep (lihat widenToolInput). Model Claude sudah membaca & mencari secara
+  // efisien (dan paralel), jadi hanya model lain yang dilebarkan. Model dibaca saat itu juga:
+  // ganti model di proses berjalan tidak membuat proses baru.
+  widenTool(h) {
+    if (!h || !('tool_name' in h) || isClaudeModel(this.meta.model)) return {};
+    const updatedInput = widenToolInput(h.tool_name, /** @type {any} */ (h.tool_input), this.meta.cwd);
+    return updatedInput ? { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), updatedInput } } : {};
   }
 
   // Sesi dibuka (HP/terminal): siapkan proses claude di latar belakang, jadi prompt pertama tidak
