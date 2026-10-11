@@ -32,7 +32,12 @@ const flags = {};
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) {
     const k = args[i].slice(2);
-    flags[k] = args[i + 1] && !args[i + 1].startsWith('--') ? args[++i] : true;
+    flags[k] = args[i + 1] && !args[i + 1].startsWith('-') ? args[++i] : true;
+  } else if (args[i].startsWith('-') && args[i].length > 1) {
+    const k = args[i].slice(1);
+    if (k === 'c') flags.computer = true;
+    else if (k === 'p') flags.pick = true;
+    else flags[k] = true;
   }
 }
 
@@ -398,8 +403,8 @@ async function tui() {
     await setup();
   }
   const { runTui } = await import('./tui.js');
-  const prompt = args.filter((a) => !a.startsWith('--')).join(' ').trim();
-  await runTui({ prompt, pick: !!flags.pick || !!flags.sessions });
+  const prompt = args.filter((a) => !a.startsWith('-')).join(' ').trim();
+  await runTui({ prompt, pick: !!flags.pick || !!flags.sessions, computer: !!(flags.computer || flags.pc) });
 }
 
 async function cliRestart() {
@@ -476,6 +481,7 @@ function help() {
   console.log(`${c.b('snugcode')} — coding agent di PC-mu, dari terminal & HP
 
   ${c.g('snugcode')}                 buka UI terminal (folder repo ini jadi sesinya)
+  ${c.g('snugcode --computer')}      buka mode komputer (kontrol seluruh PC seperti Claude Code)
   ${c.g('snugcode "prompt"')}        buka UI dan langsung kirim prompt
   ${c.g('snugcode --pick')}          pilih sesi (termasuk sesi dari HP)
 

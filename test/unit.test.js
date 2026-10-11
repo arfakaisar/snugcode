@@ -834,3 +834,57 @@ test('ganti nama: entri autostart lama (pocketcode) dipindahkan ke snugcode', as
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('mode komputer: prompt, pembuatan sesi, izin, dan proteksi kredensial', async () => {
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+  const { SNUGCODE_SYSTEM_PROMPT, SNUGCODE_COMPUTER_PROMPT, snugcodePrompt } = await import('../daemon/prompt.js');
+  const { SessionManager } = await import('../daemon/sessions.js');
+  const { HOME } = await import('../daemon/config.js');
+
+  // 1. Prompt
+  assert.equal(snugcodePrompt({ computer: false }), SNUGCODE_SYSTEM_PROMPT);
+  assert.equal(snugcodePrompt({ computer: true }), SNUGCODE_COMPUTER_PROMPT);
+  assert.match(SNUGCODE_COMPUTER_PROMPT, /Computer Mode/i);
+  assert.match(SNUGCODE_COMPUTER_PROMPT, /access to the user's computer/i);
+  assert.match(SNUGCODE_COMPUTER_PROMPT, /not limited to a single repository/i);
+  assert.ok(SNUGCODE_COMPUTER_PROMPT.length < 2600);
+
+  // 2. Pembuatan sesi mode komputer lewat SessionManager
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-comp-home-'));
+  const mgr = new SessionManager({
+    config: { routerUrl: 'http://127.0.0.1:9/v1', model: 'claude-sonnet-5-5' },
+    secrets: {},
+    log() {},
+  });
+
+  try {
+    const s = await mgr.create({ computer: true, cwd: tmpHome });
+    assert.equal(s.meta.computer, true);
+    assert.equal(s.meta.repo, 'Komputer');
+    assert.equal(s.meta.cwd, path.resolve(tmpHome));
+    assert.equal(s.summary().computer, true);
+    assert.equal(s.summary().repo, 'Komputer');
+
+    // Rewind ditolak di mode komputer
+    await assert.rejects(s.rewindTo(1), /Checkpoint dan rewind hanya tersedia untuk sesi repository git/);
+
+    // 3. Izin tool di mode komputer:
+    // Read di file sembarang (luar cwd) diizinkan langsung di mode komputer
+    assert.equal((await s.askPermission('Read', { file_path: path.join(os.tmpdir(), 'random.txt') })).behavior, 'allow');
+    assert.equal((await s.askPermission('Grep', { pattern: 'test' })).behavior, 'allow');
+
+    // Secrets internal snugcode TETAP ditolak/dilindungi di mode komputer
+    assert.equal((await s.askPermission('Read', { file_path: path.join(HOME, 'secrets.json') })).behavior, 'deny');
+    assert.equal((await s.askPermission('Write', { file_path: path.join(HOME, 'config.json'), content: '' })).behavior, 'deny');
+
+    // 4. Hapus sesi tidak menghapus folder host cwd
+    await mgr.remove(s.meta.id);
+    assert.equal(fs.existsSync(tmpHome), true, 'folder pengguna tidak dihapus saat sesi komputer dihapus');
+  } finally {
+    await mgr.close();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+

@@ -3,6 +3,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,7 @@ import { knownModelIds } from './router.js';
 import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
-import { SNUGCODE_SYSTEM_PROMPT } from './prompt.js';
+import { SNUGCODE_SYSTEM_PROMPT, snugcodePrompt } from './prompt.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
@@ -400,8 +401,8 @@ export class Session extends EventEmitter {
   summary() {
     const m = this.meta;
     // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
-    const branch = (m.local && currentBranch(m.cwd)) || m.branch;
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, cwd: m.cwd };
+    const branch = (m.local && currentBranch(m.cwd)) || m.branch || '-';
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -498,6 +499,7 @@ export class Session extends EventEmitter {
 
   // Kembalikan semua file worktree ke kondisi sebelum prompt `seq` dijalankan.
   async rewindTo(seq) {
+    if (this.meta.computer) throw new Error('Checkpoint dan rewind hanya tersedia untuk sesi repository git.');
     if (this.status === 'running') throw new Error('Hentikan agen dulu sebelum mengembalikan file.');
     const cp = this.events.find((e) => e.k === 'cp' && e.of === seq);
     const u = this.events.find((e) => e.seq === seq);
@@ -614,7 +616,7 @@ export class Session extends EventEmitter {
         disallowedTools: ['EnterPlanMode'],
         agents: subagents(),
         mcpServers: { snugcode: devToolsServer(this) },
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: SNUGCODE_SYSTEM_PROMPT },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: snugcodePrompt({ computer: !!this.meta.computer }) },
         canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
         hooks: { PreToolUse: [{ matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] }] },
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
@@ -774,7 +776,7 @@ export class Session extends EventEmitter {
     this.turn = { resolve() {} };
     // Checkpoint berjalan paralel dengan start-up agen; tool yang mengubah file menunggu
     // checkpoint ini selesai (askPermission), jadi rewind tetap mendapat kondisi sebelum prompt.
-    if (userSeq)
+    if (userSeq && !this.meta.computer)
       this.cpReady = snapshot(this.meta.cwd).then(
         (tree) => tree && this.emitEvent({ k: 'cp', of: userSeq, tree }),
         (e) => this.mgr.log('! checkpoint gagal: ' + e.message),
@@ -807,10 +809,10 @@ export class Session extends EventEmitter {
     const needsUser = isPush || secretCmd || shotFile || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
     // Mode rencana: agen menulis draf rencananya ke folder plans milik Claude (bukan worktree).
     const planFile = this.meta.plan && ['Write', 'Edit'].includes(tool) && path.resolve(String(input?.file_path || '')).startsWith(PLANS_DIR + path.sep);
-    const readInside = READ_TOOLS.has(tool) && paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR));
+    const readInside = READ_TOOLS.has(tool) && (this.meta.computer || paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR)));
     const safe = (SAFE_TOOLS.has(tool) && !(shotUrl && !isLocalUrl(shotUrl))) || readInside;
     // Edit di dalam worktree langsung diterapkan (bisa di-rewind), kecuali mode tinjau edit / rencana.
-    const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && paths.every((p) => isInside(p, cwd)) && !this.meta.askEdits && !this.meta.plan;
+    const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && (this.meta.computer || paths.every((p) => isInside(p, cwd))) && !this.meta.askEdits && !this.meta.plan;
     // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
     if (!safe && this.cpReady) await this.cpReady;
     if (!needsUser && (planFile || safe || editInside || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
@@ -1060,7 +1062,28 @@ export class SessionManager {
     return s;
   }
 
-  async create({ repo, base, branch, model, local }) {
+  async create({ repo, base, branch, model, local, computer, cwd, type }) {
+    if (computer || repo === '__computer__' || type === 'computer') {
+      const id = randomBytes(4).toString('hex');
+      const targetCwd = path.resolve(cwd || os.homedir());
+      const meta = {
+        id,
+        repo: 'Komputer',
+        cwd: targetCwd,
+        branch: os.hostname() || 'pc',
+        base: '-',
+        computer: true,
+        model: model || this.config.model,
+        title: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        auto: false,
+      };
+      const s = new Session(meta, this);
+      this.sessions.set(id, s);
+      this.saveIndex();
+      return s;
+    }
     if (local) {
       // Folder lokal dari terminal: pakai ulang sesi yang sudah ada untuk folder yang sama.
       const info = await inspectLocalRepo(local);
@@ -1107,7 +1130,7 @@ export class SessionManager {
       safeRm(s.logFile);
     } catch {}
     // Folder lokal milik pengguna tidak pernah dihapus; hanya riwayat sesinya.
-    if (!s.meta.local) {
+    if (!s.meta.local && !s.meta.computer) {
       await removeWorktree(s.meta.cwd).catch(() => {});
     }
     // Bersihkan worktree / log yatim (clone dasar repo disimpan beberapa hari untuk sesi berikutnya)
