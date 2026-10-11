@@ -218,6 +218,7 @@ const COMMANDS = [
   ['/model', 'ganti model & effort sesi ini'],
   ['/default', 'model default untuk sesi baru'],
   ['/sessions', 'pindah sesi (juga sesi dari HP)'],
+  ['/computer', 'sesi mode komputer (kontrol seluruh PC)'],
   ['/new', 'sesi baru dari repo GitHub'],
   ['/run', 'jalankan dev server di latar belakang [perintah]'],
   ['/ps', 'daftar proses latar belakang'],
@@ -401,12 +402,16 @@ class App {
     const parts = [];
     if (s) {
       parts.push(c.purple('◆ ') + c.soft(modelLabel(s.model)));
-      const g = this.git;
-      parts.push(c.blue('git ') + c.soft(g?.branch || s.branch) + (g && g.files ? c.yellow(` +${g.files}`) : '') + (g && g.ahead ? c.green(` ↑${g.ahead}`) : ''));
+      if (s.computer) {
+        parts.push(c.cyan('💻 komputer ') + c.soft(tildify(s.cwd || '')));
+      } else {
+        const g = this.git;
+        parts.push(c.blue('git ') + c.soft(g?.branch || s.branch) + (g && g.files ? c.yellow(` +${g.files}`) : '') + (g && g.ahead ? c.green(` ↑${g.ahead}`) : ''));
+        if (s.local) parts.push(dim(tildify(s.cwd || '')));
+        else parts.push(dim(s.repo));
+      }
       if (s.auto) parts.push(c.red('⚡ auto-izin'));
       if (['invalid', 'missing'].includes(this.info.githubState)) parts.push(c.red('GitHub: perlu /login'));
-      if (s.local) parts.push(dim(tildify(s.cwd || '')));
-      else parts.push(dim(s.repo));
     }
     let left = '  ' + parts.join(dim('  ·  '));
     let right;
@@ -774,7 +779,11 @@ class App {
     if (!this.session) return;
     try {
       const st = await this.cl.call('status', { id: this.session.id });
-      this.git = { branch: st.branch, files: st.files.length, ahead: st.ahead };
+      if (st.notRepo) {
+        this.git = null;
+      } else {
+        this.git = { branch: st.branch, files: st.files?.length || 0, ahead: st.ahead };
+      }
       this.scheduleRender();
     } catch {}
   }
@@ -820,8 +829,13 @@ class App {
       row(),
     ];
     if (s) {
-      if (s.local) lines.push(kv('folder', c.fg(tildify(s.cwd))));
-      lines.push(kv('repo', c.fg(s.repo) + dim(' · ') + c.blue(s.branch)));
+      if (s.computer) {
+        lines.push(kv('mode', c.cyan('💻 Komputer (kontrol seluruh PC)')));
+        lines.push(kv('folder', c.fg(tildify(s.cwd))));
+      } else {
+        if (s.local) lines.push(kv('folder', c.fg(tildify(s.cwd))));
+        lines.push(kv('repo', c.fg(s.repo) + dim(' · ') + c.blue(s.branch)));
+      }
       lines.push(kv('model', c.purple('◆ ') + c.fg(modelLabel(s.model))));
     }
     lines.push(kv('PC', c.fg(this.info.name) + dim(this.info.github ? ` · @${this.info.github}` : '') + dim(' · bisa dilanjutkan di HP')));
@@ -1182,6 +1196,9 @@ class App {
           return this.pickModel('default');
         case '/sessions':
           return this.pickSession();
+        case '/computer':
+        case '/pc':
+          return this.newComputerSession();
         case '/new':
           return this.newSession(arg);
         case '/login':
@@ -1239,6 +1256,7 @@ class App {
         }
         case '/rewind': {
           need();
+          if (s.computer) return this.setFlash('Checkpoint dan rewind hanya tersedia untuk sesi repository git', true);
           const last = this.lastUserSeq;
           if (!last) return this.setFlash('Belum ada prompt di sesi ini', true);
           if (!(await this.confirm('Rewind', `Kembalikan semua file ke sebelum prompt "${trunc(last.d || 'gambar', 50)}"?`))) return;
@@ -1248,6 +1266,7 @@ class App {
         case '/git': {
           need();
           const st = await this.cl.call('status', { id: s.id });
+          if (st.notRepo) return this.setFlash('Folder kerja sesi ini bukan repository git', true);
           this.git = { branch: st.branch, files: st.files.length, ahead: st.ahead };
           const L = ['', bold('git') + ' ' + c.blue(st.branch) + dim(st.hasUpstream ? `  ↑${st.ahead} ↓${st.behind}` : st.ahead ? `  ${st.ahead} commit belum di GitHub` : '  belum ada di GitHub')];
           if (!st.files.length) L.push(dim('  tidak ada perubahan'));
@@ -1257,7 +1276,8 @@ class App {
         }
         case '/diff': {
           need();
-          const { diff, truncated } = await this.cl.call('diff', { id: s.id });
+          const { diff, truncated, notRepo } = await this.cl.call('diff', { id: s.id });
+          if (notRepo) return this.setFlash('Folder kerja sesi ini bukan repository git', true);
           if (!diff.trim()) return this.setFlash('Tidak ada perubahan');
           const L = [''];
           for (const l of diff.split('\n')) {
@@ -1302,7 +1322,12 @@ class App {
         }
         case '/delete': {
           need();
-          if (!(await this.confirm('Hapus sesi', s.local ? 'Hapus riwayat sesi ini? Folder & file kamu tidak disentuh.' : 'Hapus sesi beserta worktree-nya? Perubahan yang belum di-push hilang.'))) return;
+          const confirmMsg = s.computer
+            ? 'Hapus riwayat sesi komputer ini? File & sistem kamu tidak disentuh.'
+            : s.local
+            ? 'Hapus riwayat sesi ini? Folder & file kamu tidak disentuh.'
+            : 'Hapus sesi beserta worktree-nya? Perubahan yang belum di-push hilang.';
+          if (!(await this.confirm('Hapus sesi', confirmMsg))) return;
           await this.cl.call('delete', { id: s.id });
           this.session = null;
           this.setFlash('Sesi dihapus');
@@ -1406,19 +1431,36 @@ class App {
     const here = gitTop(process.cwd());
     const items = list.map((x) => ({
       value: x,
-      label: x.title || '(belum ada prompt)',
+      label: x.title || (x.computer ? 'Sesi Komputer' : '(belum ada prompt)'),
       key: x.repo,
-      sub: `${x.repo} · ${x.branch} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}${x.local ? ' · lokal' : ''}`,
+      sub: x.computer
+        ? `Komputer · ${tildify(x.cwd || '')} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}`
+        : `${x.repo} · ${x.branch} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}${x.local ? ' · lokal' : ''}`,
       tag: x.status === 'running' ? c.yellow('● berjalan') : x.id === this.session?.id ? c.green('● sekarang') : '',
     }));
     if (here) items.unshift({ value: { here }, label: c.green('+ ') + 'Sesi di folder ini', sub: tildify(here), always: true });
+    items.push({ value: { computer: true }, label: c.green('+ ') + 'Sesi Komputer (kontrol PC seperti Claude Code)…', sub: 'akses penuh ke sistem & direktori', always: true });
     items.push({ value: { create: true }, label: c.green('+ ') + 'Sesi baru dari repo GitHub…', always: true });
     const pick = await this.select({ title: 'Sesi', items, placeholder: 'cari sesi…' });
     if (!pick) return;
     const v = pick.value;
+    if (v.computer) return this.newComputerSession();
     if (v.create) return this.newSession();
     if (v.here) return this.attach(await this.cl.call('create', { local: v.here }));
     return this.attach(v);
+  }
+
+  async newComputerSession(cwd = process.cwd()) {
+    this.busyText = 'Menyiapkan sesi komputer';
+    this.scheduleRender();
+    try {
+      const s = await this.cl.call('create', { computer: true, cwd });
+      this.busyText = null;
+      await this.attach(s);
+    } catch (e) {
+      this.busyText = null;
+      this.setFlash(e.message, true, 6000);
+    }
   }
 
   async newSession(q) {
@@ -1532,7 +1574,7 @@ function gitTop(dir) {
 }
 
 // ---------- main ----------
-export async function runTui({ prompt = '', pick = false } = {}) {
+export async function runTui({ prompt = '', pick = false, computer = false } = {}) {
   if (!process.stdin.isTTY || !out.isTTY) {
     console.error('snugcode perlu terminal interaktif. Untuk menjalankan daemon saja: snugcode start');
     process.exit(1);
@@ -1589,18 +1631,28 @@ export async function runTui({ prompt = '', pick = false } = {}) {
     process.exit(1);
   });
 
-  // Folder repo git -> sesi lokal (lanjutkan yang sudah ada), selain itu pilih sesi.
+  // Folder repo git -> sesi lokal (lanjutkan yang sudah ada), selain itu pilih sesi atau komputer.
   const top = gitTop(process.cwd());
   try {
-    if (top && !pick) await app.attach(await app.cl.call('create', { local: top }));
-    else {
+    if (computer) {
+      await app.newComputerSession(process.cwd());
+    } else if (top && !pick) {
+      await app.attach(await app.cl.call('create', { local: top }));
+    } else {
       app.printHeader();
       app.render();
       const list = await app.cl.call('sessions');
       if (list.length || top) await app.pickSession();
       else {
-        app.print(dim('  Folder ini bukan repo git. Pilih repo GitHub untuk mulai:'));
-        await app.newSession();
+        const pickStart = await app.select({
+          title: 'Mulai Sesi',
+          items: [
+            { value: 'computer', label: c.green('+ ') + 'Sesi Komputer (kontrol PC seperti Claude Code)', sub: tildify(process.cwd()) + ' · akses seluruh PC', always: true },
+            { value: 'repo', label: c.cyan('+ ') + 'Sesi dari repo GitHub…', sub: 'clone ke worktree terisolasi', always: true },
+          ],
+        });
+        if (pickStart?.value === 'computer') await app.newComputerSession(process.cwd());
+        else if (pickStart?.value === 'repo') await app.newSession();
       }
     }
   } catch (e) {

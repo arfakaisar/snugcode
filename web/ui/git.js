@@ -6,12 +6,21 @@ import { busyButton, h, haptic, ic, loading, toast, ui } from './dom.js';
 export async function showGit() {
   const s = app.current.session;
   const body = h('div', {}, loading('Memuat status git…'));
-  ui.sheet(ui.head('Git', { sub: s.repo }), body);
+  ui.sheet(ui.head('Git', { sub: s.computer ? 'Komputer' : s.repo }), body);
   let st;
   try {
     st = await app.conn.call('status', { id: s.id });
   } catch (e) {
     return body.replaceChildren(h('div', { class: 'err' }, e.message));
+  }
+  if (st.notRepo) {
+    return body.replaceChildren(
+      h('div', { class: 'empty' },
+        h('div', { class: 'emptyart' }, ic('branch')),
+        h('b', {}, 'Bukan repository git'),
+        'Folder kerja sesi ini bukan git repository. Fitur commit, push, dan PR membutuhkan git repo.',
+      ),
+    );
   }
   app.current.refreshGit?.();
   const msg = h('input', { class: 'field', placeholder: 'Pesan commit…', autocapitalize: 'sentences', enterkeyhint: 'done' });
@@ -97,8 +106,9 @@ export function showPR(st) {
 
 export async function showDiff() {
   const box = h('div', {}, loading('Memuat diff…'));
-  ui.sheet(ui.head('Diff', { sub: app.current.session.repo, back: showGit }), box);
-  const { diff, truncated } = await app.conn.call('diff', { id: app.current.session.id });
+  ui.sheet(ui.head('Diff', { sub: app.current.session.computer ? 'Komputer' : app.current.session.repo, back: showGit }), box);
+  const { diff, truncated, notRepo } = await app.conn.call('diff', { id: app.current.session.id });
+  if (notRepo) return box.replaceChildren(h('div', { class: 'empty' }, 'Bukan repository git.'));
   const files = [];
   let cur = null;
   for (const l of diff.split('\n')) {

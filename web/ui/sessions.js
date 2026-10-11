@@ -9,10 +9,16 @@ import { pickModel } from './model-picker.js';
 import { accountMenu } from './push.js';
 import { showSession } from './session.js';
 
+export const tildify = (p) => {
+  if (!p) return '~';
+  return p.replace(/^[A-Za-z]:[\\/][Uu]sers[\\/][^\\/]+/i, '~').replace(/^\/home\/[^\\/]+/i, '~').replace(/\\/g, '/');
+};
+
 export function sessionSub(s) {
+  if (s.computer) return `Komputer · ${tildify(s.cwd)}`;
   return `${s.repo} · ${s.branch}`;
 }
-export const repoName = (s) => s.repo.split('/')[1] || s.repo;
+export const repoName = (s) => (s.computer ? 'Komputer' : s.repo.split('/')[1] || s.repo);
 // Warna avatar tetap per repo (bukan per posisi), jadi repo yang sama selalu berwarna sama.
 const tint = (name) => [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 5;
 
@@ -40,7 +46,7 @@ export async function showSessions() {
         h('button', { class: 'starterbtn', onclick: () => (haptic(), showNewSession()) },
           h('span', { class: 'si' }, ic('plus')),
           h('span', { class: 'grow' }, 'Mulai sesi baru…'),
-          h('span', { class: 'sk' }, ic('branch'), 'pilih repo'),
+          h('span', { class: 'sk' }, ic('monitor'), 'repo / PC'),
         ),
       ),
     ),
@@ -63,7 +69,7 @@ export async function showSessions() {
         h('div', { class: 'empty' },
           h('div', { class: 'emptyart' }, ic('term')),
           h('b', {}, 'Belum ada sesi'),
-          'Pilih repo GitHub, lalu minta agen mengerjakan apa saja — dari menjelaskan kode sampai membuat PR.',
+          'Pilih repo GitHub untuk coding terisolasi, atau jalankan mode Komputer untuk mengontrol seluruh PC seperti Claude Code.',
           h('button', { class: 'btn primary', style: 'margin-top:16px', onclick: () => showNewSession() }, ic('plus'), 'Mulai sesi pertama'),
         ),
       );
@@ -81,15 +87,17 @@ export async function showSessions() {
 export function sessionCard(s, i) {
   const name = repoName(s);
   const run = s.status === 'running';
+  const isComp = !!s.computer;
   const el = h('button', { class: 'card sess' + (run ? ' running' : ''), style: `--i:${Math.min(i, 10)}`, onclick: () => (haptic(), showSession(s)) },
-    h('span', { class: 'avatar t' + tint(name) }, name[0].toUpperCase(), run ? h('i', { class: 'live' }) : null),
+    h('span', { class: 'avatar t' + (isComp ? '1' : tint(name)) }, isComp ? ic('monitor') : name[0].toUpperCase(), run ? h('i', { class: 'live' }) : null),
     h('span', { class: 'grow' },
-      h('div', { class: 'row' }, h('div', { class: 'name' }, s.title || '(belum ada prompt)'), h('span', { class: 'when' }, ago(s.updatedAt))),
-      h('div', { class: 'sub' }, s.repo),
+      h('div', { class: 'row' }, h('div', { class: 'name' }, s.title || (isComp ? 'Sesi Komputer' : '(belum ada prompt)')), h('span', { class: 'when' }, ago(s.updatedAt))),
+      h('div', { class: 'sub' }, isComp ? `Komputer · ${s.cwd ? tildify(s.cwd) : 'seluruh PC'}` : s.repo),
       h('div', { class: 'tags' },
         run ? h('span', { class: 'tag run' }, 'berjalan') : null,
+        isComp ? h('span', { class: 'tag' }, ic('monitor'), 'komputer') : null,
         s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null,
-        h('span', { class: 'tag' }, ic('branch'), s.branch),
+        !isComp ? h('span', { class: 'tag' }, ic('branch'), s.branch) : null,
         s.model ? h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)) : null,
         s.auto ? h('span', { class: 'tag warn' }, ic('bolt'), 'auto') : null,
       ),
@@ -101,17 +109,22 @@ export function sessionCard(s, i) {
 
 // Opsi cepat sebuah sesi (tekan lama di beranda).
 export function sessionActions(s) {
+  const isComp = !!s.computer;
   ui.sheet(
-    ui.head(s.title || repoName(s), { sub: sessionSub(s) }),
+    ui.head(s.title || (isComp ? 'Sesi Komputer' : repoName(s)), { sub: sessionSub(s) }),
     h('div', { class: 'group' },
       h('button', { class: 'menuitem', onclick: () => (ui.closeSheet(), showSession(s)) }, h('span', { class: 'mi' }, ic('term')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Buka sesi'))),
-      h('button', { class: 'menuitem danger', onclick: () => deleteSession(s) }, h('span', { class: 'mi' }, ic('trash')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Hapus sesi'), h('div', { class: 't2' }, 'worktree di PC ikut dihapus'))),
+      h('button', { class: 'menuitem danger', onclick: () => deleteSession(s) }, h('span', { class: 'mi' }, ic('trash')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Hapus sesi'), h('div', { class: 't2' }, isComp ? 'riwayat sesi di PC dihapus' : 'worktree di PC ikut dihapus'))),
     ),
   );
 }
 
 export async function deleteSession(s) {
-  if (!(await ui.confirm({ title: 'Hapus sesi ini?', text: 'Worktree-nya di PC ikut dihapus. Perubahan yang belum di-push akan hilang.', ok: 'Hapus', danger: true, icon: 'trash' }))) return;
+  const isComp = !!s.computer;
+  const text = isComp
+    ? 'Riwayat sesi komputer ini akan dihapus. File & sistem di PC tetap aman dan tidak disentuh.'
+    : 'Worktree-nya di PC ikut dihapus. Perubahan yang belum di-push akan hilang.';
+  if (!(await ui.confirm({ title: 'Hapus sesi ini?', text, ok: 'Hapus', danger: true, icon: 'trash' }))) return;
   try {
     await app.conn.call('delete', { id: s.id });
     toast('Sesi dihapus');
@@ -144,9 +157,13 @@ function buildDrawer() {
   const go = (fn) => () => (drawer.close(), fn());
   const item = (s, i) => {
     const on = cur.session?.id === s.id;
+    const isComp = !!s.computer;
     return h('button', { class: 'dsess' + (on ? ' on' : '') + (s.status === 'running' ? ' running' : ''), style: `--i:${Math.min(i, 12)}`, onclick: on ? () => drawer.close() : go(() => showSession(s)) },
       h('span', { class: 'sdot' }),
-      h('span', { class: 'grow' }, h('span', { class: 'st' }, s.title || '(belum ada prompt)'), h('span', { class: 'ss' }, repoName(s) + ' · ' + (ago(s.updatedAt) || '-'))),
+      h('span', { class: 'grow' },
+        h('span', { class: 'st' }, s.title || (isComp ? 'Sesi Komputer' : '(belum ada prompt)')),
+        h('span', { class: 'ss' }, (isComp ? 'Komputer' : repoName(s)) + ' · ' + (ago(s.updatedAt) || '-'))
+      ),
     );
   };
   const render = (ss) => list.replaceChildren(...(ss?.length ? ss.map(item) : [h('div', { class: 'dempty' }, ss ? 'Belum ada sesi.' : 'Memuat…')]));
@@ -178,11 +195,70 @@ function buildDrawer() {
 }
 
 // ---------- Layar: sesi baru ----------
-export function showNewSession() {
-  ui.set('Sesi baru', { sub: 'pilih repo GitHub', back: showSessions, dot: 'on' });
+export function showNewSession(initialTab = 'repo') {
+  ui.set('Sesi baru', { sub: initialTab === 'repo' ? 'pilih repo GitHub' : 'kontrol seluruh PC', back: showSessions, dot: 'on' });
+  let tab = initialTab;
+
+  const segRepo = h('button', { class: tab === 'repo' ? 'on' : '', onclick: () => (haptic(6), switchTab('repo')) }, ic('branch'), 'Repository');
+  const segPc = h('button', { class: tab === 'computer' ? 'on' : '', onclick: () => (haptic(6), switchTab('computer')) }, ic('monitor'), 'Komputer');
+  const seg = h('div', { class: 'seg slide', style: `--n:2;--at:${tab === 'repo' ? '0' : '1'};margin-bottom:14px` }, h('i', { class: 'knob' }), segRepo, segPc);
+
+  // Tab 1: Repo
   const q = h('input', { class: 'field', type: 'search', placeholder: 'Cari repo atau ketik owner/nama', autocapitalize: 'off', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'search' });
   const results = h('div', {}, skeletons(4));
-  ui.view(scrollCol(h('div', { class: 'search' }, ic('search'), q), results));
+  const repoView = h('div', { hidden: tab !== 'repo' }, h('div', { class: 'search' }, ic('search'), q), results);
+
+  // Tab 2: Komputer
+  let compModel = app.current.info?.model;
+  const compModelSlot = h('div', { class: 'group' });
+  const renderCompModel = () =>
+    compModelSlot.replaceChildren(
+      modelItem('Model sesi komputer', compModel, () => pickModel({ title: 'Model sesi komputer', current: compModel, onBack: () => showNewSession('computer'), onPick: (id) => ((compModel = id), renderCompModel(), (ui.sdir = -1), showNewSession('computer')) })),
+    );
+  renderCompModel();
+  const cwdIn = h('input', { class: 'field', placeholder: 'Folder awal, mis. ~ atau biarkan kosong', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const compErr = h('div', { class: 'err' });
+  const compBtn = h('button', { class: 'btn primary', style: 'margin-top:16px;width:100%' }, ic('monitor'), 'Mulai sesi komputer');
+  compBtn.onclick = async () => {
+    const done = busyButton(compBtn, 'Menyiapkan sesi komputer…');
+    compErr.textContent = '';
+    try {
+      const s = await app.conn.call('create', { computer: true, model: compModel, cwd: cwdIn.value.trim() || undefined });
+      haptic(20);
+      showSession(s);
+    } catch (e) {
+      compErr.textContent = e.message;
+      done();
+    }
+  };
+  const compView = h('div', { hidden: tab !== 'computer' },
+    h('div', { class: 'card', style: 'cursor:default;margin-bottom:14px;padding:14px 16px' },
+      h('span', { class: 'avatar t1' }, ic('monitor')),
+      h('span', { class: 'grow' },
+        h('div', { class: 'name', style: 'font-size:15px;font-weight:600' }, 'Kontrol Seluruh PC'),
+        h('div', { class: 'sub', style: 'margin-top:4px;line-height:1.4' }, 'Jalankan Claude Code dengan akses penuh ke komputermu. Agen dapat membuka & mengedit file di seluruh komputer, menjalankan perintah di terminal, dan mengelola sistem.'),
+      ),
+    ),
+    h('div', { class: 'label' }, 'Folder Kerja Awal (CWD)'),
+    cwdIn,
+    h('div', { class: 'dim small', style: 'margin-top:6px;margin-bottom:14px' }, 'Default: folder home pengguna (~). Agen tetap bisa mengakses direktori lain di PC.'),
+    h('div', { class: 'label' }, 'Model'),
+    compModelSlot,
+    compErr,
+    h('div', { style: 'margin-top:16px' }, compBtn),
+  );
+
+  const switchTab = (t) => {
+    tab = t;
+    seg.style.setProperty('--at', t === 'repo' ? '0' : '1');
+    segRepo.classList.toggle('on', t === 'repo');
+    segPc.classList.toggle('on', t === 'computer');
+    repoView.hidden = t !== 'repo';
+    compView.hidden = t !== 'computer';
+    ui.sub(t === 'repo' ? 'pilih repo GitHub' : 'kontrol seluruh PC');
+  };
+
+  ui.view(scrollCol(seg, repoView, compView));
   let timer;
   let seq = 0;
   const row = (r, i = 0) => {
