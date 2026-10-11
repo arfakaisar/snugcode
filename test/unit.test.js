@@ -619,6 +619,41 @@ test('markdown: render bertahap hanya membekukan blok yang sudah selesai', async
   assert.equal(html, md(src));
 });
 
+test('agen: Read potongan & Grep daftar file dilebarkan untuk model non-Claude (lebih sedikit langkah)', async () => {
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const { HOME } = await import('../daemon/config.js');
+  const { widenToolInput, Session } = await import('../daemon/sessions.js');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-widen-'));
+  fs.writeFileSync(path.join(cwd, 'small.js'), 'a\n'.repeat(300));
+  fs.writeFileSync(path.join(cwd, 'long.js'), 'a\n'.repeat(2500));
+  fs.writeFileSync(path.join(cwd, 'big.js'), 'x'.repeat(70 * 1024));
+  fs.writeFileSync(path.join(cwd, 'bin.dat'), Buffer.from([1, 0, 2]));
+  // Read potongan file kecil -> seluruh file; input lain dipertahankan.
+  assert.deepEqual(widenToolInput('Read', { file_path: 'small.js', offset: 10, limit: 40 }, cwd), { file_path: 'small.js' });
+  // Read tanpa potongan, file panjang/besar/biner/gambar/tidak ada/folder data: tidak diubah.
+  assert.equal(widenToolInput('Read', { file_path: 'small.js' }, cwd), null);
+  for (const f of ['long.js', 'big.js', 'bin.dat', 'x.png', 'nope.js', path.join(HOME, 'secrets.json')]) assert.equal(widenToolInput('Read', { file_path: f, offset: 1, limit: 5 }, cwd), null, f);
+  // Grep tanpa output_mode -> baris yang cocok + nomor baris (dibatasi); output_mode eksplisit dihormati.
+  assert.deepEqual(widenToolInput('Grep', { pattern: 'x' }, cwd), { pattern: 'x', output_mode: 'content', '-n': true, head_limit: 100 });
+  assert.equal(widenToolInput('Grep', { pattern: 'x', head_limit: 5 }, cwd).head_limit, 5);
+  assert.equal(widenToolInput('Grep', { pattern: 'x', output_mode: 'files_with_matches' }, cwd), null);
+  assert.equal(widenToolInput('Bash', { command: 'ls' }, cwd), null);
+
+  // Hook sesi: hanya untuk model non-Claude, dan mengikuti model yang dipilih saat itu.
+  const mgr = { config: {}, secrets: {}, log() {}, notify() {}, saveIndex() {}, trimAgents() {} };
+  const s = new Session({ id: 'twiden', cwd, repo: 'a/b', model: 'ag/gemini-3.8-flash-high' }, mgr);
+  const h = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: 'small.js', offset: 3, limit: 2 } };
+  assert.deepEqual(s.widenTool(h), { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { file_path: 'small.js' } } });
+  assert.ok(!('permissionDecision' in s.widenTool(h).hookSpecificOutput), 'izin tetap lewat canUseTool');
+  for (const m of ['cc/claude-opus-5-5-high', 'claude-sonnet-5-5', 'ag/claude-sonnet-4-6']) {
+    s.meta.model = m;
+    assert.deepEqual(s.widenTool(h), {}, m);
+  }
+  fs.rmSync(cwd, { recursive: true, force: true });
+});
+
 test('izin: path sensitif & tool baca di luar worktree', async () => {
   const path = await import('node:path');
   const os = await import('node:os');
