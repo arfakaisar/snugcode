@@ -3,6 +3,25 @@
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-11 — Agen 2–3× lebih cepat dengan model non-Claude
+
+### Diagnosis (diukur, bukan ditebak)
+- Harness snugcode sendiri bukan penyebabnya: proxy loopback +0 ms, overhead SDK/sesi ±50–150 ms
+  per langkah, checkpoint ±150 ms per prompt, RTT ke router ±25 ms.
+- Penyebabnya jumlah langkah: setiap langkah = satu request model (Gemini Flash high: 2,5–10 detik
+  per request). Gemini membaca file 40–120 baris per langkah (129 dari 132 Read di sesi nyata
+  dipotong offset/limit) dan memakai Grep mode daftar file lalu mencari ulang isinya. Tugas
+  eksplorasi yang sama: Opus 8 request, Gemini 45–53 request.
+
+### Perbaikan
+- Hook PreToolUse `Read|Grep` (hanya model non-Claude): Read potongan dari file ≤ 2000 baris /
+  64 KB dilebarkan menjadi seluruh file; Grep tanpa `output_mode` menjadi baris yang cocok + nomor
+  baris (`head_limit` 100). Izin tetap lewat `canUseTool`; folder data snugcode, file biner,
+  gambar, PDF, dan notebook tidak disentuh. Hasil pada tugas eksplorasi yang sama (3 kali uji):
+  135–178 detik / 45–53 request → 52–72 detik / 13–16 request, token input turun ±60%.
+- System prompt: arahan efisiensi diperjelas (gabungkan tool call yang independen, baca file
+  utuh, Grep `content`), menggantikan arahan lama yang mendorong membaca potongan offset/limit.
+
 ## 2026-10-09 — Alamat singkat, ikon baru, perbaikan beranda
 
 ### Alamat: snugcode.arfak.workers.dev
