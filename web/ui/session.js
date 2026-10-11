@@ -9,7 +9,7 @@ import { showGit } from './git.js';
 import { pickModel } from './model-picker.js';
 import { Renderer } from './renderer.js';
 import { onProc, showRun } from './run.js';
-import { deleteSession, repoName, sessionSub, showSessions } from './sessions.js';
+import { deleteSession, repoName, sessionSub, showSessions, tildify } from './sessions.js';
 
 // ---------- Layar: sesi ----------
 export const QUICK = [
@@ -20,6 +20,15 @@ export const QUICK = [
   { icon: 'commit', t1: 'Commit perubahan', t2: 'tulis pesan commit yang jelas lalu commit', text: 'Lihat perubahan yang ada, tulis pesan commit yang jelas, lalu commit. Jangan push.' },
 ];
 export const QUICK_SH = ['git status', 'git log --oneline -n 8', 'git diff --stat', 'ls'];
+
+export const QUICK_COMPUTER = [
+  { icon: 'monitor', t1: 'Ringkas info sistem', t2: 'OS, CPU, memory, direktori aktif', text: 'Tampilkan ringkasan info sistem: OS, spesifikasi, direktori aktif, dan status lingkungan. Singkat.' },
+  { icon: 'term', t1: 'Cek proses & port', t2: 'lihat proses berjalan dan port terbuka', text: 'Cek proses yang sedang berjalan dan port yang sedang digunakan atau terbuka di komputer ini.' },
+  { icon: 'bug', t1: 'Perbaiki error terakhir', t2: 'lanjutkan dari output sebelumnya', text: 'Perbaiki error terakhir yang muncul di sesi ini, lalu verifikasi.' },
+  { icon: 'search', t1: 'Cari file di komputer', t2: 'bantu cari file atau folder tertentu', text: 'Bantu cari file atau folder di komputer ini.' },
+  { icon: 'branch', t1: 'Cek status git', t2: 'periksa repositori git di folder ini jika ada', text: 'Periksa status git di direktori ini jika merupakan git repository.' },
+];
+export const QUICK_COMPUTER_SH = ['ls', 'git status', 'whoami', 'pwd'];
 
 export function showSession(s) {
   app.current.session = s;
@@ -33,7 +42,7 @@ export function showSession(s) {
   const working = h('div', { id: 'working', hidden: true }, mascot('think'), wl, wt);
   const toBottom = h('button', { id: 'tobottom', hidden: true, 'aria-label': 'Ke pesan terbaru' }, ic('arrowdown'));
   const dock = h('div', { id: 'dock' });
-  const input = h('textarea', { id: 'input', rows: 1, placeholder: 'Minta sesuatu ke agen…', autocapitalize: 'sentences', enterkeyhint: coarse ? 'enter' : 'send', 'aria-label': 'Pesan' });
+  const input = h('textarea', { id: 'input', rows: 1, placeholder: s.computer ? 'Perintahkan apa saja di komputermu…' : 'Minta sesuatu ke agen…', autocapitalize: 'sentences', enterkeyhint: coarse ? 'enter' : 'send', 'aria-label': 'Pesan' });
   const send = h('button', { id: 'send', class: 'idle', 'aria-label': 'Kirim' }, ic('send'));
   const plusBtn = h('button', { class: 'cbtn plus', 'aria-label': 'Lampiran & alat' }, ic('plus'));
   const modelChip = h('button', { class: 'cbtn model', 'aria-label': 'Ganti model' });
@@ -97,7 +106,7 @@ export function showSession(s) {
     modes.hidden = !list.length;
     modes.replaceChildren(...list);
     if (!was && list.length) anim(modes, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 240);
-    input.placeholder = ss.plan ? 'Rencanakan apa?' : shellMode ? 'Perintah shell di worktree…' : 'Minta sesuatu ke agen…';
+    input.placeholder = ss.plan ? 'Rencanakan apa?' : shellMode ? (ss.computer ? 'Perintah shell di PC…' : 'Perintah shell di worktree…') : (ss.computer ? 'Perintahkan apa saja di komputermu…' : 'Minta sesuatu ke agen…');
     plusBtn.classList.toggle('on', list.length > 0);
   };
   app.current.setPlan = (on) => {
@@ -165,39 +174,42 @@ export function showSession(s) {
   plusBtn.onclick = () => {
     haptic(6);
     const ss = app.current.session;
-    ui.sheet(
-      ui.head('Lampiran & alat'),
-      h('div', { class: 'tiles' },
-        tile('camera', 'Kamera', () => (ui.closeSheet(), camIn.click())),
-        tile('image', 'Galeri', () => (ui.closeSheet(), fileIn.click())),
-        tile('play', 'Run', () => showRun()),
-        tile('branch', 'Git', () => showGit()),
-      ),
-      h('div', { class: 'label' }, 'Mode'),
-      h('div', { class: 'group' },
-        toggleItem({ icon: 'list', t1: 'Mode rencana', t2: 'agen membaca & menyusun rencana dulu', on: !!ss.plan, onchange: setPlanRemote }),
-        toggleItem({ icon: 'term', t1: 'Mode shell', t2: 'pesan dikirim sebagai perintah ($)', on: shellMode, onchange: (v) => (setMode(v), v) }),
-        toggleItem({ icon: 'bolt', t1: 'Auto-izin', t2: 'tanpa bertanya, kecuali push & PR', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
-        // Bawaan: edit di worktree langsung diterapkan (bisa di-rewind); nyalakan untuk menyetujui tiap diff.
-        'askEdits' in ss
-          ? toggleItem({
-              icon: 'diff', t1: 'Tinjau setiap edit', t2: 'Write/Edit menunggu persetujuanmu', on: !!ss.askEdits,
-              onchange: async (on) => {
-                try {
-                  Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on }));
-                } catch (e) {
-                  throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk fitur ini') : e;
-                }
-                return app.current.session.askEdits;
-              },
-            })
-          : null,
-      ),
-      h('div', { class: 'label' }, 'Aksi cepat'),
-      h('div', { class: 'group' }, ...QUICK.map((qk) => menuItem({ icon: qk.icon, t1: qk.t1, t2: qk.t2, onclick: () => (ui.closeSheet(), quick(qk.text)) }))),
-      h('div', { class: 'label' }, 'Shell'),
-      h('div', { class: 'qsh' }, ...QUICK_SH.map((c) => h('button', { class: 'chip mono', onclick: () => (ui.closeSheet(), quick('!' + c)) }, '$ ' + c))),
-    );
+      const isComp = !!ss.computer;
+      const qkList = isComp ? QUICK_COMPUTER : QUICK;
+      const qkShList = isComp ? QUICK_COMPUTER_SH : QUICK_SH;
+      return ui.sheet(
+        ui.head('Lampiran & alat'),
+        h('div', { class: 'tiles' },
+          tile('camera', 'Kamera', () => (ui.closeSheet(), camIn.click())),
+          tile('image', 'Galeri', () => (ui.closeSheet(), fileIn.click())),
+          tile('play', 'Run', () => showRun()),
+          tile('branch', 'Git', () => showGit()),
+        ),
+        h('div', { class: 'label' }, 'Mode'),
+        h('div', { class: 'group' },
+          toggleItem({ icon: 'list', t1: 'Mode rencana', t2: 'agen membaca & menyusun rencana dulu', on: !!ss.plan, onchange: setPlanRemote }),
+          toggleItem({ icon: 'term', t1: 'Mode shell', t2: 'pesan dikirim sebagai perintah ($)', on: shellMode, onchange: (v) => (setMode(v), v) }),
+          toggleItem({ icon: 'bolt', t1: 'Auto-izin', t2: 'tanpa bertanya, kecuali push & PR', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
+          // Bawaan: edit di worktree langsung diterapkan (bisa di-rewind); nyalakan untuk menyetujui tiap diff.
+          'askEdits' in ss
+            ? toggleItem({
+                icon: 'diff', t1: 'Tinjau setiap edit', t2: 'Write/Edit menunggu persetujuanmu', on: !!ss.askEdits,
+                onchange: async (on) => {
+                  try {
+                    Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on }));
+                  } catch (e) {
+                    throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk fitur ini') : e;
+                  }
+                  return app.current.session.askEdits;
+                },
+              })
+            : null,
+        ),
+        h('div', { class: 'label' }, 'Aksi cepat'),
+        h('div', { class: 'group' }, ...qkList.map((qk) => menuItem({ icon: qk.icon, t1: qk.t1, t2: qk.t2, onclick: () => (ui.closeSheet(), quick(qk.text)) }))),
+        h('div', { class: 'label' }, 'Shell'),
+        h('div', { class: 'qsh' }, ...qkShList.map((c) => h('button', { class: 'chip mono', onclick: () => (ui.closeSheet(), quick('!' + c)) }, '$ ' + c))),
+      );
   };
 
   // --- model ---
@@ -237,7 +249,11 @@ export function showSession(s) {
     gitT = setTimeout(async () => {
       try {
         const st = await app.conn.call('status', { id: s.id });
-        const n = st.files.length;
+        if (st.notRepo) {
+          gitBadge.hidden = true;
+          return;
+        }
+        const n = st.files?.length || 0;
         const txt = n ? String(n) : st.ahead ? '↑' + st.ahead : '';
         gitBadge.hidden = !txt;
         gitBadge.textContent = txt;
@@ -402,14 +418,22 @@ export async function compressImage(file) {
 // Menu sesi (ketuk judul): rincian, git/run/model, .env, hapus.
 export function sessionMenu() {
   const s = app.current.session;
+  const isComp = !!s.computer;
   ui.sheet(
-    ui.head(s.title || repoName(s), { sub: s.repo }),
-    h('div', { class: 'tags', style: 'margin:0 0 14px' }, h('span', { class: 'tag' }, ic('branch'), s.branch), h('span', { class: 'tag' }, 'base ' + s.base), h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)), s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null),
+    ui.head(s.title || (isComp ? 'Sesi Komputer' : repoName(s)), { sub: sessionSub(s) }),
+    h('div', { class: 'tags', style: 'margin:0 0 14px' },
+      isComp ? h('span', { class: 'tag' }, ic('monitor'), 'komputer') : null,
+      isComp && s.cwd ? h('span', { class: 'tag' }, tildify(s.cwd)) : null,
+      !isComp ? h('span', { class: 'tag' }, ic('branch'), s.branch) : null,
+      !isComp ? h('span', { class: 'tag' }, 'base ' + s.base) : null,
+      h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)),
+      s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null,
+    ),
     h('div', { class: 'group' },
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
       menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
       menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
-      s.local ? null : menuItem({
+      (s.local || isComp) ? null : menuItem({
         icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',
         onclick: async () => {
           try {
@@ -423,7 +447,7 @@ export function sessionMenu() {
     ),
     h('div', { class: 'group' },
       menuItem({ icon: 'home', t1: 'Kembali ke beranda', chev: false, onclick: () => (ui.closeSheet(), (ui.dir = -1), showSessions()) }),
-      menuItem({ icon: 'trash', t1: 'Hapus sesi', t2: 'worktree di PC ikut dihapus', danger: true, chev: false, onclick: () => deleteSession(s) }),
+      menuItem({ icon: 'trash', t1: 'Hapus sesi', t2: isComp ? 'riwayat sesi di PC dihapus' : 'worktree di PC ikut dihapus', danger: true, chev: false, onclick: () => deleteSession(s) }),
     ),
   );
 }

@@ -306,7 +306,7 @@ const RPC = {
   },
   envSave(c, p) {
     const s = c.d.sessions.get(p.id);
-    if (s.meta.local) throw new Error('Sesi terminal memakai folder aslinya; .env sudah ada di sana.');
+    if (s.meta.local || s.meta.computer) throw new Error('Fitur template .env hanya untuk sesi repository git.');
     return saveEnv(s.meta.repo, s.meta.cwd);
   },
   // ---------- Web Push (HP) ----------
@@ -339,8 +339,28 @@ const RPC = {
   },
   // Dipicu pengguna: clone dasar repo yang tidak dipakai sesi mana pun ikut dihapus sekarang.
   cleanup: (c) => c.d.sessions.cleanupOrphans({ minAgeMs: 0, repoTtlMs: 0 }),
-  status: (c, p) => gitStatus(c.d.sessions.get(p.id).meta.cwd),
-  diff: (c, p) => gitDiff(c.d.sessions.get(p.id).meta.cwd, { limit: c.big ? 2 * 1024 * 1024 : 400 * 1024 }),
+  status: async (c, p) => {
+    const s = c.d.sessions.get(p.id);
+    if (s.meta.computer) {
+      try {
+        return await gitStatus(s.meta.cwd);
+      } catch {
+        return { branch: '-', files: [], ahead: 0, behind: 0, log: [], hasUpstream: false, notRepo: true };
+      }
+    }
+    return gitStatus(s.meta.cwd);
+  },
+  diff: async (c, p) => {
+    const s = c.d.sessions.get(p.id);
+    if (s.meta.computer) {
+      try {
+        return await gitDiff(s.meta.cwd, { limit: c.big ? 2 * 1024 * 1024 : 400 * 1024 });
+      } catch {
+        return { diff: '', truncated: false, notRepo: true };
+      }
+    }
+    return gitDiff(s.meta.cwd, { limit: c.big ? 2 * 1024 * 1024 : 400 * 1024 });
+  },
   commit(c, p) {
     if (!p.message?.trim()) throw new Error('Pesan commit kosong');
     const cfg = c.d.config;
