@@ -13,7 +13,7 @@ import { cloudPin, connectButton, ghcs, idleSheet, isCodespace, openRunnerOnGith
 import { routerSheet, settingsItems } from './settings.js';
 
 // ---------- Koneksi ke satu PC ----------
-/** @param {{ id: string, name?: string }} m @param {{ sid?: string }} [opts] */
+/** @param {{ id: string, name?: string, kind?: string, provider?: string }} m @param {{ sid?: string }} [opts] */
 export function openMachine(m, { sid } = {}) {
   app.conn?.close();
   app.conn = new Conn(m);
@@ -32,7 +32,8 @@ export function openMachine(m, { sid } = {}) {
       if (!app.current.ready && isCodespace(m)) return wakeScreen(m, msg, showStatus);
       if (!app.current.ready) {
         msg.textContent = 'PC sedang offline.';
-        showStatus('Menunggu PC', 'Pastikan snugcode berjalan di PC (snugcode autostart on) dan PC tidak tertidur. Halaman ini tersambung otomatis begitu PC online.', true);
+        if (m.kind === 'cloud') showStatus('Menunggu runner', 'Pastikan container snugcode berjalan di server (docker ps / docker start snugcode). Halaman ini tersambung otomatis begitu runner online.', true);
+        else showStatus('Menunggu PC', 'Pastikan snugcode berjalan di PC (snugcode autostart on) dan PC tidak tertidur. Halaman ini tersambung otomatis begitu PC online.', true);
       } else toast('PC offline — menunggu tersambung lagi…', true);
     } else if (s === 'online' || s === 'reconnecting') {
       ui.dot('busy');
