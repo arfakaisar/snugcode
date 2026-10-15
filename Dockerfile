@@ -1,9 +1,11 @@
 # Runner snugcode di container (Fly.io, Railway, VPS, …): daemon yang sama dengan di PC, tanpa PC.
 #   docker build -t snugcode .
-#   docker run -d -v snugcode:/data \
-#     -e SNUGCODE_MACHINE_TOKEN=<dari /api/machines/provision> -e SNUGCODE_PAIR_PIN=<pin> snugcode
-# Key 9router, model, dan login GitHub diatur dari aplikasi HP. Dengan SNUGCODE_IDLE_EXIT=1 (bawaan)
-# container berhenti sendiri setelah SNUGCODE_IDLE_MINUTES (30) tidak dipakai.
+#   docker run -d --restart unless-stopped -v snugcode:/data -e SNUGCODE_RELAY=https://snugcode.arfak.workers.dev \
+#     -e SNUGCODE_MACHINE_TOKEN=<token> -e SNUGCODE_PAIR_PIN=<pin> snugcode
+# Perintah lengkap (token & PIN) dibuat aplikasi HP: Tambah mesin → Runner cloud → Server sendiri.
+# Key 9router, model, dan login GitHub diatur dari aplikasi HP. Platform yang menyalakan container
+# saat dibutuhkan (mis. Fly.io): SNUGCODE_IDLE_EXIT=1 membuat container keluar setelah
+# SNUGCODE_IDLE_MINUTES (bawaan 30) tidak dipakai.
 FROM node:22-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates chromium procps curl openssh-client python3 \
@@ -17,6 +19,6 @@ RUN npm pack --silent && npm i -g ./snugcode-*.tgz --include=optional --no-audit
   && rm -rf /tmp/src && mkdir -p /data && chown node:node /data
 USER node
 WORKDIR /home/node
-ENV SNUGCODE_HOME=/data SNUGCODE_IDLE_EXIT=1 NODE_ENV=production
+ENV SNUGCODE_HOME=/data NODE_ENV=production
 VOLUME /data
 ENTRYPOINT ["snugcode", "cloud"]

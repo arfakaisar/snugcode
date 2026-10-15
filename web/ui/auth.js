@@ -85,7 +85,9 @@ export async function showMachines({ resume = false } = {}) {
   const howto = h('div', { class: 'copyline' }, h('code', {}, install), h('button', { class: 'copybtn', onclick: async (e) => (await copyText(install)) && (e.currentTarget.classList.add('done'), toast('Perintah disalin')) }, ic('copy'), 'salin'));
   const cloudBtn = (label) => h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: () => (haptic(), cloudSetupSheet()) }, ic('cloud'), label);
   // Kembali dari izin Codespaces: lanjutkan wizard runner.
-  if (store.get('cloudNext') === 'create') setTimeout(cloudSetupSheet, 300);
+  const next = store.get('cloudNext');
+  if (next) store.set('cloudNext', null);
+  if (next === 'create') setTimeout(cloudSetupSheet, 300);
   if (!machines.length)
     return list.replaceChildren(
       h('div', { class: 'empty' },

@@ -6,6 +6,26 @@
 
 ---
 
+## Status implementasi (2026-10-15)
+
+Rekomendasi dokumen ini sudah diimplementasikan (fase 1–4 di §9). Ringkasnya:
+
+| Bagian | File | Status |
+|---|---|---|
+| Setelan dari HP: key 9router, perangkat, PIN | `daemon/server.js` (RPC `configure/devices/revoke/setPin`), `web/ui/settings.js` | ✓ diuji e2e |
+| Env `GITHUB_TOKEN`/`GH_TOKEN` tidak terwariskan ke agen (§7) | `daemon/config.js` (`scrubSecretEnv`) | ✓ diuji e2e (`!env` & `/proc/<pid>/environ`) |
+| Runner headless + supervisor + berhenti saat menganggur | `daemon/runner.js`, `snugcode cloud` | ✓ diuji unit & e2e |
+| Relay: provision mesin cloud, OAuth scope `codespace` | `relay/src/index.js` | ✓ provision diuji e2e; OAuth butuh GitHub asli |
+| Codespaces dari PWA (wizard, secret sealed box, bangunkan/hentikan/hapus) | `web/codespaces.js`, `web/ui/cloud.js`, `shared/sealedbox.js` | ✓ klien diuji dengan mock API; sealed box diuji dengan vektor libsodium |
+| Runner Codespaces & Docker | `.devcontainer/`, `Dockerfile` | ✓ jalur `npm pack` + instal global diuji; belum dijalankan di Codespaces asli |
+
+**Sebelum dipakai pengguna:**
+1. Merge ke `main` — `.devcontainer/install.sh` memasang `github:arfakaisar/snugcode` (main), dan fork baru menyalin isi `main`.
+2. `npm run deploy` agar relay & PWA baru aktif.
+3. Uji sekali di Codespaces asli (risiko §8 yang hanya bisa dibuktikan di sana): secret tersedia di `postStartCommand`, perilaku idle timeout saat agen bekerja, dan izin `codespace` untuk OAuth App snugcode.
+
+---
+
 ## 1. Ringkasan eksekutif
 
 **Kesimpulan utama:** PWA-nya sudah siap. Yang terikat ke PC hanya *tempat daemon berjalan*.

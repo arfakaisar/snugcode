@@ -88,10 +88,15 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/agents.js` | Definisi ulang subagen bawaan (Explore, Plan, general-purpose, claude) dengan effort rendah; modelnya model ringan sesi. |
 | `daemon/checkpoint.js` | Snapshot worktree per prompt (index git sementara) dan rewind. |
 | `daemon/webpush.js` | Web Push terenkripsi (RFC 8291 + VAPID) ke HP saat PWA ditutup. |
+| `daemon/runner.js` | Runner cloud (tanpa PC): `bootstrapCloud` mengisi config/secrets dari env secara idempoten (token mesin, PIN, relay, router, model), `stopRunner` menghentikan runner yang menganggur (Codespaces API dengan token dari HP, atau keluar dari container). |
+| `.devcontainer/`, `Dockerfile` | Runner Codespaces (`postStartCommand` → `snugcode cloud`, data di `/workspaces/.snugcode`) dan image container yang sama untuk VPS/Fly.io. |
 | `relay/src/index.js` | Cloudflare Worker + Durable Objects (`Hub` dan `Pending`) sebagai message broker aman. |
 | `web/app.js` | Titik masuk PWA: boot, service worker, sambung ulang saat aplikasi kembali terlihat. |
 | `web/ui/*.js` | Layar PWA per modul: `dom` (elemen, ikon, toast, header/sheet), `auth` (login & daftar PC), `machine` (koneksi PC, pairing, update, login GitHub PC), `sessions`, `session`, `renderer` (event agen), `run`, `git`, `model-picker`, `push`; state bersama di `state.js` (`app.conn`, `app.current`, `app.me`). |
 | `web/conn.js` | Koneksi terenkripsi HP ↔ PC: pairing PIN, auth perangkat, kanal E2EE teks/biner, RPC. |
+| `web/codespaces.js` | Klien GitHub Codespaces tanpa DOM: cari fork runner, secret terenkripsi (sealed box) khusus repo fork, buat/cari/nyalakan/hentikan/hapus codespace. |
+| `web/ui/cloud.js`, `web/ui/settings.js` | Wizard & siklus hidup runner cloud; setelan mesin dari HP (key 9router, perangkat, PIN). |
+| `shared/sealedbox.js` | `crypto_box_seal` libsodium (X25519 + XSalsa20-Poly1305) untuk Codespaces secrets. |
 | `web/md.js` | Markdown ringan untuk teks agen + `stableCut` untuk render bertahap saat streaming. |
 | `web/index.html` & `style.css` | Struktur dan styling antarmuka mobile bergaya aplikasi chat: tema terang/gelap (token CSS), teks agen serif, drawer, composer kartu, animasi transform/opacity. |
 | `shared/crypto.js` | Implementasi kriptografi bersama (CPace, Ristretto255, X25519, XChaCha20-Poly1305, Scrypt, HKDF). |
@@ -100,6 +105,22 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `scripts/build-web.mjs` | Build script untuk membundel dan menempatkan aset web PWA ke folder relay Cloudflare. |
 | `tsconfig.json` | `tsc --checkJs` untuk seluruh JS (daemon, shared, web); relay punya tsconfig sendiri dengan tipe `wrangler types`. `npm run typecheck`, juga di CI. |
 | `test/` | `e2e-harness.mjs` (setup bersama), `e2e-ui.mjs` (`npm run test:ui`: PWA di Chrome + TUI di pty), `unit.test.js` (`npm test`, juga dijalankan CI di Linux/Windows/macOS), `e2e-agent.mjs` (`npm run test:e2e`: HP → relay lokal → daemon → Agent SDK → mock 9router; butuh `npm run dev:relay`), `worktree.it.mjs` (integrasi git, butuh internet), `e2e-phone.mjs`. |
+
+### Runner cloud (tanpa PC)
+Mesin di relay tidak harus PC. `POST /api/machines/provision` (akun yang login) mendaftarkan mesin `kind: 'cloud'`
+dan mengembalikan token mesinnya ke PWA. PWA lalu:
+1. membuat PIN acak (disimpan di HP untuk pairing otomatis),
+2. menyimpan token mesin, PIN, dan URL relay sebagai **Codespaces user secret** yang dienkripsi di HP dengan
+   sealed box ke public key akun GitHub, dibatasi ke repo fork snugcode milik pengguna,
+3. membuat codespace dari fork itu (`display_name = "snugcode <mid>"`, idle timeout 240 menit sebagai pengaman).
+
+Di codespace, `.devcontainer/start.sh` menjalankan `snugcode cloud`: `bootstrapCloud` membaca env (idempoten —
+perubahan dari HP seperti ganti PIN/key tidak ditimpa saat runner start ulang), menghapus env rahasia, lalu
+menjalankan daemon di bawah **supervisor** (exit 75 = restart/update dari HP, exit 0 = berhenti). Daemon dengan
+`runtime: 'cloud'` tidak menjalankan anti-sleep/autostart, boleh start tanpa key 9router (diisi dari HP lewat RPC
+`configure`), dan memeriksa tiap menit apakah ia menganggur (tidak ada agen/`!perintah`/dev server/tunnel, tidak
+ada HP yang membuka aplikasi). Setelah `idleStopMinutes` (bawaan 30) codespace dihentikan lewat GitHub API dengan
+token `codespace` yang dikirim HP (RPC `runnerConfig`). Saat runner tidur dibuka lagi, PWA menyalakannya (`/start`).
 
 ---
 
@@ -316,6 +337,7 @@ snugcode autostart on
 - [x] Web Push Notification saat PWA ditutup di latar belakang.
 - [x] Kirim gambar / screenshot ke agen dari kamera/galeri HP.
 - [x] AskUserQuestion, mode rencana, checkpoint & rewind per prompt.
+- [x] Runner cloud tanpa PC: GitHub Codespaces (dibuat & dinyalakan dari HP) dan Docker; setelan mesin (key 9router, PIN, perangkat) dari HP.
 - [ ] Integrasi OS Keychain (Windows Credential Manager / macOS Keychain / Linux SecretService) untuk `secrets.json`.
 - [ ] Panel Terminal Interaktif PTY penuh di HP.
 - [ ] Tunnel preview E2EE lewat relay sendiri (Service Worker), pengganti quick tunnel Cloudflare.
