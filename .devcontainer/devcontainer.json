@@ -1,0 +1,16 @@
+// Runner snugcode di GitHub Codespaces: daemon yang sama dengan di PC, dikendalikan dari HP.
+// Codespace ini dibuat otomatis oleh aplikasi (Pengaturan → Pakai cloud) dari fork repo ini; token mesin
+// & PIN datang dari Codespaces secrets (SNUGCODE_MACHINE_TOKEN, SNUGCODE_PAIR_PIN, SNUGCODE_RELAY).
+// Lihat daemon/runner.js dan docs/analisis-pwa-tanpa-pc.md.
+{
+  "name": "snugcode runner",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "hostRequirements": { "cpus": 2 },
+  // /workspaces tetap ada saat codespace dihentikan & di-rebuild: worktree, riwayat sesi, transcript agen.
+  "containerEnv": { "SNUGCODE_HOME": "/workspaces/.snugcode" },
+  "postCreateCommand": "bash .devcontainer/install.sh",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/README.md"] }
+  }
+}
