@@ -83,13 +83,15 @@ const hub = (env, sub) => env.HUB.get(env.HUB.idFromName('u:' + sub));
 const pending = (env, code) => env.PENDING.get(env.PENDING.idFromName('p:' + code));
 const USER_TTL = 30 * 24 * 3600 * 1000;
 
-async function registerMachine(env, user, name) {
+// extra: { kind: 'cloud', provider: 'codespace' | 'container' } untuk runner cloud (tanpa PC).
+async function registerMachine(env, user, name, extra = {}) {
   const mid = randomId(9);
-  await hub(env, user.id).fetch('https://hub/register', { method: 'POST', body: JSON.stringify({ mid, name }) });
+  await hub(env, user.id).fetch('https://hub/register', { method: 'POST', body: JSON.stringify({ mid, name, ...extra }) });
   const token = await signToken(env, { kind: 'machine', sub: user.id, login: user.login, mid });
   return { token, mid, login: user.login };
 }
 
+/** @returns {Promise<{ id: string, login: string, token: string }>} */
 async function githubUser(env, code, redirectUri) {
   const tr = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
@@ -103,8 +105,12 @@ async function githubUser(env, code, redirectUri) {
   });
   if (!ur.ok) throw new Error('Gagal membaca profil GitHub');
   const u = await ur.json();
-  return { id: String(u.id), login: u.login };
+  return { id: String(u.id), login: u.login, token: t.access_token };
 }
+
+const MAX_CLOUD = 3;
+// Runner cloud: repo yang di-fork pengguna untuk Codespaces (berisi .devcontainer snugcode).
+const runnerRepo = (env) => env.RUNNER_REPO || 'arfakaisar/snugcode';
 
 async function authUser(env, request) {
   const h = request.headers.get('authorization') || '';
@@ -123,7 +129,10 @@ export default {
 
     // ---------- Login GitHub (web flow) ----------
     if (path === '/auth/login') {
-      const kind = url.searchParams.get('kind') === 'machine' ? 'machine' : 'user';
+      // gh: token GitHub ber-scope `codespace` untuk PWA (membuat & menyalakan runner Codespaces).
+      const k = url.searchParams.get('kind');
+      const kind = k === 'machine' || k === 'gh' ? k : 'user';
+      if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Mode dev', '<p>Runner Codespaces butuh OAuth App GitHub (GITHUB_CLIENT_ID).</p>');
       const pc = url.searchParams.get('pc') || '';
       if (devAuth && !env.GITHUB_CLIENT_ID) {
         return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
@@ -133,7 +142,7 @@ export default {
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', url.origin + '/auth/callback');
       gh.searchParams.set('state', state);
-      gh.searchParams.set('scope', '');
+      gh.searchParams.set('scope', kind === 'gh' ? 'codespace' : '');
       gh.searchParams.set('allow_signup', 'false');
       return Response.redirect(gh.toString(), 302);
     }
@@ -148,6 +157,7 @@ export default {
           user = await githubUser(env, url.searchParams.get('code'), url.origin + '/auth/callback');
         } else {
           kind = url.searchParams.get('kind');
+          if (kind === 'gh') return page('Mode dev', '<p>Runner Codespaces butuh login GitHub asli.</p>');
           pc = url.searchParams.get('pc') || '';
           const login = (url.searchParams.get('login') || '').trim();
           if (!login) return page('Login dev', '<p>Username kosong.</p>');
@@ -155,6 +165,11 @@ export default {
         }
       } catch (e) {
         return page('Login gagal', `<p>${esc(e.message)}</p>`);
+      }
+      if (kind === 'gh') {
+        // Token tidak disimpan relay: diteruskan ke PWA lewat fragmen URL (tidak pernah dikirim ke server).
+        // Login tetap diperiksa PWA terhadap akun relay-nya sebelum dipakai.
+        return Response.redirect(url.origin + '/#gh=' + encodeURIComponent(user.token) + '&ghlogin=' + encodeURIComponent(user.login), 302);
       }
       if (kind === 'machine') {
         const r = await pending(env, pc).fetch('https://p/claim', { method: 'POST', body: JSON.stringify({ user }) });
@@ -192,6 +207,18 @@ export default {
       const r = await hub(env, u.sub).fetch('https://hub/machines');
       return new Response(r.body, r);
     }
+    // Runner cloud: daftarkan mesin tanpa login browser dari mesin itu sendiri. Token mesin dikembalikan
+    // ke PWA, yang menyimpannya sebagai Codespaces secret (terenkripsi di HP) untuk runner.
+    if (path === '/api/machines/provision' && request.method === 'POST') {
+      const u = await authUser(env, request);
+      if (!u) return json({ error: 'unauthorized' }, 401);
+      const body = await request.json().catch(() => ({}));
+      const provider = body.provider === 'container' ? 'container' : 'codespace';
+      const name = String(body.name || 'Cloud').trim().slice(0, 60) || 'Cloud';
+      const { machines } = await (await hub(env, u.sub).fetch('https://hub/machines')).json();
+      if (machines.filter((m) => m.kind === 'cloud').length >= MAX_CLOUD) return json({ error: `Maksimal ${MAX_CLOUD} runner cloud per akun. Hapus yang lama dulu.` }, 409);
+      return json(await registerMachine(env, { id: u.sub, login: u.login }, name, { kind: 'cloud', provider }));
+    }
     if (path.startsWith('/api/machines/') && request.method === 'DELETE') {
       const u = await authUser(env, request);
       if (!u) return json({ error: 'unauthorized' }, 401);
@@ -213,7 +240,7 @@ export default {
       return hub(env, p.sub).fetch(new Request('https://hub/ws?role=p&mid=' + encodeURIComponent(mid), request));
     }
 
-    if (path === '/api/health') return json({ ok: true, devAuth, ...(legacy ? { legacy: true, publicUrl: env.PUBLIC_URL } : {}) });
+    if (path === '/api/health') return json({ ok: true, devAuth, runnerRepo: runnerRepo(env), ...(legacy ? { legacy: true, publicUrl: env.PUBLIC_URL } : {}) });
     return env.ASSETS.fetch(request);
   },
 };
@@ -273,13 +300,13 @@ export class Hub extends DurableObject {
     const machines = await this.machines();
 
     if (url.pathname === '/register') {
-      const { mid, name } = await request.json();
-      machines[mid] = { name, createdAt: Date.now(), lastSeen: null };
+      const { mid, name, kind, provider } = await request.json();
+      machines[mid] = { name, createdAt: Date.now(), lastSeen: null, ...(kind === 'cloud' ? { kind, provider } : {}) };
       await this.ctx.storage.put('machines', machines);
       return json({ ok: true });
     }
     if (url.pathname === '/machines') {
-      const list = Object.entries(machines).map(([id, m]) => ({ id, name: m.name, online: this.online(id), lastSeen: m.lastSeen }));
+      const list = Object.entries(machines).map(([id, m]) => ({ id, name: m.name, online: this.online(id), lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt }));
       return json({ machines: list });
     }
     if (url.pathname === '/remove') {

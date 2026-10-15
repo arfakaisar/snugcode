@@ -7,6 +7,7 @@
 //   snugcode pin       : ganti PIN / buka kunci setelah salah berkali-kali
 //   snugcode devices   : daftar HP terpasang;  snugcode revoke <id|all>
 //   snugcode status    : ringkasan konfigurasi
+//   snugcode cloud     : runner cloud (Codespaces/container) — konfigurasi dari env, lihat runner.js
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import util from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR } from './config.js';
+import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR, isCloud, scrubSecretEnv } from './config.js';
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
@@ -23,7 +24,7 @@ import { checkUpdate, performUpdate } from './updater.js';
 import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help'];
+const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: snugcode "jelaskan repo ini".
@@ -306,7 +307,9 @@ function autostart() {
 async function start() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  if (!cfg.relayUrl || !sec.machineToken || !sec.routerKey || !sec.prs) {
+  // Runner cloud dikonfigurasi dari HP: key 9router boleh belum ada saat start pertama.
+  if (isCloud(cfg) ? !cfg.relayUrl || !sec.machineToken : !cfg.relayUrl || !sec.machineToken || !sec.routerKey || !sec.prs) {
+    if (isCloud(cfg)) throw new Error('Runner belum dikonfigurasi. Jalankan `snugcode cloud` dengan SNUGCODE_MACHINE_TOKEN.');
     console.log(c.y('Belum setup. Menjalankan setup dulu…\n'));
     await setup();
     return start();
@@ -320,7 +323,7 @@ async function start() {
   fs.writeFileSync(PID_FILE, String(process.pid));
   process.on('exit', () => runningPid() === process.pid && fs.rmSync(PID_FILE, { force: true }));
   // Selalu sinkronkan skrip autostart jika autostart pernah diaktifkan pada sistem ini
-  syncAutostart(CLI, process.execPath);
+  if (!isCloud(cfg)) syncAutostart(CLI, process.execPath);
   if (flags.log) {
     const out = fs.createWriteStream(LOG_FILE, { flags: 'a' });
     const write = (...a) => out.write(new Date().toISOString() + ' ' + util.format(...a).replace(/\x1b\[[0-9;]*m/g, '') + '\n');
@@ -342,6 +345,7 @@ function status() {
   const sec = loadSecrets();
   console.log({
     home: HOME,
+    runtime: cfg.runtime || 'pc',
     relay: cfg.relayUrl,
     account: cfg.relayLogin,
     machine: cfg.machineName,
@@ -494,10 +498,62 @@ function help() {
   snugcode clean            pindai & bersihkan worktree / repo yatim
   snugcode pin              ganti PIN / buka kunci
   snugcode devices          HP yang terpasang;  snugcode revoke <id|all>
-  snugcode status           ringkasan konfigurasi`);
+  snugcode status           ringkasan konfigurasi
+  snugcode cloud            runner cloud tanpa PC (Codespaces/Docker), dikonfigurasi lewat env & HP`);
 }
 
-const commands = { tui, help, setup, login, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+// ---------- runner cloud ----------
+// Isi konfigurasi dari env (idempoten), lalu jalankan daemon di bawah supervisor: restart/update dari
+// HP (exit 75) dan crash menyalakannya lagi; exit 0 (menganggur / shutdown) menghentikan supervisor —
+// container ikut berhenti. --no-supervise: jalankan daemon langsung di proses ini.
+async function cloud() {
+  ensureDirs();
+  const { bootstrapCloud } = await import('./runner.js');
+  const cfg = loadConfig();
+  const sec = loadSecrets();
+  const { relinked, warnings } = await bootstrapCloud(process.env, cfg, sec);
+  saveConfig(cfg);
+  saveSecrets(sec);
+  scrubSecretEnv();
+  console.log(c.b('snugcode cloud') + c.d(` — ${cfg.machineName} · @${cfg.relayLogin || '?'} · ${cfg.runner?.provider}${cfg.runner?.name ? ' ' + cfg.runner.name : ''} · data ${HOME}`));
+  if (relinked) console.log(c.g('✓ Runner ditautkan ke mesin ' + cfg.machineId));
+  for (const w of warnings) console.log(c.y('! ' + w));
+  if (!sec.routerKey) console.log(c.y('! Key 9router belum diisi: buka aplikasi di HP → Pengaturan PC.'));
+  // Container yang dinyalakan ulang memakai PID kecil yang sama lagi: daemon.pid dari sesi lalu bisa
+  // menunjuk proses lain yang kebetulan hidup. Anggap berjalan hanya bila itu memang daemon snugcode.
+  const other = runningPid();
+  if (other && other !== process.pid) {
+    let ours = true;
+    try {
+      ours = fs.readFileSync(`/proc/${other}/cmdline`, 'utf8').includes('cli.js');
+    } catch {}
+    if (ours) return console.log(c.d(`Daemon sudah berjalan (pid ${other}).`));
+    fs.rmSync(PID_FILE, { force: true });
+  }
+  if (flags['no-supervise'] || process.env.SNUGCODE_SUPERVISED === '1') return start();
+  const { RESTART_EXIT_CODE } = await import('./updater.js');
+  let child = null;
+  let stopping = false;
+  let backoff = 1000;
+  const run = () => {
+    const t0 = Date.now();
+    child = spawn(process.execPath, [CLI, 'start'], { stdio: 'inherit', env: { ...process.env, SNUGCODE_SUPERVISED: '1' } });
+    child.on('exit', (code, signal) => {
+      if (stopping || code === 0) return process.exit(0);
+      if (Date.now() - t0 > 60_000) backoff = 1000;
+      const wait = code === RESTART_EXIT_CODE ? 300 : backoff;
+      if (code !== RESTART_EXIT_CODE) {
+        console.log(c.y(`! daemon berhenti (${signal || 'exit ' + code}); dinyalakan lagi dalam ${Math.round(wait / 1000)} detik`));
+        backoff = Math.min(backoff * 2, 30_000);
+      }
+      setTimeout(run, wait);
+    });
+  };
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => ((stopping = true), child?.exitCode === null ? child.kill(sig) : process.exit(0)));
+  run();
+}
+
+const commands = { tui, help, cloud, setup, login, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);

@@ -211,8 +211,18 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
   return { ok: true, commit: commit || 'terbaru', installType: 'npm' };
 }
 
+// Kode keluar yang berarti "nyalakan lagi" bagi supervisor `snugcode cloud` (lihat cli.js).
+export const RESTART_EXIT_CODE = 75;
+
 export function restartDaemon(daemon, { delay = 1000 } = {}) {
   setTimeout(async () => {
+    // Runner cloud: supervisor yang menyalakan ulang (proses terlepas akan ikut mati bersama container).
+    if (process.env.SNUGCODE_SUPERVISED === '1') {
+      try {
+        await daemon?.stop();
+      } catch {}
+      process.exit(RESTART_EXIT_CODE);
+    }
     try {
       if (fs.existsSync(PID_FILE)) {
         try {

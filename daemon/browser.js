@@ -85,7 +85,8 @@ function launch(exe) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'snugcode-cdp-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--hide-scrollbars', '--mute-audio'];
   // Chrome menolak berjalan sebagai root tanpa --no-sandbox (Linux server/WSL/container).
-  if (process.getuid?.() === 0) args.push('--no-sandbox');
+  // Container (runner cloud, Docker) umumnya juga tanpa user namespace untuk sandbox Chrome; /dev/shm-nya kecil.
+  if (process.getuid?.() === 0 || process.env.SNUGCODE_SUPERVISED === '1') args.push('--no-sandbox', '--disable-dev-shm-usage');
   const proc = spawn(exe, [...args, 'about:blank'], { stdio: 'ignore', windowsHide: true });
   const kill = () => {
     proc.kill();

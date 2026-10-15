@@ -923,3 +923,149 @@ test('mode komputer: prompt, pembuatan sesi, izin, dan proteksi kredensial', asy
   }
 });
 
+
+// ---------- runner cloud ----------
+const fakeMachineToken = (mid, login = 'tester') => Buffer.from(JSON.stringify({ kind: 'machine', sub: '1', login, mid })).toString('base64url') + '.sig';
+
+test('scrubSecretEnv: token GitHub & env bootstrap runner tidak terwariskan ke agen', async () => {
+  const { scrubSecretEnv } = await import('../daemon/config.js');
+  const env = { PATH: '/bin', GITHUB_TOKEN: 'a', GH_TOKEN: 'b', GITHUB_CODESPACE_TOKEN: 'c', SNUGCODE_MACHINE_TOKEN: 'd', SNUGCODE_PAIR_PIN: 'e', SNUGCODE_ROUTER_KEY: 'f', POCKETCODE_GITHUB_TOKEN: 'g', SNUGCODE_HOME: '/h', CODESPACE_NAME: 'x', GITHUB_USER: 'u' };
+  scrubSecretEnv(env);
+  assert.deepEqual(Object.keys(env).sort(), ['CODESPACE_NAME', 'GITHUB_USER', 'PATH', 'SNUGCODE_HOME']);
+});
+
+test('bootstrapCloud: config dari env, idempoten, perubahan dari HP tidak ditimpa', async () => {
+  const { bootstrapCloud, decodeMachineToken } = await import('../daemon/runner.js');
+  assert.equal(decodeMachineToken(fakeMachineToken('m1')).mid, 'm1');
+  assert.equal(decodeMachineToken('sampah'), null);
+  const env = { SNUGCODE_MACHINE_TOKEN: fakeMachineToken('m1'), SNUGCODE_PAIR_PIN: 'moon42', SNUGCODE_RELAY: 'https://r.example/', CODESPACE_NAME: 'cs-1', SNUGCODE_IDLE_MINUTES: '45' };
+  const cfg = {};
+  const sec = { devices: {}, pinFails: 0 };
+  const r1 = await bootstrapCloud(env, cfg, sec);
+  assert.equal(r1.relinked, true);
+  assert.equal(cfg.runtime, 'cloud');
+  assert.equal(cfg.machineId, 'm1');
+  assert.equal(cfg.relayLogin, 'tester');
+  assert.equal(cfg.relayUrl, 'https://r.example');
+  assert.deepEqual(cfg.runner, { provider: 'codespace', name: 'cs-1' });
+  assert.equal(cfg.idleStopMinutes, 45);
+  assert.equal(sec.prs, C.bytesToHex(await C.pinToPrs('moon42', 'm1')));
+  assert.ok(!r1.warnings.length, r1.warnings.join());
+
+  // PIN diganti dari HP (RPC setPin) lalu runner start ulang dengan env yang sama: PIN dari HP tetap.
+  sec.prs = 'dari-hp';
+  sec.devices.d1 = { name: 'HP' };
+  sec.routerKey = 'key-dari-hp';
+  const r2 = await bootstrapCloud(env, cfg, sec);
+  assert.equal(r2.relinked, false);
+  assert.equal(sec.prs, 'dari-hp');
+  assert.ok(sec.devices.d1, 'pairing tetap');
+  assert.equal(sec.routerKey, 'key-dari-hp');
+
+  // Env PIN berubah -> diterapkan; mesin baru (token mid lain) -> pairing lama dibuang.
+  await bootstrapCloud({ ...env, SNUGCODE_PAIR_PIN: 'sun123' }, cfg, sec);
+  assert.equal(sec.prs, C.bytesToHex(await C.pinToPrs('sun123', 'm1')));
+  const r3 = await bootstrapCloud({ ...env, SNUGCODE_MACHINE_TOKEN: fakeMachineToken('m2'), CODESPACE_NAME: '' , SNUGCODE_IDLE_EXIT: '1' }, cfg, sec);
+  assert.equal(r3.relinked, true);
+  assert.equal(cfg.machineId, 'm2');
+  assert.deepEqual(sec.devices, {});
+  assert.equal(sec.prs, C.bytesToHex(await C.pinToPrs('moon42', 'm2')), 'PIN env diterapkan ulang untuk mesin baru');
+  assert.equal(cfg.runner.provider, 'container');
+  assert.equal(cfg.runner.idleExit, true);
+
+  await assert.rejects(bootstrapCloud({}, {}, { devices: {} }), /SNUGCODE_MACHINE_TOKEN/);
+  await assert.rejects(bootstrapCloud({ SNUGCODE_MACHINE_TOKEN: 'x.y' }, {}, { devices: {} }), /tidak valid/);
+});
+
+test('stopRunner & checkIdle: runner menganggur dihentikan, yang sibuk tidak', async () => {
+  const { stopRunner } = await import('../daemon/runner.js');
+  const { Daemon } = await import('../daemon/server.js');
+  const calls = [];
+  const fetchImpl = async (url, opts) => (calls.push({ url, auth: opts.headers.authorization }), { ok: true, status: 202 });
+  const cfg = { runtime: 'cloud', runner: { provider: 'codespace', name: 'cs 1' } };
+  assert.equal(await stopRunner(cfg, {}, { fetchImpl }), null, 'tanpa token dari HP: tidak bisa berhenti');
+  assert.equal(await stopRunner(cfg, { runnerToken: 't' }, { fetchImpl }), 'stopped');
+  assert.deepEqual(calls, [{ url: 'https://api.github.com/user/codespaces/cs%201/stop', auth: 'Bearer t' }]);
+  const sec = { runnerToken: 't' };
+  await assert.rejects(stopRunner(cfg, sec, { fetchImpl: async () => ({ ok: false, status: 401 }) }), /tidak berlaku/);
+  assert.equal(sec.runnerToken, undefined);
+  assert.equal(await stopRunner({ runner: { provider: 'container', idleExit: true } }, {}), 'exit');
+
+  // checkIdle: hanya setelah N menit tanpa aktivitas, dan hanya sekali.
+  let active = false;
+  const logs = [];
+  const fake = { config: { runtime: 'cloud', idleStopMinutes: 30, runner: { provider: 'codespace', name: 'cs' } }, secrets: {}, lastActive: 0, isActive: () => active, log: (m) => logs.push(m), saveSecrets() {}, stop() {} };
+  const check = (t) => Daemon.prototype.checkIdle.call(fake, t);
+  assert.equal(await check(10 * 60_000), null, 'belum 30 menit');
+  assert.equal(await check(31 * 60_000), null, 'tanpa token: tidak ada cara berhenti');
+  active = true;
+  await check(40 * 60_000);
+  assert.equal(fake.lastActive, 40 * 60_000, 'aktif: hitungan diulang');
+  active = false;
+  fake.config.idleStopMinutes = 0;
+  assert.equal(await check(200 * 60_000), null, '0 = tidak pernah berhenti');
+});
+
+test('defaultModel: Claude Sonnet didahulukan saat router baru dipasang dari HP', async () => {
+  const { defaultModel } = await import('../daemon/server.js');
+  assert.equal(defaultModel(['ag/gemini-3.8-flash-low', 'cc/claude-opus-5-5', 'cc/claude-sonnet-5-5']), 'cc/claude-sonnet-5-5');
+  assert.equal(defaultModel(['ag/gemini-3.8-flash-low', 'ag/gemini-3-pro-high']), 'ag/gemini-3-pro-high');
+  assert.equal(defaultModel(['x/y']), 'x/y');
+});
+
+test('sealedBox: kompatibel dengan libsodium crypto_box_seal (Codespaces secrets)', async () => {
+  const { sealedBox, openSealedBox } = await import('../shared/sealedbox.js');
+  // Vektor dibuat PyNaCl (libsodium): SealedBox(pk).encrypt(b'dari libsodium').
+  const sk = Uint8Array.from(Buffer.from('Q51sZey2LLuTdK8wnOawoY7wXkg4if6dmK9S3Yr4DRQ=', 'base64'));
+  const ct = Uint8Array.from(Buffer.from('CpPJECbbMMgGtPT105AaDDBQLfhgEN/iDyGvxtQP12UN8yriTUc+LN3IrpIfQsQdFLM92NOqLR5xJmyMohs=', 'base64'));
+  assert.equal(new TextDecoder().decode(openSealedBox(ct, sk)), 'dari libsodium');
+  const { x25519 } = await import('@noble/curves/ed25519.js');
+  const sealed = sealedBox(new TextEncoder().encode('token-mesin'), x25519.getPublicKey(sk));
+  assert.equal(sealed.length, 32 + 16 + 'token-mesin'.length);
+  assert.equal(new TextDecoder().decode(openSealedBox(sealed, sk)), 'token-mesin');
+  assert.throws(() => openSealedBox(sealed, C.randomBytes(32)));
+});
+
+test('Codespaces (PWA): fork, secret terenkripsi untuk repo fork saja, buat/cari/nyalakan runner', async () => {
+  const { Codespaces, displayName, randomPin, SECRET_NAMES } = await import('../web/codespaces.js');
+  const { openSealedBox } = await import('../shared/sealedbox.js');
+  const { x25519 } = await import('@noble/curves/ed25519.js');
+  const sk = C.randomBytes(32);
+  const calls = [];
+  const res = (status, body) => ({ ok: status < 300, status, json: async () => body });
+  const fetchImpl = async (url, opts) => {
+    const p = url.replace('https://api.github.com', '');
+    const body = opts.body ? JSON.parse(opts.body) : null;
+    calls.push({ m: opts.method, p, body, auth: opts.headers.authorization });
+    if (p === '/repos/budi/snugcode') return res(200, { id: 77, full_name: 'budi/snugcode', default_branch: 'main', owner: { login: 'budi' }, parent: { full_name: 'arfakaisar/snugcode' } });
+    if (p === '/repos/sari/snugcode') return res(404, { message: 'Not Found' });
+    if (p.startsWith('/repos/arfakaisar/snugcode/forks')) return res(200, [{ id: 88, full_name: 'sari/snug-fork', owner: { login: 'Sari' } }]);
+    if (p === '/user/codespaces/secrets/public-key') return res(200, { key_id: 'k1', key: C.b64(x25519.getPublicKey(sk)) });
+    if (p.startsWith('/user/codespaces/secrets/')) return res(opts.method === 'DELETE' ? 204 : 201, null);
+    if (p === '/user/codespaces' && opts.method === 'POST') return res(201, { name: 'cs-abc', state: 'Queued' });
+    if (p === '/user/codespaces?per_page=100') return res(200, { codespaces: [{ name: 'cs-lain', display_name: 'x' }, { name: 'cs-abc', display_name: displayName('m1'), state: 'Shutdown' }] });
+    if (p === '/user/codespaces/hilang') return res(404, {});
+    if (p.endsWith('/start')) return res(409, { message: 'already running' });
+    return res(500, { message: 'tak terduga ' + p });
+  };
+  const cs = new Codespaces('tok', { fetchImpl });
+  assert.equal((await cs.findRunnerRepo('budi', 'arfakaisar/snugcode')).id, 77);
+  assert.equal((await cs.findRunnerRepo('sari', 'arfakaisar/snugcode')).id, 88, 'fork yang diganti namanya ditemukan');
+  await cs.setSecrets({ SNUGCODE_MACHINE_TOKEN: 'tok.mesin', SNUGCODE_PAIR_PIN: 'moon42' }, 77);
+  const puts = calls.filter((c) => c.m === 'PUT');
+  assert.deepEqual(puts.map((c) => c.p), ['/user/codespaces/secrets/SNUGCODE_MACHINE_TOKEN', '/user/codespaces/secrets/SNUGCODE_PAIR_PIN']);
+  for (const c of puts) {
+    assert.deepEqual(c.body.selected_repository_ids, [77]);
+    assert.equal(c.body.key_id, 'k1');
+  }
+  assert.equal(new TextDecoder().decode(openSealedBox(C.unb64(puts[0].body.encrypted_value), sk)), 'tok.mesin');
+  assert.ok(!JSON.stringify(calls).includes('moon42'), 'PIN tidak pernah dikirim polos');
+  const c = await cs.create({ id: 77, default_branch: 'main' }, 'm1');
+  assert.equal(c.name, 'cs-abc');
+  assert.deepEqual(calls.at(-1).body, { repository_id: 77, ref: 'main', display_name: 'snugcode m1', idle_timeout_minutes: 240 });
+  assert.equal((await cs.find('m1', 'hilang')).name, 'cs-abc', 'dicari lewat nama tampilan bila nama tersimpan tidak ada');
+  assert.equal(await cs.start('cs-abc'), null, '409 (sudah menyala) bukan error');
+  await cs.deleteSecrets(SECRET_NAMES);
+  assert.ok(calls.every((x) => x.auth === 'Bearer tok'));
+  for (let i = 0; i < 50; i++) assert.match(randomPin(), C.PIN_RE);
+});

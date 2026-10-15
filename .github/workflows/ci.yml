@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
       - name: Cek sintaks semua modul
         shell: bash
-        run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js relay/src/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done
+        run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js relay/src/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done && bash -n .devcontainer/*.sh
       - name: Type check (tsc --checkJs, termasuk relay)
         if: runner.os == 'Linux'
         run: npm ci --prefix relay && npm run typecheck
@@ -51,6 +51,7 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && exit 0; sleep 1; done
           cat wrangler.log; exit 1
       - run: npm run test:e2e
+      - run: npm run test:e2e:cloud
       - run: npm run test:ui
         env:
           SHOTS: ${{ runner.temp }}/shots
