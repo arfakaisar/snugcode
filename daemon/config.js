@@ -93,6 +93,19 @@ export function ensureDirs() {
   for (const d of [HOME, WORKSPACES, SESSIONS_DIR, CLAUDE_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 
+// Runner cloud (Codespaces / container): daemon yang sama, tanpa fitur khusus PC (anti-sleep,
+// autostart) dan bisa dikonfigurasi sepenuhnya dari HP. Lihat `snugcode cloud` di cli.js.
+export const isCloud = (cfg) => cfg?.runtime === 'cloud';
+
+// Kredensial di environment yang tidak boleh terwariskan ke proses agen, Bash-nya, dev server, dan `!perintah`:
+// token GitHub (Codespaces selalu mengisi GITHUB_TOKEN) dan env bootstrap runner cloud.
+export const SECRET_ENV_RE =
+  /^(GITHUB_TOKEN|GH_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GITHUB_CODESPACE_TOKEN|(SNUGCODE|POCKETCODE)_(MACHINE_TOKEN|PAIR_PIN|ROUTER_KEY|GITHUB_TOKEN|RUNNER_TOKEN))$/i;
+export function scrubSecretEnv(env = process.env) {
+  for (const k of Object.keys(env)) if (SECRET_ENV_RE.test(k)) delete env[k];
+  return env;
+}
+
 // Base URL untuk Claude Code: tanpa /v1 karena Claude Code menambahkan /v1/messages sendiri.
 export function anthropicBaseUrl(routerUrl) {
   return routerUrl.replace(/\/+$/, '').replace(/\/v1$/, '');

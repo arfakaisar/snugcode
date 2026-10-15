@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import * as C from '../shared/crypto.js';
-import { loadSecrets, saveSecrets, saveConfig, IPC_PATH } from './config.js';
+import { loadSecrets, saveSecrets, saveConfig, IPC_PATH, isCloud, scrubSecretEnv } from './config.js';
 import { SessionManager } from './sessions.js';
 import { listModels, probeModel, knownModelIds } from './router.js';
 import { lightModel } from '../shared/models.js';
@@ -16,6 +16,7 @@ import { startKeepAwake } from './keepawake.js';
 import { detectProject, saveEnv } from './project.js';
 import { capture } from './browser.js';
 import { checkPush, sendPush } from './webpush.js';
+import { idleMinutes, stopRunner } from './runner.js';
 
 const MAX_PIN_FAILS = 5;
 // Versi protokol daemon <-> klien. 2 = kanal biner + daftar `caps` di info.
@@ -27,7 +28,11 @@ export class Daemon {
     this.secrets = loadSecrets();
     this.log = log;
     this.updaterMeta = getInstallInfo(config);
-    this.keepAwake = startKeepAwake({ log: (m) => this.log(m) });
+    // Token GitHub di env (mis. GITHUB_TOKEN dari Codespaces) & env bootstrap runner tidak boleh
+    // terwariskan ke agen, Bash-nya, dev server, atau `!perintah`.
+    scrubSecretEnv();
+    // Runner cloud tidak punya "PC yang tertidur".
+    this.keepAwake = isCloud(config) ? null : startKeepAwake({ log: (m) => this.log(m) });
     this.conns = new Map();
     this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => (process.env.SNUGCODE_DEBUG || process.env.POCKETCODE_DEBUG) && log(m), notify: (s, msg, o) => this.notify(s, msg, o) });
     this.backoff = 1000;
@@ -50,6 +55,41 @@ export class Daemon {
     this.listenLocal();
     this.github.startChecks();
     this.startUpdateChecks();
+    if (isCloud(this.config)) this.startIdleWatch();
+  }
+
+  // ---------- Runner cloud: berhenti sendiri saat menganggur ----------
+  // Menganggur = tidak ada agen/perintah/dev server/tunnel yang berjalan dan tidak ada HP yang sedang
+  // membuka aplikasi (atau terminal tersambung). Kuota Codespaces / biaya container tidak terbuang.
+  startIdleWatch() {
+    this.lastActive = Date.now();
+    clearInterval(this.idleTimer);
+    this.idleTimer = setInterval(() => this.checkIdle(), 60_000);
+    this.idleTimer.unref?.();
+  }
+
+  isActive() {
+    return this.sessions.busy() || this.locals.size > 0 || [...this.conns.values()].some((c) => c.ready && c.visible);
+  }
+
+  async checkIdle(now = Date.now()) {
+    const mins = idleMinutes(this.config);
+    if (this.isActive() || !(mins > 0)) return (this.lastActive = now), null;
+    if (now - this.lastActive < mins * 60_000 || this.idleStopping) return null;
+    this.idleStopping = true;
+    try {
+      const how = await stopRunner(this.config, this.secrets);
+      if (how) this.log(`◆ Runner menganggur ${mins} menit: dihentikan (${how === 'exit' ? 'daemon keluar' : 'Codespaces'}). Buka aplikasi untuk menyalakannya lagi.`);
+      if (how === 'exit') setTimeout(() => Promise.resolve(this.stop()).finally(() => process.exit(0)), 50);
+      return how;
+    } catch (e) {
+      this.log('! gagal menghentikan runner: ' + e.message);
+      this.saveSecrets();
+      return null;
+    } finally {
+      this.lastActive = now; // gagal / tanpa cara berhenti: coba lagi satu periode kemudian
+      this.idleStopping = false;
+    }
   }
 
   // Menunggu (singkat) dev server & tunnel milik sesi benar-benar mati.
@@ -58,6 +98,7 @@ export class Daemon {
     this.keepAwake?.stop();
     clearInterval(this.ping);
     clearInterval(this.updateTimer);
+    clearInterval(this.idleTimer);
     this.ws?.close();
     this.ipc?.close();
     return this.sessions?.close();
@@ -190,6 +231,16 @@ function need(v, name, { type = 'string', max = 100_000 } = {}) {
 }
 const opt = (v, name, o) => (v == null || v === '' ? undefined : need(v, name, o));
 
+// Model default saat router baru dipasang dari HP: Claude Sonnet/Opus bila ada, lalu Claude lain, lalu yang pertama.
+export function defaultModel(ids) {
+  const pref = [/^cc\/claude-sonnet/, /^cc\/claude-opus/, /^(cc\/)?claude-/, /claude/, /gemini.*pro/, /gemini/];
+  for (const re of pref) {
+    const hit = ids.find((id) => re.test(id));
+    if (hit) return hit;
+  }
+  return ids[0];
+}
+
 // Tabel metode RPC: (conn, params) -> hasil. `conn.d` = Daemon, `conn.big` = kanal biner (tanpa batas 1MB relay).
 const RPC = {
   info: (c) => c.info(),
@@ -223,6 +274,81 @@ const RPC = {
     saveConfig(c.d.config);
     return c.info();
   },
+  // ---------- setelan dari HP (dulu hanya `snugcode setup` / `pin` / `devices` / `revoke`) ----------
+  // Key 9router dikirim lewat kanal E2EE dan tidak pernah dikembalikan ke klien.
+  async configure(c, p) {
+    const cfg = c.d.config;
+    const sec = c.d.secrets;
+    const url = p.routerUrl != null && p.routerUrl !== '' ? need(p.routerUrl, 'URL router', { max: 300 }).trim().replace(/\/+$/, '') : cfg.routerUrl;
+    if (!/^https?:\/\/[^\s/]+/i.test(url || '')) throw new Error('URL router harus diawali http:// atau https://');
+    const key = p.routerKey ? need(p.routerKey, 'key 9router', { max: 1000 }).trim() : sec.routerKey;
+    if (!key) throw new Error('Key 9router kosong');
+    // Divalidasi dulu: key/URL yang salah tidak menimpa konfigurasi yang sedang berjalan.
+    let models;
+    try {
+      models = await listModels({ routerUrl: url }, key, { fresh: true });
+    } catch (e) {
+      throw new Error(/\b40[13]\b/.test(e.message) ? 'Key ditolak router (401). Periksa lagi key-nya.' : 'Router tidak bisa dihubungi: ' + e.message);
+    }
+    if (!models.length) throw new Error('Router tidak punya model yang mendukung tool calling.');
+    const urlChanged = url !== cfg.routerUrl;
+    cfg.routerUrl = url;
+    sec.routerKey = key;
+    if (!cfg.model || !models.some((m) => m.id === cfg.model)) cfg.model = defaultModel(models.map((m) => m.id));
+    saveConfig(cfg);
+    c.d.saveSecrets();
+    if (urlChanged) c.d.sessions.resetRouter();
+    return c.info();
+  },
+  devices: (c) =>
+    Object.entries(c.d.secrets.devices).map(([id, d]) => ({
+      id,
+      name: d.name,
+      pairedAt: d.pairedAt,
+      lastSeen: d.lastSeen,
+      push: !!d.push,
+      current: id === c.deviceId,
+      online: [...c.d.conns.values()].some((x) => x.ready && x.deviceId === id),
+    })),
+  revoke(c, p) {
+    const devs = c.d.secrets.devices;
+    const ids = p.id === 'all' ? Object.keys(devs) : [need(p.id, 'id', { max: 64 })];
+    for (const id of ids) {
+      if (!devs[id]) throw new Error('Perangkat tidak ditemukan');
+      delete devs[id];
+    }
+    c.d.saveSecrets();
+    // Diputus setelah balasan terkirim (perangkat yang mencabut dirinya sendiri tetap menerima jawaban).
+    setTimeout(() => {
+      for (const x of c.d.conns.values()) if (ids.includes(x.deviceId)) c.d.kick(x.cid, 'revoked');
+    }, 300);
+    return true;
+  },
+  async setPin(c, p) {
+    const pin = need(p.pin, 'PIN', { max: 12 });
+    if (!C.PIN_RE.test(pin)) throw new Error('PIN harus 6–12 huruf/angka.');
+    const s = c.d.secrets;
+    s.prs = C.bytesToHex(await C.pinToPrs(pin, c.d.config.machineId));
+    s.pinFails = 0;
+    c.d.saveSecrets();
+    return true;
+  },
+  // Runner cloud: token Codespaces milik HP (scope `codespace`) agar runner bisa menghentikan dirinya
+  // sendiri saat menganggur, dan batas menit menganggur. Disimpan di secrets.json (tertutup bagi agen).
+  runnerConfig(c, p) {
+    const cfg = c.d.config;
+    if (!isCloud(cfg)) throw new Error('Hanya untuk runner cloud');
+    if (p.token !== undefined) {
+      if (p.token) c.d.secrets.runnerToken = need(p.token, 'token', { max: 400 });
+      else delete c.d.secrets.runnerToken;
+      c.d.saveSecrets();
+    }
+    if (p.idleStopMinutes != null) {
+      cfg.idleStopMinutes = Math.max(0, Math.min(24 * 60, need(p.idleStopMinutes, 'menit', { type: 'number' })));
+      saveConfig(cfg);
+    }
+    return c.info().runner;
+  },
   setSessionModel(c, p) {
     const s = c.d.sessions.get(p.id);
     if (s.status === 'running') throw new Error('Tunggu agen selesai (atau Stop) sebelum ganti model.');
@@ -235,7 +361,7 @@ const RPC = {
     return s.summary();
   },
   repos(c, p) {
-    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Jalankan `snugcode setup` di PC.');
+    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Login dari Pengaturan PC → GitHub di aplikasi, atau jalankan `snugcode login` di PC.');
     return listRepos(c.d.secrets.githubToken, opt(p.q, 'q', { max: 200 }), c.d.config.githubLogin);
   },
   async branches(c, p) {
@@ -434,6 +560,11 @@ class RpcConn {
       version: this.d.updaterMeta?.version || '0.1.0',
       commit: this.d.updaterMeta?.commit || 'main',
       preventSleep: this.d.keepAwake?.active?.() ?? false,
+      // 'pc' | 'cloud' (Codespaces / container). PWA menyembunyikan fitur khusus PC & menampilkan setelan runner.
+      runtime: c.runtime || 'pc',
+      machineId: c.machineId,
+      routerConfigured: !!this.d.secrets.routerKey,
+      runner: isCloud(c) ? { ...(c.runner || {}), idleStopMinutes: idleMinutes(c), autoStop: !!this.d.secrets.runnerToken || !!c.runner?.idleExit } : null,
       // Fitur protokol yang didukung daemon ini: klien memeriksa ini, bukan menebak dari pesan error.
       proto: PROTO,
       caps: Object.keys(RPC),
