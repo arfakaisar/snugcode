@@ -11,6 +11,7 @@ import { reattach } from './session.js';
 import { sessionSub, showSessions, showSessionsMeta } from './sessions.js';
 import { cloudPin, connectButton, ghcs, idleSheet, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
 import { routerSheet, settingsItems } from './settings.js';
+import { progress } from './progress.js';
 
 // ---------- Koneksi ke satu PC ----------
 /** @param {{ id: string, name?: string, kind?: string, provider?: string }} m @param {{ sid?: string }} [opts] */
@@ -20,13 +21,20 @@ export function openMachine(m, { sid } = {}) {
   app.current = { m, resumeSid: sid };
   store.set('last', { mid: m.id, sid });
   const msg = h('div', { class: 'muted' });
-  const showStatus = (title, text, busy = true) =>
-    ui.view(h('div', { class: 'hero center' }, busy ? mascot('think xl') : h('div', { class: 'lockicon' }, ic('monitor')), h('h1', { class: 'serif' + (busy ? ' shimmer' : '') }, title), msg, text ? h('p', { class: 'dim small' }, text) : null));
+  const showStatus = (title, text, busy = true, extra = null) =>
+    ui.view(h('div', { class: 'hero center' }, busy ? mascot('think xl') : h('div', { class: 'lockicon' }, ic('monitor')), h('h1', { class: 'serif' + (busy ? ' shimmer' : '') }, title), msg, text ? h('p', { class: 'dim small' }, text) : null, extra));
   ui.set(m.name, { sub: 'menghubungkan…', back: goMachines, dot: 'busy' });
-  msg.textContent = 'Membuka kanal terenkripsi ke PC…';
-  showStatus('Menghubungkan');
+  const connecting = progress('connect', [
+    { id: 'relay', label: 'Menghubungi relay', est: 1 },
+    { id: 'auth', label: 'Membuka kanal terenkripsi', est: 2 },
+  ]);
+  app.current.connecting = connecting;
+  showStatus('Menghubungkan', null, true, connecting.el);
   app.conn.on('state', (s) => {
+    app.current?.watch?.(s);
+    if (s === 'online') (connecting.step('auth'), app.current.wakeProg?.step('auth'));
     if (s === 'offline') {
+      connecting.stop();
       ui.dot('off');
       ui.sub('offline');
       if (!app.current.ready && isCodespace(m)) return wakeScreen(m, msg, showStatus);
@@ -44,6 +52,7 @@ export function openMachine(m, { sid } = {}) {
       if (pin && !app.current.autoPaired) {
         app.current.autoPaired = true;
         msg.textContent = 'Memasangkan HP ini ke runner…';
+        connecting.step('auth', 'memasangkan HP (pertama kali)');
         app.conn.pair(pin).then((r) => r.ok || showPin(m));
       } else showPin(m);
     }
@@ -53,6 +62,10 @@ export function openMachine(m, { sid } = {}) {
   });
   app.conn.on('ready', (info) => {
     ui.dot('on');
+    connecting.done();
+    app.current.wakeProg?.done();
+    app.current.wakeProg = null;
+    app.current.watch?.('ready');
     const first = !app.current.ready;
     app.current.ready = true;
     app.current.info = info;
@@ -83,11 +96,19 @@ export function openMachine(m, { sid } = {}) {
 function wakeScreen(m, msg, showStatus) {
   if (app.current.waking) return;
   app.current.waking = true;
-  msg.textContent = 'Runner sedang tidur.';
-  showStatus('Menyalakan runner', 'Codespace dinyalakan di GitHub (±30–60 detik). Halaman ini tersambung otomatis begitu runner siap.');
-  wakeRunner(m, (t) => (msg.textContent = 'Codespace: ' + t))
+  msg.textContent = '';
+  const wp = progress('cloud-wake', [
+    { id: 'boot', label: 'Menyalakan codespace', est: 35 },
+    { id: 'start', label: 'Menyalakan snugcode', est: 10 },
+    { id: 'auth', label: 'Menyambungkan HP', est: 3 },
+  ]);
+  app.current.wakeProg = wp;
+  showStatus('Menyalakan runner', 'Halaman ini tersambung otomatis begitu runner siap.', true, wp.el);
+  wakeRunner(m, (t, phase) => wp.step(phase, t))
     .then((ok) => {
       if (ok || app.current?.m.id !== m.id || app.current.ready) return;
+      wp.stop();
+      app.current.wakeProg = null;
       app.current.waking = false;
       showStatus('Runner tidur', 'Runner berhenti sendiri saat tidak dipakai. Hubungkan GitHub Codespaces di HP ini untuk menyalakannya.', false);
       $view()?.querySelector('.hero')?.append(connectButton());
@@ -95,7 +116,8 @@ function wakeScreen(m, msg, showStatus) {
     .catch((e) => {
       if (app.current?.m.id !== m.id) return;
       app.current.waking = false;
-      msg.textContent = e.message;
+      wp.fail(e.message);
+      app.current.wakeProg = null;
       ui.sub('gagal menyalakan');
     });
 }
@@ -168,16 +190,32 @@ export function showPin(m) {
 }
 
 // ---------- Pembaruan PC Otomatis (dari HP) ----------
-async function runUpdate(btn, after) {
-  const done = busyButton(btn, 'Memperbarui…');
+// Progress: pasang (balasan RPC update) → daemon restart → tersambung lagi (event ready).
+async function runUpdate(_btn, after) {
+  const where = here().split(' ')[0];
+  const p = progress('pc-update', [
+    { id: 'install', label: 'Mengunduh & memasang pembaruan', est: 90 },
+    { id: 'restart', label: 'Menyalakan ulang snugcode', est: 8 },
+    { id: 'reconnect', label: 'Menyambungkan lagi', est: 4 },
+  ]);
+  const closeBtn = h('button', { class: 'btn', style: 'margin-top:14px', onclick: () => ui.closeSheet() }, 'Tutup — tetap berjalan');
+  ui.sheet(ui.head('Memperbarui snugcode', { sub: app.current.m.name }), p.el, h('div', { class: 'fine' }, `Sesi yang sedang berjalan di ${where} dihentikan dulu agar file tidak terkunci.`), closeBtn);
+  const cur = app.current;
   try {
     haptic(20);
     const res = await app.conn.call('update');
-    haptic(25);
-    toast(res.message || 'Pembaruan berhasil! PC sedang me-restart…', false, 7000);
-    after?.();
+    p.step('restart', res.commit ? 'versi ' + res.commit : '');
+    cur.watch = (ev) => {
+      if (ev === 'reconnecting' || ev === 'online' || ev === 'offline') p.step('reconnect');
+      if (ev !== 'ready') return;
+      cur.watch = null;
+      p.done('snugcode diperbarui');
+      haptic(25);
+      after?.();
+      setTimeout(() => closeBtn.isConnected && ui.closeSheet(), 1500);
+    };
   } catch (err) {
-    done();
+    p.fail('Gagal: ' + err.message);
     toast('Pembaruan gagal: ' + err.message, true, 6000);
   }
 }
