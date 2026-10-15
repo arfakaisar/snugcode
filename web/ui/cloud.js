@@ -4,7 +4,7 @@ import { store } from '../conn.js';
 import { Codespaces, SECRET_NAMES, randomPin, stateText } from '../codespaces.js';
 import { app } from './state.js';
 import { api } from './auth.js';
-import { busyButton, h, haptic, ic, loading, mascot, toast, ui } from './dom.js';
+import { busyButton, copyText, h, haptic, ic, loading, mascot, toast, ui } from './dom.js';
 
 /** @returns {{ token: string, login: string } | null} */
 export const ghcs = () => store.get('ghcs');
@@ -70,7 +70,10 @@ export async function cloudSetupSheet() {
     h('b', {}, 'Agen berjalan di GitHub Codespaces'),
     'Mesin Linux pribadi di akun GitHub-mu: git, Node, Python, dan Chromium untuk preview. HP tetap hanya remote, dan agen terus bekerja walau HP dikunci.',
   );
-  const fine = h('div', { class: 'fine' }, 'Gratis 120 core-hour/bulan untuk akun GitHub Free (±60 jam runner 2-core). Runner berhenti sendiri setelah 30 menit tidak dipakai.');
+  const fine = h('div', {},
+    h('div', { class: 'fine' }, 'Gratis 120 core-hour/bulan untuk akun GitHub Free (±60 jam runner 2-core). Runner berhenti sendiri setelah 30 menit tidak dipakai.'),
+    dockerOption(),
+  );
   const cs = client();
   if (!cs)
     return body.replaceChildren(intro,
@@ -108,6 +111,31 @@ export async function cloudSetupSheet() {
   } catch (e) {
     body.replaceChildren(h('div', { class: 'err' }, e.message), h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => (e.status === 401 ? connectCodespaces('create') : cloudSetupSheet()) }, ic('refresh'), e.status === 401 ? 'Hubungkan lagi' : 'Coba lagi'));
   }
+}
+
+// Runner di server sendiri (VPS, Fly.io, Railway, NAS): image Docker yang sama, token & PIN dari HP.
+function dockerOption() {
+  const out = h('div', {});
+  const btn = h('button', { class: 'btn', style: 'margin-top:10px' }, ic('term'), 'Buat perintah Docker');
+  btn.onclick = async () => {
+    const done = busyButton(btn, 'Mendaftarkan…');
+    try {
+      const prov = await api('/api/machines/provision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Server', provider: 'container' }) });
+      if (prov.error) throw new Error(prov.error);
+      const pin = randomPin();
+      store.set('cloudpin.' + prov.mid, pin);
+      const cmd = `docker build -t snugcode https://github.com/${await runnerRepo()}.git && docker run -d --name snugcode --restart unless-stopped -v snugcode:/data -e SNUGCODE_RELAY=${location.origin} -e SNUGCODE_PAIR_PIN=${pin} -e SNUGCODE_MACHINE_TOKEN=${prov.token} snugcode`;
+      btn.remove();
+      out.replaceChildren(
+        h('div', { class: 'muted small' }, 'Jalankan di server (Docker). Perintah ini berisi token mesin — jangan dibagikan. Server muncul di daftar mesin begitu container menyala, dan HP ini langsung terpasang.'),
+        h('div', { class: 'copyline' }, h('code', {}, cmd), h('button', { class: 'copybtn', onclick: async (e) => (await copyText(cmd)) && (e.currentTarget.classList.add('done'), toast('Perintah disalin')) }, ic('copy'), 'salin')),
+      );
+    } catch (e) {
+      done();
+      toast(e.message, true);
+    }
+  };
+  return h('details', { class: 'addpc' }, h('summary', {}, ic('term'), 'Server sendiri (Docker / VPS)'), h('div', { class: 'muted small' }, 'Tanpa Codespaces: jalankan runner di server mana pun yang punya Docker.'), btn, out);
 }
 
 async function recreate(m) {
@@ -154,6 +182,8 @@ async function createRunner(body, repo, user) {
     cur.done();
     haptic(25);
     toast('Runner siap · @' + user.login);
+    // Wizard sudah ditutup dan pengguna sedang di layar lain: cukup kabari, jangan pindahkan layarnya.
+    if (!body.isConnected) return;
     ui.closeSheet();
     (await import('./machine.js')).openMachine(m);
   } catch (e) {
@@ -205,6 +235,8 @@ export async function wakeRunner(m, onState) {
     if (app.current?.m.id !== m.id || app.current.ready) return clearInterval(t);
     const now = await client()?.get(c.name).catch(() => null);
     if (now) onState?.(stateText(now.state));
+    // Dibuka tepat saat runner sedang berhenti sendiri: /start ditolak (409), jadi nyalakan setelah benar-benar berhenti.
+    if (now?.state === 'Shutdown') await client().start(c.name).catch(() => {});
   }, 5000);
   return true;
 }

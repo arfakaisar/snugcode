@@ -4,7 +4,7 @@
 
 <br>
 
-**Coding agent Claude Code yang berjalan di PC-mu, dikendalikan penuh dari HP.**<br>
+**Coding agent Claude Code yang berjalan di PC-mu — atau di cloud tanpa PC — dikendalikan penuh dari HP.**<br>
 Analisis repo, edit kode, jalankan test, preview web app, commit, push, dan buat Pull Request dari mana saja.
 
 <br>
@@ -15,7 +15,7 @@ Analisis repo, edit kode, jalankan test, preview web app, commit, push, dan buat
 [![Platform](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3936?style=flat-square)](#instalasi-di-pc)
 [![PWA](https://img.shields.io/badge/HP-PWA%20Android%20%C2%B7%20iOS-3a3936?style=flat-square)](#pakai-dari-hp)
 
-**[Instalasi](#instalasi-di-pc)** &nbsp;·&nbsp; [Demo](#lihat-cara-kerjanya) &nbsp;·&nbsp; [Fitur](#fitur) &nbsp;·&nbsp; [Arsitektur](#arsitektur) &nbsp;·&nbsp; [Terminal](#terminal-snugcode) &nbsp;·&nbsp; [Keamanan](#keamanan) &nbsp;·&nbsp; [FAQ](#faq)
+**[Instalasi](#instalasi-di-pc)** &nbsp;·&nbsp; **[Tanpa PC](#tanpa-pc-runner-cloud)** &nbsp;·&nbsp; [Demo](#lihat-cara-kerjanya) &nbsp;·&nbsp; [Fitur](#fitur) &nbsp;·&nbsp; [Arsitektur](#arsitektur) &nbsp;·&nbsp; [Terminal](#terminal-snugcode) &nbsp;·&nbsp; [Keamanan](#keamanan) &nbsp;·&nbsp; [FAQ](#faq)
 
 <sub>Dulu bernama <b>pocketcode</b> — lihat <a href="#migrasi-dari-pocketcode">Migrasi dari pocketcode</a>.</sub>
 
@@ -306,6 +306,45 @@ Setiap sesi mendapat folder `~/.snugcode/workspaces/<owner>__<repo>/s-<id>` deng
 
 ---
 
+## Tanpa PC: runner cloud
+
+Tidak punya PC yang bisa terus menyala? Semua bisa dari HP: daemon snugcode yang **sama** berjalan di
+**GitHub Codespaces milikmu**, dan aplikasi memperlakukannya seperti PC biasa. Tidak ada yang perlu
+dipasang atau diketik di komputer mana pun.
+
+```mermaid
+flowchart LR
+    A["Login GitHub<br/>di aplikasi"] --> B["Pakai cloud<br/>— tanpa PC"]
+    B --> C["Izinkan<br/>Codespaces"]
+    C --> D["Fork repo<br/><i>(sekali)</i>"]
+    D --> E["Buat runner<br/><i>±3–5 menit pertama</i>"]
+    E --> F["Tempel key 9router<br/>& login GitHub"]
+```
+
+1. Login di aplikasi → layar kosong menampilkan **Pakai cloud — tanpa PC** (atau *Tambah PC lain* → *Buat runner cloud*).
+2. **Hubungkan GitHub Codespaces** (izin `codespace`; token hanya disimpan di HP, tidak di server snugcode).
+3. Fork repo ini sekali. Codespace runner dibuat dari fork itu.
+4. **Buat runner**: aplikasi mendaftarkan mesin, menyimpan token mesin & PIN acak sebagai *Codespaces secret*
+   yang **dienkripsi di HP** (sealed box), lalu membuat codespace. HP langsung terpasang tanpa mengetik PIN.
+5. Tempel **key 9router** (diuji dulu sebelum disimpan) dan login GitHub untuk clone/push — semuanya dari HP.
+
+| | |
+|---|---|
+| **Biaya** | Kuota gratis GitHub: 120 core-hour/bulan untuk akun Free (±60 jam runner 2-core), 180 untuk Pro. |
+| **Berhenti sendiri** | Setelah 30 menit tidak dipakai (bisa 15 menit – 2 jam, atau mati) — tidak ada agen/perintah/dev server berjalan dan aplikasi tidak dibuka. |
+| **Menyala lagi** | Otomatis saat kamu membuka runner di aplikasi (±30–60 detik). Sesi, worktree, dan riwayat tetap ada di `/workspaces/.snugcode`. |
+| **Fitur** | Sama dengan PC: agen, izin, Run & Preview (Chromium terpasang), git/PR, Web Push, update jarak jauh. |
+
+**Server sendiri (Docker / VPS):** di wizard yang sama, *Server sendiri* membuat perintah `docker build … && docker run …`
+lengkap dengan token mesin & PIN (lihat [`Dockerfile`](Dockerfile)). Untuk penyedia lain, jalankan `snugcode cloud`
+dengan env dari [`daemon/runner.js`](daemon/runner.js).
+
+> [!NOTE]
+> Di mode cloud, kode dan key 9router berada di mesin penyedia runner (GitHub, atau servermu). Relay tetap
+> tidak bisa membaca apa pun: pesan tetap E2EE, dan PIN maupun key tidak pernah lewat relay.
+
+---
+
 ## Instalasi di PC
 
 **Kebutuhan:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), akun GitHub, dan **API key 9router**.
@@ -431,6 +470,7 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 | `snugcode devices` | Daftar HP yang sudah dipasangkan |
 | `snugcode revoke <id\|all>` | Cabut akses HP |
 | `snugcode status` | Ringkasan konfigurasi |
+| `snugcode cloud` | Runner cloud tanpa PC (Codespaces/Docker): konfigurasi dari env, setelan lain dari HP |
 
 <details>
 <summary><b>Lokasi data di PC</b></summary>
@@ -478,7 +518,8 @@ sequenceDiagram
 
 - **Relay zero-knowledge** — tidak pernah melihat PIN, isi percakapan, kode, key 9router, atau token GitHub.
 - **Brute-force dibatasi** — setelah 5 kali PIN salah, pairing terkunci sampai `snugcode pin` dijalankan di PC.
-- **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen.
+- **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen. `GITHUB_TOKEN`/`GH_TOKEN` yang ada di environment (mis. dari Codespaces) dibuang saat daemon start, jadi tidak terwariskan ke agen, Bash, dev server, atau `!perintah`.
+- **Setelan dari HP** — key 9router, PIN, dan daftar HP bisa diatur dari aplikasi (Pengaturan PC). Key dikirim lewat kanal E2EE, divalidasi ke router dulu, dan tidak pernah dikembalikan ke klien.
 - **Key 9router tidak pernah masuk ke proses agen.** Proses `claude` (dan Bash agen) hanya memegang token lokal acak; loopback proxy (`127.0.0.1`) menukarnya dengan key asli. Request tanpa token itu ditolak, jadi program lain di PC tidak bisa memakai key-mu.
 - **`~/.snugcode` tertutup untuk agen** — Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
 - **Tanpa izin hanya yang aman** — tool baca lolos otomatis hanya di dalam worktree sesi. Membaca di luar worktree dan `WebFetch` meminta izin (atau auto-izin), agar prompt injection dari README/issue tidak bisa diam-diam mengirim file ke luar.
@@ -498,7 +539,9 @@ snugcode/
 ├── web/         # PWA (vanilla JS, tanpa framework)
 ├── shared/      # kriptografi (CPace, X25519, XChaCha20), model event & normalisasi model
 ├── scripts/     # build PWA ke relay, ikon, gambar dokumentasi
-├── test/        # unit, integrasi worktree, simulasi HP end-to-end, uji UI
+├── test/        # unit, integrasi worktree, simulasi HP end-to-end, uji UI, runner cloud
+├── .devcontainer/  # runner Codespaces (`snugcode cloud` saat codespace menyala)
+├── Dockerfile   # runner di container (VPS, Fly.io, …)
 └── docs/        # gambar, GIF & mockup dokumentasi
 ```
 
@@ -521,6 +564,7 @@ npm test                                   # unit test
 npm run typecheck                          # tsc --checkJs: daemon, shared, PWA, relay
 node test/e2e-phone.mjs                    # simulasi HP: pairing → sesi → agen → git
 npm run test:e2e                           # HP → relay dev → daemon → Agent SDK → mock 9router (tanpa key asli)
+npm run test:e2e:cloud                     # runner cloud: provision → `snugcode cloud` → pairing otomatis → setelan dari HP
 npm run test:ui                            # PWA hasil build di Chrome + TUI di pseudo-terminal (setelah build:web)
 node test/worktree.it.mjs                  # skenario branch/worktree (butuh internet)
 npm run docs:images                        # buat ulang gambar & GIF README (butuh relay dev berjalan)
@@ -602,6 +646,12 @@ Tidak. snugcode memakai `CLAUDE_CONFIG_DIR` sendiri di `~/.snugcode/claude`.
 </details>
 
 <details>
+<summary><b>Bisa dipakai tanpa PC sama sekali?</b></summary>
+
+Bisa — lihat [Tanpa PC: runner cloud](#tanpa-pc-runner-cloud). Runner berjalan di GitHub Codespaces milikmu (atau server Docker) dan diatur sepenuhnya dari HP. Log runner: `/workspaces/.snugcode/cloud.log` (menu runner → *Buka codespace di GitHub*).
+</details>
+
+<details>
 <summary><b>Screenshot/preview tidak jalan.</b></summary>
 
 Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExecutable` di `~/.snugcode/config.json`). Preview memakai `cloudflared`, yang diunduh otomatis ke `~/.snugcode/bin`.
@@ -618,6 +668,7 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 - [x] Web Push, kirim gambar, mode rencana, checkpoint & rewind
 - [x] Update jarak jauh 1-tap
 - [x] Tema gelap & terang
+- [x] Runner cloud tanpa PC (GitHub Codespaces / Docker), semua setelan dari HP
 - [ ] Integrasi keychain OS untuk `secrets.json`
 - [ ] Terminal interaktif (PTY) penuh di HP
 - [ ] Tunnel preview E2EE lewat relay sendiri
