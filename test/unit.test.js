@@ -488,7 +488,8 @@ test('procs: proses latar belakang, deteksi port dari log, stop', async () => {
   const pm = new ProcManager({ cwd: dir, onChange: (p) => events.push(p.status), onOut: () => {} });
   try {
     await pm.start('node srv.js', 'web');
-    assert.equal(await pm.waitPort('web', 10000), 5199);
+    // Batas bawaan waitPort (30 dtk): di runner Windows, start PowerShell + node bisa lebih dari 10 dtk.
+    assert.equal(await pm.waitPort('web'), 5199);
     assert.match(pm.logs('web'), /Local: {3}http:\/\/localhost:5199\/ PORT=\d+/);
     await assert.rejects(pm.start('node -v', 'web'), /masih berjalan/);
     await pm.stopAll();
