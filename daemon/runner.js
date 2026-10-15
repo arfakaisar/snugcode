@@ -122,3 +122,22 @@ export async function stopRunner(cfg, sec, { fetchImpl = fetch } = {}) {
   if (r.idleExit) return 'exit';
   return null;
 }
+
+// Laporkan tahap/kegagalan runner ke relay (tampil di aplikasi HP selama runner belum tersambung).
+// Hanya bila token mesin tersedia; kegagalan jaringan diabaikan.
+export async function reportStatus(env, stage, msg, { fetchImpl = fetch } = {}) {
+  const token = env1(env, 'MACHINE_TOKEN');
+  if (!token) return false;
+  const relay = (env1(env, 'RELAY') || DEFAULT_RELAY_URL).replace(/\/+$/, '');
+  try {
+    const r = await fetchImpl(relay + '/api/runner/status', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify({ stage, msg: String(msg).slice(-400) }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}

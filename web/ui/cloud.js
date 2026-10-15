@@ -193,20 +193,32 @@ async function createRunner(body, repo, user) {
   }
 }
 
-// Tunggu codespace menyala dan daemon-nya tersambung ke relay.
+// Tahap yang dilaporkan runner sendiri (.devcontainer/lib.sh → /api/runner/status) sejak `since`.
+export const bootOf = (m, since = 0) => (m?.boot && m.boot.at >= since ? m.boot : null);
+
+// Tunggu codespace menyala dan daemon-nya tersambung ke relay. Selama itu, tahap dari runner
+// (memasang paket, menyalakan snugcode, error) lebih informatif daripada status codespace.
 async function waitOnline(mid, name, onState, ms = 12 * 60_000) {
   const cs = client();
-  const end = Date.now() + ms;
+  const t0 = Date.now();
+  const end = t0 + ms;
   let last = '';
+  let availableAt = 0;
   while (Date.now() < end) {
     const { machines } = await api('/api/machines');
     const m = machines.find((x) => x.id === mid);
     if (!m) throw new Error('Runner dihapus dari akun.');
     if (m.online) return m;
+    const boot = bootOf(m, t0 - 60_000);
+    if (boot?.stage === 'error') throw new Error('Runner gagal menyala: ' + boot.msg);
     const c = await cs.get(name).catch(() => null);
     if (c?.state === 'Failed') throw new Error('Codespace gagal dibuat. Buka di GitHub untuk melihat log: ' + c.web_url);
     if (c?.state === 'Shutdown') await cs.start(name);
-    const t = stateText(c?.state);
+    if (c?.state === 'Available') availableAt ||= Date.now();
+    // Codespace menyala lama tanpa satu laporan pun: skrip runner tidak berjalan atau tidak menerima secret.
+    if (!boot && availableAt && Date.now() - availableAt > 6 * 60_000)
+      throw new Error('Codespace menyala tapi runner tidak melapor. Buka codespace di GitHub dan periksa /workspaces/.snugcode/cloud.log, lalu buat ulang runner.');
+    const t = boot ? boot.msg : stateText(c?.state);
     if (t !== last) onState?.((last = t));
     await new Promise((r) => setTimeout(r, 4000));
   }
@@ -231,10 +243,13 @@ export async function wakeRunner(m, onState) {
   onState?.(stateText(c.state));
   if (!['Available', 'Starting', 'Provisioning', 'Queued', 'Rebuilding', 'Updating', 'Created'].includes(c.state)) await client().start(c.name);
   // Daemon tersambung sendiri; status codespace ditampilkan sampai relay melihatnya online.
+  const t0 = Date.now() - 60_000;
   const t = setInterval(async () => {
     if (app.current?.m.id !== m.id || app.current.ready) return clearInterval(t);
     const now = await client()?.get(c.name).catch(() => null);
-    if (now) onState?.(stateText(now.state));
+    // Tahap dari runner (memasang/menyalakan/error) setelah codespace menyala lebih informatif.
+    const boot = now?.state === 'Available' ? bootOf((await api('/api/machines').catch(() => ({ machines: [] }))).machines.find((x) => x.id === m.id), t0) : null;
+    if (now) onState?.(boot ? (boot.stage === 'error' ? 'gagal: ' : '') + boot.msg : stateText(now.state));
     // Dibuka tepat saat runner sedang berhenti sendiri: /start ditolak (409), jadi nyalakan setelah benar-benar berhenti.
     if (now?.state === 'Shutdown') await client().start(c.name).catch(() => {});
   }, 5000);
