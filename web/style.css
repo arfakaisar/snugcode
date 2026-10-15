@@ -1123,3 +1123,9 @@ html.kb.short #modes { display: none; }
 .steps li.ok .si { color: var(--ok); }
 .steps li.bad .si { color: var(--bad); }
 .steps li .dim { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Kartu mesin + tombol opsi (⋯) di sebelahnya: tombol tidak boleh bersarang di dalam tombol kartu. */
+.cardrow { position: relative; animation: rise .55s var(--spring) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.cardrow .card { padding-right: 56px; animation: none; }
+.cardrow .more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--dim); }
+.cardrow .more:active { transform: translateY(-50%) scale(.9); }
