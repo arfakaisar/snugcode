@@ -1,0 +1,55 @@
+# Deploy relay + PWA ke Cloudflare (sama dengan `npm run deploy` di PC), otomatis saat main berubah
+# di bagian yang ikut ter-deploy, atau manual dari tab Actions (bisa dari HP: Run workflow).
+# Butuh secret repo CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers"); CLOUDFLARE_ACCOUNT_ID
+# opsional, hanya bila token punya akses ke lebih dari satu akun.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relay/**'
+      - 'web/**'
+      - 'shared/**'
+      - 'scripts/build-web.mjs'
+      - 'package-lock.json'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Periksa secret Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Secret CLOUDFLARE_API_TOKEN belum di-set: Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+      - run: npm ci && npm ci --prefix relay
+      - name: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          npm run deploy
+      - name: Cek versi baru aktif
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf https://snugcode.arfak.workers.dev/api/health | tee /dev/stderr | grep -q runnerRepo; then exit 0; fi
+            sleep 3
+          done
+          echo "::warning::/api/health belum menampilkan versi baru"
