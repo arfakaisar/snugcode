@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { RELAY, ok, sleep, startMockRouter, routerLog } from './e2e-harness.mjs';
+import { findBrowser } from '../daemon/browser.js';
 
 const KEY = 'ROUTER-KEY-CLOUD';
 const PIN = 'cloud7x';
@@ -79,6 +80,57 @@ assert.match(rlog, /Key 9router belum diisi/);
 assert.equal(machines.find((m) => m.id === prov.mid).online, true);
 ok('snugcode cloud: konfigurasi dari env, tersambung ke relay tanpa key 9router');
 
+// ---------- PWA di Chromium: pairing otomatis, key 9router dari HP, menu runner, layar tanpa mesin ----------
+const exe = process.env.CHROME || findBrowser();
+if (exe) {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: exe, args: process.getuid?.() === 0 ? ['--no-sandbox'] : [] });
+  const SHOTS = process.env.SHOTS || '';
+  if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+  const open = async (ls) => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push('console: ' + m.text()));
+    await page.goto(RELAY + '/');
+    await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, ls);
+    await page.reload();
+    return { page, errors, shot: (n) => SHOTS && page.screenshot({ path: path.join(SHOTS, 'cloud-' + n + '.png') }) };
+  };
+  // PIN runner dibuat HP saat membuat runner (cloud.js): HP itu memasangkan diri tanpa layar PIN.
+  const P = await open([['pc.token', JSON.stringify(userToken)], ['pc.cloudpin.' + prov.mid, JSON.stringify(PIN)]]);
+  await P.page.waitForSelector('text=Cloud e2e');
+  assert.match(await P.page.locator('.card.pc').first().innerText(), /runner cloud/);
+  await P.page.locator('text=Cloud e2e').first().click();
+  await P.page.waitForSelector('text=Satu langkah lagi', { timeout: 20000 });
+  assert.equal(await P.page.locator('text=Pasangkan HP ini').count(), 0, 'tanpa layar PIN');
+  await P.shot('1-key');
+  await P.page.fill('input[aria-label="API key 9router"]', 'salah');
+  await P.page.click('text=Simpan & uji');
+  await P.page.waitForSelector('text=Key ditolak router');
+  await P.page.locator('#sheet:not([hidden]) [aria-label="Tutup"]').first().click();
+  await P.page.waitForSelector('#sheet', { state: 'hidden' });
+  await P.page.click('[aria-label="Pengaturan PC"]');
+  await P.page.waitForSelector('text=Runner cloud');
+  for (const t of ['Cloud · container', 'Key 9router (perlu)', 'Perangkat terpasang', 'PIN untuk HP lain', 'Berhenti otomatis']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
+  await P.shot('2-menu');
+  await P.page.locator('#sheet').getByText('Perangkat terpasang').click();
+  await P.page.waitForSelector('text=HP ini');
+  assert.deepEqual(P.errors, []);
+  await P.page.close();
+  // Akun tanpa mesin: pilihan utama "Pakai cloud", wizard meminta izin Codespaces.
+  const r2 = await fetch(`${RELAY}/auth/dev/login?kind=user&login=kosong${Date.now().toString(36)}`, { redirect: 'manual' });
+  const E = await open([['pc.token', JSON.stringify(decodeURIComponent(r2.headers.get('location').split('#login=')[1]))]]);
+  await E.page.waitForSelector('text=Belum ada mesin');
+  await E.page.click('text=Pakai cloud — tanpa PC');
+  await E.page.waitForSelector('text=Hubungkan GitHub Codespaces');
+  await E.shot('3-wizard');
+  assert.deepEqual(E.errors, []);
+  await browser.close();
+  await sleep(3100); // batas satu percobaan pairing per 3 detik di daemon
+  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, layar tanpa mesin');
+} else console.log('- Chrome tidak ditemukan: uji PWA runner cloud dilewati');
+
 // ---------- HP: pairing dengan PIN yang dibuat HP ----------
 async function phone(pin) {
   const conn = new Conn({ id: prov.mid });
@@ -137,16 +189,16 @@ ok('GITHUB_TOKEN/GH_TOKEN & env bootstrap tidak terwariskan ke shell dan agen');
 
 // Perangkat, ganti PIN, cabut akses — tanpa terminal.
 const devs = await A.conn.call('devices');
-assert.equal(devs.length, 1);
-assert.equal(devs[0].current, true);
+assert.equal(devs.length, exe ? 2 : 1, 'HP ini (+ PWA di Chromium)');
+assert.equal(devs.filter((d) => d.current).length, 1);
 await assert.rejects(A.conn.call('setPin', { pin: '12' }), /6–12/);
 await A.conn.call('setPin', { pin: 'baru99x' });
 mem = phones.b;
 store.set('token', userToken);
 await sleep(3100); // daemon membatasi satu percobaan pairing per 3 detik
 const B = await phone('baru99x');
-assert.equal((await B.conn.call('devices')).length, 2);
-const bId = (await A.conn.call('devices')).find((d) => !d.current).id;
+assert.equal((await B.conn.call('devices')).length, devs.length + 1);
+const bId = (await B.conn.call('devices')).find((d) => d.current).id;
 await A.conn.call('revoke', { id: bId });
 await until(() => B.states.includes('revoked'), 'HP kedua dicabut');
 B.conn.close();
