@@ -532,6 +532,8 @@ export class Session extends EventEmitter {
     images = checkImages(images);
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
+    // Runner cloud baru dikonfigurasi dari HP: key 9router bisa belum ada.
+    if (!this.mgr.secrets.routerKey) throw new Error('Key 9router belum diisi. Buka Pengaturan PC → Key 9router di aplikasi HP (atau jalankan `snugcode setup`).');
     if (!this.meta.title) this.meta.title = (text || 'gambar').slice(0, 80);
     const u = this.emitEvent({ k: 'user', d: text, img: images.length || undefined });
     this.run(text, images, u.seq).catch((err) => {
@@ -1098,6 +1100,24 @@ export class SessionManager {
     await Promise.all(active.map((s) => s.close()));
     if (active.length) await new Promise((r) => setTimeout(r, wait));
     return active.length;
+  }
+
+  // URL router diganti dari HP: proxy baru di port baru. Proses claude yang hidup memakai URL proxy
+  // lama di kuncinya (lihat startAgent), jadi otomatis dibuat ulang pada prompt berikutnya.
+  resetRouter() {
+    this.proxy?.close();
+    try {
+      this.proxy = startRouterProxy(this.config.routerUrl, { getKey: () => this.secrets.routerKey });
+    } catch (e) {
+      this.proxy = null;
+      this.log('! gagal memulai loopback proxy: ' + e.message);
+    }
+    if (this.secrets.routerKey) knownModelIds(this.config, this.secrets.routerKey);
+  }
+
+  // Ada pekerjaan yang berjalan (agen, `!perintah`, dev server, atau tunnel preview)?
+  busy() {
+    return [...this.sessions.values()].some((s) => s.status === 'running' || s.shellProc || s.procs.running() || s.tunnel);
   }
 
   // Atomik: gagal menulis (mis. disk penuh) membiarkan index lama tetap utuh, tidak memutus alur agen.

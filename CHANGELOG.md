@@ -3,6 +3,37 @@
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-15 — snugcode tanpa PC: runner cloud dari HP
+
+### Runner cloud (GitHub Codespaces / Docker)
+- `snugcode cloud` (`daemon/runner.js`): daemon yang sama dengan di PC, dikonfigurasi dari env
+  (`SNUGCODE_MACHINE_TOKEN`, `SNUGCODE_PAIR_PIN`, `SNUGCODE_RELAY`, …) secara idempoten, di bawah
+  supervisor (restart/update dari HP tetap jalan di container). Boleh start tanpa key 9router.
+- Berhenti sendiri saat menganggur (bawaan 30 menit; bisa diatur dari HP): Codespaces dihentikan lewat
+  GitHub API dengan token dari HP, container keluar (`SNUGCODE_IDLE_EXIT=1`).
+- Relay: `POST /api/machines/provision` mendaftarkan mesin cloud tanpa login dari mesinnya (maks. 3 per
+  akun); daftar mesin membawa `kind`/`provider`; login `kind=gh` memberi PWA token ber-scope `codespace`
+  lewat fragmen URL (tidak disimpan relay).
+- PWA: **Pakai cloud — tanpa PC** di daftar mesin. Wizard: izin Codespaces → fork (sekali) → provision →
+  secret terenkripsi di HP (sealed box, `shared/sealedbox.js`, diuji dengan vektor libsodium) → codespace →
+  tunggu online → pairing otomatis dengan PIN yang dibuat HP. Runner yang tidur dinyalakan saat dibuka.
+  Menu runner: berhenti otomatis, hentikan sekarang, buka di GitHub, hapus. Opsi *Server sendiri* membuat
+  perintah Docker lengkap.
+- `.devcontainer/` (Codespaces) dan `Dockerfile`.
+
+### Setelan mesin dari HP (PC & runner)
+- RPC baru `configure` (key/URL 9router, divalidasi ke router dulu, key tidak pernah dikembalikan),
+  `devices`, `revoke`, `setPin`, `runnerConfig`; `info` membawa `runtime`, `routerConfigured`, `runner`.
+- PWA: Pengaturan PC → *Router & akses*: key 9router, perangkat terpasang (cabut akses), ganti PIN.
+
+### Keamanan
+- `GITHUB_TOKEN`, `GH_TOKEN`, dan env bootstrap runner dibuang dari environment daemon saat start, sehingga
+  tidak terwariskan ke agen, Bash, dev server, atau `!perintah` (sebelumnya terwariskan bila ada di env PC).
+
+### Uji
+- `npm run test:e2e:cloud` (juga di CI): provision → `snugcode cloud` dari env saja → pairing otomatis di
+  Chromium → key 9router dari HP → env bersih → ganti PIN/cabut HP → restart lewat supervisor.
+
 ## 2026-10-11 — Agen 2–3× lebih cepat dengan model non-Claude
 
 ### Diagnosis (diukur, bukan ditebak)

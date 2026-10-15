@@ -6,6 +6,7 @@ import { app } from './ui/state.js';
 import { showLogin, showMachines } from './ui/auth.js';
 import { applyTheme, toast, ui } from './ui/dom.js';
 import { showSession } from './ui/session.js';
+import { acceptGhToken } from './ui/cloud.js';
 
 // ---------- pindah alamat ----------
 // Alamat lama (pocketcode-relay…) tetap melayani PC & API, tapi PWA-nya menawarkan pindah ke alamat
@@ -44,10 +45,12 @@ function boot() {
   applyTheme();
   const m = location.hash.match(/login=([^&]+)/);
   if (m) store.set('token', decodeURIComponent(m[1]));
+  // Kembali dari izin GitHub Codespaces (runner cloud): #gh=<token>&ghlogin=<login>
+  const g = acceptGhToken(location.hash);
   // Dibuka dari notifikasi push: #open=<mid>:<sid>
   const o = location.hash.match(/open=([\w-]+)(?::([\w-]+))?/);
   if (o) store.set('last', { mid: o[1], sid: o[2] });
-  if (m || o) history.replaceState(null, '', location.pathname);
+  if (m || o || g) history.replaceState(null, '', location.pathname);
   if (!token()) return showLogin();
   showMachines({ resume: true }).catch((e) => toast(e.message, true));
 }
