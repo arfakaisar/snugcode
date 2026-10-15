@@ -1069,3 +1069,21 @@ test('Codespaces (PWA): fork, secret terenkripsi untuk repo fork saja, buat/cari
   assert.ok(calls.every((x) => x.auth === 'Bearer tok'));
   for (let i = 0; i < 50; i++) assert.match(randomPin(), C.PIN_RE);
 });
+
+test('progress: bar maju sesuai tahap, tidak penuh sebelum selesai, perkiraan sisa & durasi dipelajari', async () => {
+  const { stepFraction, overall, remaining, fmtLeft, fmtClock, learn } = await import('../web/eta.js');
+  assert.equal(stepFraction(0, 10), 0);
+  assert.equal(stepFraction(10, 10), 0.9);
+  assert.ok(stepFraction(1000, 10) <= 0.99 && stepFraction(1000, 10) > 0.98, 'melambat, tidak pernah penuh');
+  const ests = [2, 3, 75, 50, 80, 12];
+  assert.equal(overall(ests, 0, 0), 0);
+  const mid = overall(ests, 3, 25);
+  assert.ok(mid > overall(ests, 2, 75) && mid < overall(ests, 4, 0), 'monoton antar tahap');
+  assert.ok(overall(ests, 5, 9999) <= 99);
+  assert.equal(remaining(ests, 2, 70), 5 + 50 + 80 + 12);
+  assert.equal(remaining(ests, 2, 500), 50 + 80 + 12, 'tahap yang molor tidak membuat sisa negatif');
+  assert.equal(fmtLeft(12), '±10 dtk lagi');
+  assert.equal(fmtLeft(170), '±3 mnt lagi');
+  assert.equal(fmtClock(75), '1:15');
+  assert.deepEqual(learn({ a: 100 }, { a: 40, b: 7 }), { a: 70, b: 7 });
+});

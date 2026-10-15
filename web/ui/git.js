@@ -1,6 +1,7 @@
 // Layar git: status, diff, commit, push, Pull Request.
 import { app } from './state.js';
 import { busyButton, h, haptic, ic, loading, toast, ui } from './dom.js';
+import { progress } from './progress.js';
 
 // ---------- Git ----------
 export async function showGit() {
@@ -67,12 +68,15 @@ export async function showGit() {
     h('div', { class: 'btnrow' },
       act([ic('push'), 'Push'], async () => {
         if (!(await ui.confirm({ title: 'Push ke GitHub?', text: `Branch ${st.branch} dikirim ke origin.`, ok: 'Push', icon: 'push', stay: true }))) return;
-        ui.sheet(ui.head('Git', { sub: s.repo }), loading('Push ke GitHub…'));
+        const p = progress('git-push', [{ id: 'push', label: `Push ${st.branch} ke GitHub`, est: 6 }]);
+        ui.sheet(ui.head('Git', { sub: s.repo }), p.el);
         try {
           await app.conn.call('push', { id: s.id });
+          p.done();
           toast('Push berhasil');
           haptic(20);
         } catch (x) {
+          p.fail(x.message);
           toast(x.message, true);
         }
         showGit();

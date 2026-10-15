@@ -3,6 +3,7 @@ import * as M from '../../shared/models.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { goMachines } from './auth.js';
+import { progress } from './progress.js';
 import { ago, busyButton, drawer, greeting, h, haptic, ic, onLongPress, pullToRefresh, renderIf, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { checkUpdateStatus, ghBad, modelItem, renderGhBanner, renderUpdateBanner, showMachineMenu } from './machine.js';
 import { pickModel } from './model-picker.js';
@@ -331,14 +332,24 @@ export async function pickBranch(repo) {
   btn.onclick = async () => {
     const done = busyButton(btn, 'Menyiapkan repo…');
     err.textContent = '';
+    // Clone pertama sebuah repo bisa lama (repo besar); berikutnya hanya worktree baru dari clone dasar.
+    const p = progress('session-create', [
+      { id: 'clone', label: 'Menyiapkan repo (clone & branch sesi)', est: 12 },
+      { id: 'open', label: 'Membuka sesi', est: 1 },
+    ]);
+    btn.before(p.el);
     try {
       const params = mode.v === 'new' ? { repo: repo.full, base: branches.value || undefined, branch: newName.value.trim() || undefined } : { repo: repo.full, branch: branches.value || repo.branch };
       params.model = model;
       const s = await app.conn.call('create', params);
+      p.step('open');
+      p.done();
       haptic(20);
       ui.closeSheet();
       showSession(s);
     } catch (e) {
+      p.stop();
+      p.el.remove();
       err.textContent = e.message;
       done();
     }
