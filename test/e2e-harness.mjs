@@ -55,8 +55,13 @@ function toolMsg(model, name, input) {
     { type: 'message_stop' },
   ];
 }
-function startMockRouter(cwdRef, reply) {
+// key: bila diisi, request dengan Authorization lain ditolak 401 (menguji validasi key dari HP).
+export function startMockRouter(cwdRef, reply, { key } = {}) {
   const srv = http.createServer((req, res) => {
+    if (key && req.headers.authorization !== 'Bearer ' + key && req.headers['x-api-key'] !== key) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'invalid key' } }));
+    }
     let body = '';
     req.on('data', (d) => (body += d));
     req.on('end', () => {
