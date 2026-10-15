@@ -9,6 +9,8 @@ import { pickModel } from './model-picker.js';
 import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
 import { sessionSub, showSessions, showSessionsMeta } from './sessions.js';
+import { cloudPin, connectButton, ghcs, idleSheet, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
+import { routerSheet, settingsItems } from './settings.js';
 
 // ---------- Koneksi ke satu PC ----------
 /** @param {{ id: string, name?: string }} m @param {{ sid?: string }} [opts] */
@@ -27,6 +29,7 @@ export function openMachine(m, { sid } = {}) {
     if (s === 'offline') {
       ui.dot('off');
       ui.sub('offline');
+      if (!app.current.ready && isCodespace(m)) return wakeScreen(m, msg, showStatus);
       if (!app.current.ready) {
         msg.textContent = 'PC sedang offline.';
         showStatus('Menunggu PC', 'Pastikan snugcode berjalan di PC (snugcode autostart on) dan PC tidak tertidur. Halaman ini tersambung otomatis begitu PC online.', true);
@@ -34,7 +37,15 @@ export function openMachine(m, { sid } = {}) {
     } else if (s === 'online' || s === 'reconnecting') {
       ui.dot('busy');
       if (app.current.ready) ui.sub('menyambung ulang…');
-    } else if (s === 'needpin') showPin(m);
+    } else if (s === 'needpin') {
+      // Runner cloud yang dibuat dari HP ini: PIN-nya diketahui, pairing otomatis (sekali per koneksi).
+      const pin = cloudPin(m.id);
+      if (pin && !app.current.autoPaired) {
+        app.current.autoPaired = true;
+        msg.textContent = 'Memasangkan HP ini ke runner…';
+        app.conn.pair(pin).then((r) => r.ok || showPin(m));
+      } else showPin(m);
+    }
     else if (s === 'revoked') (toast('HP ini dicabut aksesnya dari PC.', true), showPin(m));
     else if (s === 'removed') (toast('PC ini sudah dihapus dari akun.', true), goMachines());
     else if (s === 'authfail') toast('Verifikasi PC gagal.', true);
@@ -49,8 +60,11 @@ export function openMachine(m, { sid } = {}) {
     checkUpdateStatus(false);
     syncPush(false);
     if (document.visibilityState !== 'visible') app.conn.call('visible', { on: false }).catch(() => {});
-    if (first) showSessions();
-    else if (app.current.session) (reattach(), ui.sub(sessionSub(app.current.session)));
+    if (first) {
+      showSessions();
+      if (info.runtime === 'cloud') setupCloud(info);
+      else if (info.routerConfigured === false) routerSheet({ first: true });
+    } else if (app.current.session) (reattach(), ui.sub(sessionSub(app.current.session)));
     else showSessionsMeta();
   });
   app.conn.on('events', (msg) => app.current?.onEvents?.(msg));
@@ -62,6 +76,37 @@ export function openMachine(m, { sid } = {}) {
     localNotify('snugcode', `${msg.title}: ${msg.msg}`);
   });
   app.conn.connect();
+}
+
+// Runner Codespaces yang sedang tidur: nyalakan dari HP (butuh izin Codespaces di HP ini).
+function wakeScreen(m, msg, showStatus) {
+  if (app.current.waking) return;
+  app.current.waking = true;
+  msg.textContent = 'Runner sedang tidur.';
+  showStatus('Menyalakan runner', 'Codespace dinyalakan di GitHub (±30–60 detik). Halaman ini tersambung otomatis begitu runner siap.');
+  wakeRunner(m, (t) => (msg.textContent = 'Codespace: ' + t))
+    .then((ok) => {
+      if (ok || app.current?.m.id !== m.id || app.current.ready) return;
+      app.current.waking = false;
+      showStatus('Runner tidur', 'Runner berhenti sendiri saat tidak dipakai. Hubungkan GitHub Codespaces di HP ini untuk menyalakannya.', false);
+      $view()?.querySelector('.hero')?.append(connectButton());
+    })
+    .catch((e) => {
+      if (app.current?.m.id !== m.id) return;
+      app.current.waking = false;
+      msg.textContent = e.message;
+      ui.sub('gagal menyalakan');
+    });
+}
+const $view = () => document.getElementById('view');
+
+// Runner cloud tersambung: beri token Codespaces (agar bisa berhenti sendiri saat menganggur), lalu
+// minta key 9router bila belum ada — runner baru tidak punya terminal untuk `snugcode setup`.
+function setupCloud(info) {
+  const t = ghcs();
+  if (t && info.runner?.provider === 'codespace' && info.caps?.includes('runnerConfig'))
+    app.conn.call('runnerConfig', { token: t.token }).then((runner) => app.current && (app.current.info = { ...app.current.info, runner })).catch(() => {});
+  if (!info.routerConfigured) routerSheet({ first: true, after: () => (ghBad() ? githubLoginSheet() : ui.closeSheet()) });
 }
 
 export function showPin(m) {
@@ -167,7 +212,7 @@ export function renderUpdateBanner() {
   renderIf(el, 'up|' + sha + '|' + msg, () => [
     h('button', { class: 'banner up', onclick: () => updateMachineSheet() },
       h('span', { class: 'bi' }, ic('spark')),
-      h('span', { class: 'grow' }, h('div', { class: 'name' }, `Pembaruan PC tersedia · ${sha}`), h('div', { class: 'sub' }, msg)),
+      h('span', { class: 'grow' }, h('div', { class: 'name' }, `Pembaruan ${here().split(' ')[0]} tersedia · ${sha}`), h('div', { class: 'sub' }, msg)),
       upBtn,
     ),
   ]);
@@ -249,6 +294,8 @@ export function migrateSheet() {
 // ---------- Login GitHub PC (dari HP) ----------
 // Token GitHub di PC bisa dicabut. Daemon memulai device flow dan kodenya
 // tampil di sini, jadi login ulang bisa dilakukan dari mana saja.
+// "PC ini" / "runner ini" sesuai jenis mesin yang terbuka.
+const here = () => (app.current?.info?.runtime === 'cloud' ? 'runner ini' : 'PC ini');
 export const ghBad = () => ['invalid', 'missing'].includes(app.current?.info?.githubState);
 
 export function renderGhBanner() {
@@ -259,7 +306,7 @@ export function renderGhBanner() {
     h('button', { class: 'banner warn', onclick: () => githubLoginSheet() },
       h('span', { class: 'bi' }, ic('github')),
       h('span', { class: 'grow' },
-        h('div', { class: 'name' }, app.current.info.githubState === 'missing' ? 'GitHub belum login di PC ini' : 'Login GitHub di PC ini tidak berlaku'),
+        h('div', { class: 'name' }, app.current.info.githubState === 'missing' ? 'GitHub belum login di ' + here() : 'Login GitHub di ' + here() + ' tidak berlaku'),
         h('div', { class: 'sub' }, 'Push, PR, dan daftar repo tidak bisa dipakai. Ketuk untuk login ulang dari HP.'),
       ),
       ic('right', 'chev'),
@@ -332,6 +379,10 @@ export function modelItem(t1, id, onclick) {
 
 export function showMachineMenu() {
   const info = app.current.info;
+  const m = app.current.m;
+  const cloud = info.runtime === 'cloud';
+  const settings = settingsItems(showMachineMenu);
+  const idle = info.runner?.idleStopMinutes;
   const pick = (title, field) =>
     pickModel({
       title,
@@ -345,10 +396,10 @@ export function showMachineMenu() {
       },
     });
   ui.sheet(
-    ui.head('Pengaturan PC', { sub: app.current.m.name }),
+    ui.head(cloud ? 'Pengaturan runner' : 'Pengaturan PC', { sub: app.current.m.name }),
     h('div', { class: 'pchero' },
-      h('span', { class: 'avatar' }, ic('monitor'), h('i', { class: 'live' })),
-      h('div', { class: 'grow' }, h('b', {}, app.current.m.name), h('div', { class: 'dim small' }, [{ win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[info.platform] || info.platform, info.commit ? 'v' + info.commit : null, info.github && !ghBad() ? '@' + info.github : 'GitHub belum login'].filter(Boolean).join(' · '))),
+      h('span', { class: 'avatar' }, ic(cloud ? 'cloud' : 'monitor'), h('i', { class: 'live' })),
+      h('div', { class: 'grow' }, h('b', {}, app.current.m.name), h('div', { class: 'dim small' }, [cloud ? (info.runner?.provider === 'codespace' ? 'Cloud · Codespaces' : 'Cloud · container') : { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[info.platform] || info.platform, info.commit ? 'v' + info.commit : null, info.github && !ghBad() ? '@' + info.github : 'GitHub belum login'].filter(Boolean).join(' · '))),
     ),
     h('div', { class: 'label' }, 'Model'),
     h('div', { class: 'group' },
@@ -362,6 +413,17 @@ export function showMachineMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'github', t1: ghBad() ? 'Login GitHub (perlu)' : 'Login ulang GitHub', t2: info.github && !ghBad() ? '@' + info.github + ' · tersambung' : 'push, PR, dan daftar repo', onclick: () => githubLoginSheet() }),
     ),
+    settings.length ? h('div', { class: 'label' }, 'Router & akses') : null,
+    settings.length ? h('div', { class: 'group' }, ...settings) : null,
+    cloud ? h('div', { class: 'label' }, 'Runner cloud') : null,
+    cloud
+      ? h('div', { class: 'group' },
+          menuItem({ icon: 'clock', t1: 'Berhenti otomatis', t2: idle ? `setelah ${idle} menit tidak dipakai${info.runner?.autoStop ? '' : ' · belum aktif'}` : 'mati — runner terus menyala', onclick: () => idleSheet(showMachineMenu) }),
+          isCodespace(m) ? menuItem({ icon: 'stop', t1: 'Hentikan runner sekarang', t2: 'menyala lagi saat kamu membukanya', onclick: () => runnerAction('stop') }) : null,
+          isCodespace(m) ? menuItem({ icon: 'github', t1: 'Buka codespace di GitHub', t2: 'log runner: /workspaces/.snugcode/cloud.log', onclick: () => runnerAction('github') }) : null,
+          isCodespace(m) ? menuItem({ icon: 'trash', t1: 'Hapus runner', t2: 'codespace beserta sesi & worktree-nya', danger: true, chev: false, onclick: () => runnerAction('remove') }) : null,
+        )
+      : null,
     h('div', { class: 'label' }, 'Sistem & pembaruan'),
     h('div', { class: 'group' },
       menuItem({
@@ -408,6 +470,24 @@ export function showMachineMenu() {
       menuItem({ icon: 'unlink', t1: 'Lupakan pairing HP ini', t2: 'Perlu PIN lagi untuk tersambung', danger: true, chev: false, onclick: () => (store.set('dev.' + app.current.m.id, null), ui.closeSheet(), openMachine(app.current.m)) }),
     ),
   );
+}
+
+async function runnerAction(kind) {
+  const m = app.current.m;
+  try {
+    if (kind === 'github') return await openRunnerOnGithub(m);
+    if (kind === 'stop') {
+      if (!(await ui.confirm({ title: 'Hentikan runner?', text: 'Agen, dev server, dan preview yang berjalan ikut berhenti. Sesi & file tetap tersimpan.', ok: 'Hentikan', icon: 'stop' }))) return;
+      await stopRunnerNow(m);
+      toast('Runner dihentikan');
+      return goMachines();
+    }
+    if (!(await ui.confirm({ title: 'Hapus runner?', text: 'Codespace beserta semua sesi, worktree, dan commit yang belum di-push dihapus permanen.', ok: 'Hapus runner', danger: true, icon: 'trash' }))) return;
+    await removeRunner(m);
+    goMachines();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 export async function updateMachineSheet() {

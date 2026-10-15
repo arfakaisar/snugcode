@@ -1012,3 +1012,60 @@ test('defaultModel: Claude Sonnet didahulukan saat router baru dipasang dari HP'
   assert.equal(defaultModel(['ag/gemini-3.8-flash-low', 'ag/gemini-3-pro-high']), 'ag/gemini-3-pro-high');
   assert.equal(defaultModel(['x/y']), 'x/y');
 });
+
+test('sealedBox: kompatibel dengan libsodium crypto_box_seal (Codespaces secrets)', async () => {
+  const { sealedBox, openSealedBox } = await import('../shared/sealedbox.js');
+  // Vektor dibuat PyNaCl (libsodium): SealedBox(pk).encrypt(b'dari libsodium').
+  const sk = Uint8Array.from(Buffer.from('Q51sZey2LLuTdK8wnOawoY7wXkg4if6dmK9S3Yr4DRQ=', 'base64'));
+  const ct = Uint8Array.from(Buffer.from('CpPJECbbMMgGtPT105AaDDBQLfhgEN/iDyGvxtQP12UN8yriTUc+LN3IrpIfQsQdFLM92NOqLR5xJmyMohs=', 'base64'));
+  assert.equal(new TextDecoder().decode(openSealedBox(ct, sk)), 'dari libsodium');
+  const { x25519 } = await import('@noble/curves/ed25519.js');
+  const sealed = sealedBox(new TextEncoder().encode('token-mesin'), x25519.getPublicKey(sk));
+  assert.equal(sealed.length, 32 + 16 + 'token-mesin'.length);
+  assert.equal(new TextDecoder().decode(openSealedBox(sealed, sk)), 'token-mesin');
+  assert.throws(() => openSealedBox(sealed, C.randomBytes(32)));
+});
+
+test('Codespaces (PWA): fork, secret terenkripsi untuk repo fork saja, buat/cari/nyalakan runner', async () => {
+  const { Codespaces, displayName, randomPin, SECRET_NAMES } = await import('../web/codespaces.js');
+  const { openSealedBox } = await import('../shared/sealedbox.js');
+  const { x25519 } = await import('@noble/curves/ed25519.js');
+  const sk = C.randomBytes(32);
+  const calls = [];
+  const res = (status, body) => ({ ok: status < 300, status, json: async () => body });
+  const fetchImpl = async (url, opts) => {
+    const p = url.replace('https://api.github.com', '');
+    const body = opts.body ? JSON.parse(opts.body) : null;
+    calls.push({ m: opts.method, p, body, auth: opts.headers.authorization });
+    if (p === '/repos/budi/snugcode') return res(200, { id: 77, full_name: 'budi/snugcode', default_branch: 'main', owner: { login: 'budi' }, parent: { full_name: 'arfakaisar/snugcode' } });
+    if (p === '/repos/sari/snugcode') return res(404, { message: 'Not Found' });
+    if (p.startsWith('/repos/arfakaisar/snugcode/forks')) return res(200, [{ id: 88, full_name: 'sari/snug-fork', owner: { login: 'Sari' } }]);
+    if (p === '/user/codespaces/secrets/public-key') return res(200, { key_id: 'k1', key: C.b64(x25519.getPublicKey(sk)) });
+    if (p.startsWith('/user/codespaces/secrets/')) return res(opts.method === 'DELETE' ? 204 : 201, null);
+    if (p === '/user/codespaces' && opts.method === 'POST') return res(201, { name: 'cs-abc', state: 'Queued' });
+    if (p === '/user/codespaces?per_page=100') return res(200, { codespaces: [{ name: 'cs-lain', display_name: 'x' }, { name: 'cs-abc', display_name: displayName('m1'), state: 'Shutdown' }] });
+    if (p === '/user/codespaces/hilang') return res(404, {});
+    if (p.endsWith('/start')) return res(409, { message: 'already running' });
+    return res(500, { message: 'tak terduga ' + p });
+  };
+  const cs = new Codespaces('tok', { fetchImpl });
+  assert.equal((await cs.findRunnerRepo('budi', 'arfakaisar/snugcode')).id, 77);
+  assert.equal((await cs.findRunnerRepo('sari', 'arfakaisar/snugcode')).id, 88, 'fork yang diganti namanya ditemukan');
+  await cs.setSecrets({ SNUGCODE_MACHINE_TOKEN: 'tok.mesin', SNUGCODE_PAIR_PIN: 'moon42' }, 77);
+  const puts = calls.filter((c) => c.m === 'PUT');
+  assert.deepEqual(puts.map((c) => c.p), ['/user/codespaces/secrets/SNUGCODE_MACHINE_TOKEN', '/user/codespaces/secrets/SNUGCODE_PAIR_PIN']);
+  for (const c of puts) {
+    assert.deepEqual(c.body.selected_repository_ids, [77]);
+    assert.equal(c.body.key_id, 'k1');
+  }
+  assert.equal(new TextDecoder().decode(openSealedBox(C.unb64(puts[0].body.encrypted_value), sk)), 'tok.mesin');
+  assert.ok(!JSON.stringify(calls).includes('moon42'), 'PIN tidak pernah dikirim polos');
+  const c = await cs.create({ id: 77, default_branch: 'main' }, 'm1');
+  assert.equal(c.name, 'cs-abc');
+  assert.deepEqual(calls.at(-1).body, { repository_id: 77, ref: 'main', display_name: 'snugcode m1', idle_timeout_minutes: 240 });
+  assert.equal((await cs.find('m1', 'hilang')).name, 'cs-abc', 'dicari lewat nama tampilan bila nama tersimpan tidak ada');
+  assert.equal(await cs.start('cs-abc'), null, '409 (sudah menyala) bukan error');
+  await cs.deleteSecrets(SECRET_NAMES);
+  assert.ok(calls.every((x) => x.auth === 'Bearer tok'));
+  for (let i = 0; i < 50; i++) assert.match(randomPin(), C.PIN_RE);
+});
