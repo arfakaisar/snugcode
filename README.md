@@ -580,6 +580,8 @@ npm install && (cd relay && npm install)
 CLOUDFLARE_API_TOKEN=<token> npm run deploy
 ```
 
+Tanpa PC: workflow [`Deploy`](.github/workflows/deploy.yml) menjalankan perintah yang sama setiap kali `main` berubah di `relay/`, `web/`, atau `shared/` (atau manual: tab Actions → Deploy → Run workflow). Butuh secret repo `CLOUDFLARE_API_TOKEN` (template *Edit Cloudflare Workers*).
+
 Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TOKEN_SECRET` diganti, semua login HP dan PC harus diulang.
 </details>
 
