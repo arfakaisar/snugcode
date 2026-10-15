@@ -226,7 +226,7 @@ export default {
       const p = await verifyToken(env, h.replace(/^Bearer\s+/i, ''));
       if (!p || p.kind !== 'machine') return json({ error: 'unauthorized' }, 401);
       const body = await request.json().catch(() => ({}));
-      const boot = { stage: String(body.stage || '').slice(0, 20), msg: String(body.msg || '').slice(0, 400), at: Date.now() };
+      const boot = { stage: String(body.stage || '').slice(0, 20), step: String(body.step || '').slice(0, 20), msg: String(body.msg || '').slice(0, 400), at: Date.now() };
       const r = await hub(env, p.sub).fetch('https://hub/boot', { method: 'POST', body: JSON.stringify({ mid: p.mid, boot }) });
       return new Response(r.body, r);
     }
