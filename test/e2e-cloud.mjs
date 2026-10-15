@@ -42,7 +42,13 @@ let { machines } = await (await api('/api/machines')).json();
 assert.deepEqual(machines.map((m) => [m.id, m.kind, m.provider, m.online]), [[prov.mid, 'cloud', 'codespace', false]]);
 for (let i = 0; i < 2; i++) await api('/api/machines/provision', { method: 'POST', body: '{}' });
 assert.equal((await api('/api/machines/provision', { method: 'POST', body: '{}' })).status, 409, 'batas runner cloud per akun');
-ok('provision: mesin cloud terdaftar tanpa login dari mesinnya; batas per akun berlaku');
+// Runner yang sedang menyiapkan diri melaporkan tahapnya dengan token mesinnya (tampil di wizard HP).
+const report = (tok, body) => fetch(RELAY + '/api/runner/status', { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+assert.equal((await report(userToken, { stage: 'starting', msg: 'x' })).status, 401, 'token pengguna bukan token mesin');
+assert.equal((await report(prov.token, { stage: 'installing', msg: 'Memasang snugcode…' })).status, 200);
+({ machines } = await (await api('/api/machines')).json());
+assert.deepEqual([machines.find((m) => m.id === prov.mid).boot.stage, machines.find((m) => m.id === prov.mid).boot.msg], ['installing', 'Memasang snugcode…']);
+ok('provision: mesin cloud terdaftar tanpa login dari mesinnya; batas per akun berlaku; runner melaporkan tahapnya');
 
 // ---------- runner: hanya env, tanpa setup interaktif ----------
 const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ANTHROPIC_|SNUGCODE_|POCKETCODE_|CODESPACE)/.test(k)));

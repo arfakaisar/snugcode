@@ -508,10 +508,17 @@ function help() {
 // container ikut berhenti. --no-supervise: jalankan daemon langsung di proses ini.
 async function cloud() {
   ensureDirs();
-  const { bootstrapCloud } = await import('./runner.js');
+  const { bootstrapCloud, reportStatus } = await import('./runner.js');
   const cfg = loadConfig();
   const sec = loadSecrets();
-  const { relinked, warnings } = await bootstrapCloud(process.env, cfg, sec);
+  let boot;
+  try {
+    boot = await bootstrapCloud(process.env, cfg, sec);
+  } catch (e) {
+    await reportStatus(process.env, 'error', 'Konfigurasi runner gagal: ' + e.message);
+    throw e;
+  }
+  const { relinked, warnings } = boot;
   saveConfig(cfg);
   saveSecrets(sec);
   scrubSecretEnv();

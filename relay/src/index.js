@@ -219,6 +219,17 @@ export default {
       if (machines.filter((m) => m.kind === 'cloud').length >= MAX_CLOUD) return json({ error: `Maksimal ${MAX_CLOUD} runner cloud per akun. Hapus yang lama dulu.` }, 409);
       return json(await registerMachine(env, { id: u.sub, login: u.login }, name, { kind: 'cloud', provider }));
     }
+    // Runner cloud yang sedang menyiapkan diri (codespace: pasang paket, menyalakan daemon) melaporkan
+    // tahapnya dengan token mesinnya sendiri; PWA menampilkannya selama runner belum tersambung.
+    if (path === '/api/runner/status' && request.method === 'POST') {
+      const h = request.headers.get('authorization') || '';
+      const p = await verifyToken(env, h.replace(/^Bearer\s+/i, ''));
+      if (!p || p.kind !== 'machine') return json({ error: 'unauthorized' }, 401);
+      const body = await request.json().catch(() => ({}));
+      const boot = { stage: String(body.stage || '').slice(0, 20), msg: String(body.msg || '').slice(0, 400), at: Date.now() };
+      const r = await hub(env, p.sub).fetch('https://hub/boot', { method: 'POST', body: JSON.stringify({ mid: p.mid, boot }) });
+      return new Response(r.body, r);
+    }
     if (path.startsWith('/api/machines/') && request.method === 'DELETE') {
       const u = await authUser(env, request);
       if (!u) return json({ error: 'unauthorized' }, 401);
@@ -306,8 +317,15 @@ export class Hub extends DurableObject {
       return json({ ok: true });
     }
     if (url.pathname === '/machines') {
-      const list = Object.entries(machines).map(([id, m]) => ({ id, name: m.name, online: this.online(id), lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt }));
+      const list = Object.entries(machines).map(([id, m]) => ({ id, name: m.name, online: this.online(id), lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt, boot: m.boot || null }));
       return json({ machines: list });
+    }
+    if (url.pathname === '/boot') {
+      const { mid, boot } = await request.json();
+      if (!machines[mid]) return json({ error: 'PC tidak terdaftar' }, 404);
+      machines[mid].boot = boot;
+      await this.ctx.storage.put('machines', machines);
+      return json({ ok: true });
     }
     if (url.pathname === '/remove') {
       const { mid } = await request.json();
