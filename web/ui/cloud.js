@@ -5,6 +5,7 @@ import { Codespaces, SECRET_NAMES, randomPin, stateText } from '../codespaces.js
 import { app } from './state.js';
 import { api } from './auth.js';
 import { busyButton, copyText, h, haptic, ic, loading, mascot, toast, ui } from './dom.js';
+import { progress } from './progress.js';
 
 /** @returns {{ token: string, login: string } | null} */
 export const ghcs = () => store.get('ghcs');
@@ -49,16 +50,6 @@ async function cloudMachines() {
   const { machines } = await api('/api/machines');
   return machines.filter(isCodespace);
 }
-
-const step = (text) => {
-  const el = h('li', { class: 'run' }, h('span', { class: 'si' }, h('span', { class: 'spinner' })), h('span', { class: 'grow' }, text), h('span', { class: 'dim small' }));
-  return {
-    el,
-    note: (t) => (el.lastChild.textContent = t),
-    done: (t) => (el.className = 'ok', el.firstChild.replaceChildren(ic('check')), t != null && (el.lastChild.textContent = t)),
-    fail: () => (el.className = 'bad', el.firstChild.replaceChildren(ic('x'))),
-  };
-};
 
 // ---------- Wizard: buat runner ----------
 export async function cloudSetupSheet() {
@@ -148,38 +139,49 @@ async function recreate(m) {
   cloudSetupSheet();
 }
 
+// Langkah pembuatan runner. machine/chromium/install/start mengikuti status codespace dan laporan
+// runner sendiri (.devcontainer/lib.sh), jadi bar mencerminkan progres nyata di codespace.
+const CREATE_STEPS = [
+  { id: 'provision', label: 'Mendaftarkan runner', est: 2 },
+  { id: 'secrets', label: 'Menyimpan token & PIN (terenkripsi di HP)', est: 3 },
+  { id: 'codespace', label: 'Membuat codespace', est: 6 },
+  { id: 'machine', label: 'Menyiapkan mesin di GitHub', est: 75 },
+  { id: 'chromium', label: 'Memasang Chromium', est: 50 },
+  { id: 'install', label: 'Memasang snugcode', est: 80 },
+  { id: 'start', label: 'Menyalakan snugcode', est: 12 },
+];
+
+// Langkah progress dari status codespace + laporan runner. Codespace baru yang sudah menyala tapi
+// skripnya belum melapor masih "menyiapkan mesin" (postCreate baru mulai).
+export function runnerPhase(state, boot) {
+  if (boot?.step) return boot.step;
+  if (boot?.stage === 'starting') return 'start';
+  if (boot?.stage === 'installing') return 'install';
+  return 'machine';
+}
+
 async function createRunner(body, repo, user) {
   haptic(15);
   const cs = client();
-  const list = h('ol', { class: 'steps' });
+  const p = progress('cloud-create', CREATE_STEPS);
   const err = h('div', { class: 'err', role: 'alert' });
-  body.replaceChildren(h('div', { class: 'muted small', style: 'margin-bottom:10px' }, 'Pertama kali ±3–5 menit (memasang snugcode & Chromium). Boleh tinggalkan layar ini — runner tetap disiapkan.'), list, err);
-  const add = (t) => {
-    const s = step(t);
-    list.append(s.el);
-    return s;
-  };
-  let cur;
+  body.replaceChildren(p.el, err, h('div', { class: 'fine' }, 'Boleh tinggalkan layar ini — runner tetap disiapkan dan muncul di daftar mesin.'));
   try {
-    cur = add('Mendaftarkan runner di akun snugcode');
     const prov = await api('/api/machines/provision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Cloud', provider: 'codespace' }) });
     if (prov.error) throw new Error(prov.error);
     const pin = randomPin();
     store.set('cloudpin.' + prov.mid, pin);
-    cur.done();
 
-    cur = add('Menyimpan token & PIN sebagai Codespaces secret');
+    p.step('secrets');
     await cs.setSecrets({ SNUGCODE_MACHINE_TOKEN: prov.token, SNUGCODE_PAIR_PIN: pin, SNUGCODE_RELAY: location.origin }, repo.id);
-    cur.done('terenkripsi di HP');
 
-    cur = add('Membuat codespace');
+    p.step('codespace');
     const c = await cs.create(repo, prov.mid);
     store.set('cloud.' + prov.mid, { codespace: c.name });
-    cur.done(c.machine?.display_name || '');
 
-    cur = add('Menunggu runner menyala');
-    const m = await waitOnline(prov.mid, c.name, (t) => cur.note(t));
-    cur.done();
+    p.step('machine', stateText(c.state));
+    const m = await waitOnline(prov.mid, c.name, (t, phase) => p.step(phase, t));
+    p.done('Runner tersambung');
     haptic(25);
     toast('Runner siap · @' + user.login);
     // Wizard sudah ditutup dan pengguna sedang di layar lain: cukup kabari, jangan pindahkan layarnya.
@@ -187,7 +189,7 @@ async function createRunner(body, repo, user) {
     ui.closeSheet();
     (await import('./machine.js')).openMachine(m);
   } catch (e) {
-    cur?.fail();
+    p.fail();
     err.textContent = e.message;
     body.append(h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => cloudSetupSheet() }, ic('refresh'), 'Coba lagi'));
   }
@@ -219,7 +221,8 @@ async function waitOnline(mid, name, onState, ms = 12 * 60_000) {
     if (!boot && availableAt && Date.now() - availableAt > 6 * 60_000)
       throw new Error('Codespace menyala tapi runner tidak melapor. Buka codespace di GitHub dan periksa /workspaces/.snugcode/cloud.log, lalu buat ulang runner.');
     const t = boot ? boot.msg : stateText(c?.state);
-    if (t !== last) onState?.((last = t));
+    const phase = runnerPhase(c?.state, boot);
+    if (t + phase !== last) onState?.(t, phase), (last = t + phase);
     await new Promise((r) => setTimeout(r, 4000));
   }
   throw new Error('Runner belum tersambung setelah 12 menit. Coba buka lagi nanti, atau lihat log di codespace: /workspaces/.snugcode/cloud.log');
@@ -240,7 +243,7 @@ export async function wakeRunner(m, onState) {
   if (!client()) return false;
   const c = await codespaceOf(m);
   if (!c) throw new Error('Codespace runner tidak ditemukan (mungkin sudah dihapus atau kedaluwarsa). Buat ulang dari menu Tambah PC → Runner cloud.');
-  onState?.(stateText(c.state));
+  onState?.(stateText(c.state), c.state === 'Available' ? 'start' : 'boot');
   if (!['Available', 'Starting', 'Provisioning', 'Queued', 'Rebuilding', 'Updating', 'Created'].includes(c.state)) await client().start(c.name);
   // Daemon tersambung sendiri; status codespace ditampilkan sampai relay melihatnya online.
   const t0 = Date.now() - 60_000;
@@ -249,7 +252,7 @@ export async function wakeRunner(m, onState) {
     const now = await client()?.get(c.name).catch(() => null);
     // Tahap dari runner (memasang/menyalakan/error) setelah codespace menyala lebih informatif.
     const boot = now?.state === 'Available' ? bootOf((await api('/api/machines').catch(() => ({ machines: [] }))).machines.find((x) => x.id === m.id), t0) : null;
-    if (now) onState?.(boot ? (boot.stage === 'error' ? 'gagal: ' : '') + boot.msg : stateText(now.state));
+    if (now) onState?.(boot ? (boot.stage === 'error' ? 'gagal: ' : '') + boot.msg : stateText(now.state), now.state === 'Available' ? 'start' : 'boot');
     // Dibuka tepat saat runner sedang berhenti sendiri: /start ditolak (409), jadi nyalakan setelah benar-benar berhenti.
     if (now?.state === 'Shutdown') await client().start(c.name).catch(() => {});
   }, 5000);
