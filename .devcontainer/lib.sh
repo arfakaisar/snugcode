@@ -10,12 +10,13 @@ fi
 LOG="$SNUGCODE_HOME/cloud.log"
 RELAY="${SNUGCODE_RELAY:-https://snugcode.arfak.workers.dev}"
 log() { echo "[$(date -u +%H:%M:%S)] $*" >> "$LOG"; echo "$*"; }
-# report <tahap> <pesan>: tahap = installing | starting | error
+# report <tahap> <pesan> [langkah]: tahap = installing | starting | error; langkah (untuk progress bar
+# di HP) = chromium | install | start
 report() {
   log "$1: $2"
   [ -n "${SNUGCODE_MACHINE_TOKEN:-}" ] || return 0
   local body
-  body=$(STAGE="$1" MSG="$2" node -e 'process.stdout.write(JSON.stringify({ stage: process.env.STAGE, msg: process.env.MSG.slice(-400) }))' 2>/dev/null) || return 0
+  body=$(STAGE="$1" MSG="$2" STEP="${3:-}" node -e 'process.stdout.write(JSON.stringify({ stage: process.env.STAGE, msg: process.env.MSG.slice(-400), step: process.env.STEP }))' 2>/dev/null) || return 0
   curl -s -m 10 -X POST -H "authorization: Bearer $SNUGCODE_MACHINE_TOKEN" -H 'content-type: application/json' --data "$body" "$RELAY/api/runner/status" >/dev/null 2>&1 || true
 }
 # Path snugcode: PATH, folder global npm image devcontainer, atau prefix npm saat ini.

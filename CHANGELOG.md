@@ -3,6 +3,19 @@
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 (Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
+## 2026-10-15 — Progress yang jelas untuk proses lama
+
+- Komponen progress (`web/ui/progress.js`, perhitungan di `web/eta.js`): bar yang terus bergerak,
+  daftar tahap (selesai / sedang / berikutnya), waktu berjalan, dan perkiraan sisa. Di dalam satu
+  tahap bar maju mengikuti perkiraan durasinya dan melambat mendekati akhir, jadi tidak pernah penuh
+  sebelum tahapnya selesai; tahap yang jauh melewati perkiraan diberi keterangan "lebih lama dari
+  biasanya, masih berjalan". Durasi nyata tiap tahap dipelajari per HP, jadi perkiraan makin tepat.
+- Dipakai di: membuat runner cloud (tahap mengikuti status codespace dan laporan runner —
+  Chromium / snugcode / menyalakan), menyalakan runner yang tidur, menghubungkan ke mesin,
+  pembaruan PC dari HP (pasang → restart → tersambung lagi), membuat sesi repo (clone), dan push.
+- Runner melaporkan langkahnya (`step`) ke relay bersama tahap & pesan.
+- Mesin bisa dihapus langsung dari daftar (tombol ⋯), juga saat offline atau macet.
+
 ## 2026-10-15 — snugcode tanpa PC: runner cloud dari HP
 
 ### Runner cloud (GitHub Codespaces / Docker)

@@ -9,7 +9,7 @@ if [ -z "${SNUGCODE_MACHINE_TOKEN:-}" ] && [ ! -f "$SNUGCODE_HOME/secrets.json" 
   log "snugcode: SNUGCODE_MACHINE_TOKEN tidak ada di environment codespace (Codespaces secret belum terpasang untuk repo ini). Buat ulang runner dari aplikasi snugcode di HP."
   exit 0
 fi
-report starting "Menyalakan snugcode…"
+report starting "Menyalakan snugcode…" start
 SNUG="$(find_snug)" || { bash "$DIR/install.sh"; SNUG="$(find_snug)"; } || SNUG=""
 CMD=()
 if [ -n "$SNUG" ]; then
@@ -17,7 +17,7 @@ if [ -n "$SNUG" ]; then
 else
   # Paket global tidak bisa dipasang: jalankan dari kode repo ini (codespace dibuat dari repo snugcode).
   ROOT="$(cd "$DIR/.." && pwd)"
-  report installing "Paket global gagal; memakai kode dari repo ($ROOT)…"
+  report installing "Paket global gagal; memakai kode dari repo ($ROOT)…" install
   if (cd "$ROOT" && npm ci --omit=dev --include=optional --no-audit --no-fund --loglevel=error >> "$SNUGCODE_HOME/install.log" 2>&1); then
     CMD=(node "$ROOT/daemon/cli.js" cloud)
   else
