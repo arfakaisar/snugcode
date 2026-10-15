@@ -1129,3 +1129,32 @@ html.kb.short #modes { display: none; }
 .cardrow .card { padding-right: 56px; animation: none; }
 .cardrow .more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--dim); }
 .cardrow .more:active { transform: translateY(-50%) scale(.9); }
+
+/* Progress proses lama (web/ui/progress.js): bar bergerak + tahap + waktu & perkiraan sisa */
+.prog { padding: 14px; border-radius: var(--r-lg); background: var(--surface); text-align: left; animation: rise .4s var(--spring) both; }
+.prog .ptop { display: flex; align-items: baseline; gap: 10px; }
+.prog .plabel { flex: 1; min-width: 0; font-weight: 600; }
+.prog .ptime { flex: none; color: var(--dim); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.prog .pbar { position: relative; height: 8px; margin: 10px 0 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.prog .pbar i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width .5s linear; overflow: hidden; }
+/* Kilau yang terus berjalan: tanda hidup walau bar maju pelan */
+.prog .pbar i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent); transform: translateX(-100%); animation: pshine 1.6s ease-in-out infinite; }
+@keyframes pshine { to { transform: translateX(100%); } }
+.prog.ok .pbar i { background: var(--ok); }
+.prog.ok .pbar i::after, .prog.bad .pbar i::after { animation: none; display: none; }
+.prog.bad .pbar i { background: var(--bad); }
+.prog .pdetail { color: var(--dim); font-size: 12.5px; min-height: 1.2em; overflow-wrap: anywhere; }
+.prog.slow .pdetail::after { content: ' · lebih lama dari biasanya, masih berjalan'; }
+.prog .psteps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.prog .psteps li { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13px; }
+.prog .psteps li.now { color: var(--fg); font-weight: 600; }
+.prog .psteps li.done { color: var(--fg-2, var(--fg)); }
+.prog .psteps .pi { flex: none; width: 18px; height: 18px; display: grid; place-items: center; }
+.prog .psteps .pi:empty::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2, var(--line)); }
+.prog .psteps .pi svg { width: 16px; height: 16px; }
+.prog .psteps li.done .pi { color: var(--ok); }
+.prog .psteps .spinner { width: 14px; height: 14px; }
+.prog.bad .psteps li.now .pi { color: var(--bad); }
+.hero .prog { width: 100%; max-width: 420px; margin: 18px auto 0; }
+@media (prefers-reduced-motion: reduce) { .prog .pbar i::after { animation: none; } }
+#sheetBody .prog { margin: 12px 0; }
