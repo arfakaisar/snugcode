@@ -262,14 +262,17 @@ export async function stopRunnerNow(m) {
   await client().stop(c.name);
 }
 
+// Hapus runner: codespace-nya (bila HP ini punya izin Codespaces), secret-nya, dan mesinnya di akun.
+// @returns {Promise<{ codespace: boolean }>} codespace = codespace ikut terhapus
 export async function removeRunner(m, { quiet = false } = {}) {
-  const cs = client();
+  const cs = isCodespace(m) ? client() : null;
   const c = cs ? await codespaceOf(m).catch(() => null) : null;
   if (c) await cs.remove(c.name);
   await api('/api/machines/' + m.id, { method: 'DELETE' });
   if (cs) await cs.deleteSecrets(SECRET_NAMES).catch(() => {});
   for (const k of ['cloud.', 'cloudpin.', 'dev.']) store.set(k + m.id, null);
-  if (!quiet) toast('Runner dihapus');
+  if (!quiet) toast(c || !isCodespace(m) ? 'Runner dihapus' : 'Runner dihapus dari akun. Codespace-nya hapus manual di github.com/codespaces.', false, c ? 3200 : 6000);
+  return { codespace: !!c };
 }
 
 export async function openRunnerOnGithub(m) {

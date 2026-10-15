@@ -122,6 +122,20 @@ if (exe) {
   await P.shot('2-menu');
   await P.page.locator('#sheet').getByText('Perangkat terpasang').click();
   await P.page.waitForSelector('text=HP ini');
+  // Hapus mesin langsung dari daftar (tombol ⋯), tanpa tersambung ke mesinnya: runner cadangan yang offline.
+  await P.page.evaluate(() => localStorage.removeItem('pc.last'));
+  await P.page.reload();
+  await P.page.waitForSelector('.cardrow');
+  const before = await P.page.locator('.cardrow').count();
+  const spare = (await (await api('/api/machines')).json()).machines.find((m) => m.id !== prov.mid);
+  await P.page.locator('.cardrow', { hasText: spare.name }).filter({ hasNotText: 'online' }).first().locator('[aria-label^="Opsi"]').click();
+  await P.page.locator('#sheet').getByText('Hapus runner').first().click();
+  await P.page.waitForSelector('text=github.com/codespaces'); // tanpa izin Codespaces: codespace dihapus manual
+  await P.shot('4-hapus');
+  await P.page.locator('#sheet button.dangerfill').click();
+  await P.page.waitForFunction((n) => document.querySelectorAll('.cardrow').length === n - 1, before);
+  assert.equal((await (await api('/api/machines')).json()).machines.length, before - 1);
+  assert.ok(await P.page.locator('text=Cloud e2e').count(), 'runner yang dipakai tetap ada');
   assert.deepEqual(P.errors, []);
   await P.page.close();
   // Akun tanpa mesin: pilihan utama "Pakai cloud", wizard meminta izin Codespaces.
@@ -134,7 +148,7 @@ if (exe) {
   assert.deepEqual(E.errors, []);
   await browser.close();
   await sleep(3100); // batas satu percobaan pairing per 3 detik di daemon
-  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, layar tanpa mesin');
+  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, hapus mesin dari daftar, layar tanpa mesin');
 } else console.log('- Chrome tidak ditemukan: uji PWA runner cloud dilewati');
 
 // ---------- HP: pairing dengan PIN yang dibuat HP ----------

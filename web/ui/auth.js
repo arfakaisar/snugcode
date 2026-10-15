@@ -1,10 +1,10 @@
 // API relay, layar login GitHub, dan daftar PC.
 import { token, store } from '../conn.js';
 import { app } from './state.js';
-import { $, ago, coarse, copyText, greeting, h, haptic, ic, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
+import { $, ago, coarse, copyText, greeting, h, haptic, ic, menuItem, onLongPress, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { openMachine } from './machine.js';
 import { accountMenu } from './push.js';
-import { cloudSetupSheet, isCodespace } from './cloud.js';
+import { cloudSetupSheet, ghcs, isCodespace, removeRunner } from './cloud.js';
 
 // ---------- API relay ----------
 export async function api(path, opts = {}) {
@@ -36,6 +36,46 @@ export function showLogin() {
         h('a', { class: 'btn primary big', href: '/auth/login?kind=user', onclick: () => haptic() }, ic('github'), 'Login dengan GitHub'),
         h('div', { class: 'fine' }, 'Punya PC? Pakai akun GitHub yang sama dengan saat setup di PC. Tanpa PC? Pilih runner cloud setelah login.'),
       ),
+    ),
+  );
+}
+
+// ---------- Opsi per mesin: buka / hapus dari akun ----------
+// Bisa dipakai walau mesin offline atau runner macet (tidak perlu tersambung ke mesinnya).
+export function machineActions(m) {
+  const cloud = m.kind === 'cloud';
+  const what = cloud ? 'runner' : 'PC';
+  const remove = async () => {
+    const text = cloud
+      ? isCodespace(m)
+        ? ghcs()
+          ? 'Codespace runner beserta semua sesi, worktree, dan commit yang belum di-push dihapus permanen.'
+          : 'Runner dihapus dari akun. HP ini belum terhubung ke Codespaces, jadi codespace-nya perlu dihapus manual di github.com/codespaces.'
+        : 'Runner dihapus dari akun dan langsung terputus. Hentikan juga container-nya di server (docker rm -f snugcode).'
+      : 'PC ini dihapus dari akun dan langsung terputus. File & repo di PC tidak disentuh. Untuk menautkannya lagi, jalankan `snugcode setup` di PC.';
+    if (!(await ui.confirm({ title: `Hapus ${m.name}?`, text, ok: `Hapus ${what}`, danger: true, icon: 'trash', stay: true }))) return;
+    ui.sheet(ui.head('Menghapus…', { sub: m.name, close: false }), h('div', { class: 'loading' }, mascot('think'), h('span', { class: 'shimmer' }, cloud ? 'Menghapus runner…' : 'Menghapus PC dari akun…')));
+    try {
+      if (cloud) await removeRunner(m);
+      else {
+        const r = await api('/api/machines/' + m.id, { method: 'DELETE' });
+        if (r?.error) throw new Error(r.error);
+        store.set('dev.' + m.id, null);
+        toast('PC dihapus dari akun');
+      }
+      if (store.get('last')?.mid === m.id) store.set('last', null);
+      ui.closeSheet();
+      showMachines();
+    } catch (e) {
+      ui.closeSheet();
+      toast('Gagal menghapus: ' + e.message, true, 6000);
+    }
+  };
+  ui.sheet(
+    ui.head(m.name, { sub: (cloud ? (isCodespace(m) ? 'Runner Codespaces' : 'Runner server') : 'PC') + (m.online ? ' · online' : ' · offline') }),
+    h('div', { class: 'group' },
+      menuItem({ icon: cloud ? 'cloud' : 'monitor', t1: 'Buka', t2: m.online ? 'sesi & pengaturan' : cloud ? 'nyalakan & buka' : 'menunggu PC online', onclick: () => (ui.closeSheet(), openMachine(m)) }),
+      menuItem({ icon: 'trash', t1: `Hapus ${what}`, t2: cloud ? (isCodespace(m) ? 'codespace & mesinnya di akun' : 'dari akun snugcode') : 'dari akun snugcode', danger: true, chev: false, onclick: remove }),
     ),
   );
 }
@@ -105,13 +145,14 @@ export async function showMachines({ resume = false } = {}) {
   list.replaceChildren(
     h('div', { class: 'label' }, 'Komputer', h('span', { class: 'count' }, machines.length), online ? h('span', { class: 'tag on' }, online + ' online') : null),
     h('div', { class: 'list' },
-      ...machines.map((m, i) =>
-        h('button', { class: 'card pc' + (m.online ? ' online' : ''), style: `--i:${i}`, onclick: () => (haptic(), openMachine(m)) },
+      ...machines.map((m, i) => {
+        const card = h('button', { class: 'card pc' + (m.online ? ' online' : ''), style: `--i:${i}`, onclick: () => (haptic(), openMachine(m)) },
           h('span', { class: 'avatar' + (m.online ? '' : ' off') }, ic(m.kind === 'cloud' ? 'cloud' : 'monitor'), h('i', { class: 'live' })),
           h('span', { class: 'grow' }, h('div', { class: 'name' }, m.name), h('div', { class: 'sub' }, m.online ? (m.kind === 'cloud' ? 'online · runner cloud' : 'online · siap dipakai') : m.kind === 'cloud' ? 'tidur · ketuk untuk menyalakan' : 'offline · terakhir ' + (ago(m.lastSeen) || '-') + (m.lastSeen ? ' lalu' : ''))),
-          ic('right', 'chev'),
-        ),
-      ),
+        );
+        onLongPress(card, () => machineActions(m));
+        return h('div', { class: 'cardrow', style: `--i:${i}` }, card, h('button', { class: 'iconbtn more', 'aria-label': 'Opsi ' + m.name, title: 'Opsi', onclick: () => (haptic(6), machineActions(m)) }, ic('dots')));
+      }),
     ),
     h('details', { class: 'addpc' },
       h('summary', {}, ic('plus'), 'Tambah PC lain'),
