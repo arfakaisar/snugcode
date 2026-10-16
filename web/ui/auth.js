@@ -4,7 +4,7 @@ import { app } from './state.js';
 import { $, ago, coarse, copyText, greeting, h, haptic, ic, menuItem, onLongPress, pullToRefresh, scrollCol, skeletons, mascot, toast, ui } from './dom.js';
 import { openMachine } from './machine.js';
 import { accountMenu } from './push.js';
-import { cloudSetupSheet, ghcs, isCodespace, removeRunner } from './cloud.js';
+import { cloudSetupSheet, codespacesError, ghcs, isCodespace, removeRunner } from './cloud.js';
 
 // ---------- API relay ----------
 export async function api(path, opts = {}) {
@@ -68,7 +68,7 @@ export function machineActions(m) {
       showMachines();
     } catch (e) {
       ui.closeSheet();
-      toast('Gagal menghapus: ' + e.message, true, 6000);
+      if (!(await codespacesError(e, 'create'))) toast('Gagal menghapus: ' + e.message, true, 6000);
     }
   };
   ui.sheet(
