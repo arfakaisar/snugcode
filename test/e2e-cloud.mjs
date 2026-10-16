@@ -136,6 +136,14 @@ if (exe) {
   await P.page.waitForFunction((n) => document.querySelectorAll('.cardrow').length === n - 1, before);
   assert.equal((await (await api('/api/machines')).json()).machines.length, before - 1);
   assert.ok(await P.page.locator('text=Cloud e2e').count(), 'runner yang dipakai tetap ada');
+  // Izin Codespaces di HP ditolak GitHub (401) saat menyalakan runner: token dibuang & ada tombol hubungkan lagi.
+  await P.page.route('https://api.github.com/**', (r) => r.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"Bad credentials"}' }));
+  await P.page.evaluate(() => localStorage.setItem('pc.ghcs', JSON.stringify({ token: 'kedaluwarsa', login: 'x' })));
+  await P.page.locator('.cardrow', { hasText: 'tidur' }).first().locator('.card').click();
+  await P.page.waitForSelector('text=Hubungkan lagi GitHub Codespaces', { timeout: 20000 });
+  assert.equal(await P.page.evaluate(() => localStorage.getItem('pc.ghcs')), null, 'token yang ditolak dibuang');
+  await P.shot('5-hubungkan-lagi');
+  await P.page.unroute('https://api.github.com/**');
   assert.deepEqual(P.errors, []);
   await P.page.close();
   // Akun tanpa mesin: pilihan utama "Pakai cloud", wizard meminta izin Codespaces.
@@ -148,7 +156,7 @@ if (exe) {
   assert.deepEqual(E.errors, []);
   await browser.close();
   await sleep(3100); // batas satu percobaan pairing per 3 detik di daemon
-  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, hapus mesin dari daftar, layar tanpa mesin');
+  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, hapus mesin dari daftar, hubungkan lagi Codespaces saat izin ditolak, layar tanpa mesin');
 } else console.log('- Chrome tidak ditemukan: uji PWA runner cloud dilewati');
 
 // ---------- HP: pairing dengan PIN yang dibuat HP ----------

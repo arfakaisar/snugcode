@@ -1069,6 +1069,11 @@ test('Codespaces (PWA): fork, secret terenkripsi untuk repo fork saja, buat/cari
   await cs.deleteSecrets(SECRET_NAMES);
   assert.ok(calls.every((x) => x.auth === 'Bearer tok'));
   for (let i = 0; i < 50; i++) assert.match(randomPin(), C.PIN_RE);
+  // Token ditolak GitHub: pemanggil diberi tahu (PWA membuang token & menawarkan "Hubungkan lagi").
+  let dropped = 0;
+  const dead = new Codespaces('lama', { fetchImpl: async () => res(401, { message: 'Bad credentials' }), onAuthError: () => dropped++ });
+  await assert.rejects(dead.list(), (e) => e.status === 401 && /tidak berlaku/.test(e.message));
+  assert.equal(dropped, 1);
 });
 
 test('progress: bar maju sesuai tahap, tidak penuh sebelum selesai, perkiraan sisa & durasi dipelajari', async () => {
