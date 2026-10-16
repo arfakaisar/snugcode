@@ -11,7 +11,9 @@ import { progress } from './progress.js';
 export const ghcs = () => store.get('ghcs');
 export const cloudPin = (mid) => store.get('cloudpin.' + mid);
 export const isCodespace = (m) => m?.kind === 'cloud' && m.provider === 'codespace';
-const client = () => (ghcs() ? new Codespaces(ghcs().token) : null);
+// Token yang ditolak GitHub (401) langsung dibuang, sehingga layar berikutnya menawarkan "Hubungkan lagi".
+const client = () => (ghcs() ? new Codespaces(ghcs().token, { onAuthError: () => store.set('ghcs', null) }) : null);
+export const isAuthError = (e) => e?.status === 401;
 
 let health = null;
 async function runnerRepo() {
@@ -24,6 +26,14 @@ async function runnerRepo() {
 export function connectCodespaces(next = 'create') {
   store.set('cloudNext', next);
   location.href = '/auth/login?kind=gh';
+}
+
+// Kegagalan karena izin Codespaces tidak berlaku: tawarkan menghubungkan lagi (lalu kembali ke `next`).
+// @returns true bila sudah ditangani.
+export async function codespacesError(e, next = 'wake') {
+  if (!isAuthError(e)) return false;
+  if (await ui.confirm({ title: 'Hubungkan lagi GitHub Codespaces', text: 'Izin GitHub Codespaces di HP ini tidak berlaku lagi (dicabut atau kedaluwarsa). Hubungkan lagi untuk melanjutkan — runner & isinya tidak berubah.', ok: 'Hubungkan lagi', icon: 'github' })) connectCodespaces(next);
+  return true;
 }
 
 // Dipanggil saat boot (app.js) dengan isi fragmen URL.
@@ -191,7 +201,11 @@ async function createRunner(body, repo, user) {
   } catch (e) {
     p.fail();
     err.textContent = e.message;
-    body.append(h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => cloudSetupSheet() }, ic('refresh'), 'Coba lagi'));
+    body.append(
+      isAuthError(e)
+        ? h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: () => connectCodespaces('create') }, ic('github'), 'Hubungkan lagi GitHub Codespaces')
+        : h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => cloudSetupSheet() }, ic('refresh'), 'Coba lagi'),
+    );
   }
 }
 
@@ -285,7 +299,7 @@ export async function openRunnerOnGithub(m) {
 }
 
 // Tampilan untuk layar tunggu saat izin Codespaces belum ada di HP ini.
-export const connectButton = () => h('button', { class: 'btn primary', style: 'margin-top:16px', onclick: () => connectCodespaces('wake') }, ic('github'), 'Hubungkan Codespaces untuk menyalakan');
+export const connectButton = (label = 'Hubungkan Codespaces untuk menyalakan') => h('button', { class: 'btn primary', style: 'margin-top:16px', onclick: () => connectCodespaces('wake') }, ic('github'), label);
 export const wakeArt = () => mascot('think xl');
 
 // Pilihan "berhenti otomatis setelah N menit" (runner menghentikan dirinya sendiri lewat token dari HP).

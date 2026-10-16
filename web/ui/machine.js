@@ -9,7 +9,7 @@ import { pickModel } from './model-picker.js';
 import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
 import { sessionSub, showSessions, showSessionsMeta } from './sessions.js';
-import { cloudPin, connectButton, ghcs, idleSheet, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
+import { cloudPin, codespacesError, connectButton, connectCodespaces, ghcs, idleSheet, isAuthError, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
 import { routerSheet, settingsItems } from './settings.js';
 import { progress } from './progress.js';
 
@@ -119,6 +119,10 @@ function wakeScreen(m, msg, showStatus) {
       wp.fail(e.message);
       app.current.wakeProg = null;
       ui.sub('gagal menyalakan');
+      const hero = $view()?.querySelector('.hero');
+      // Izin Codespaces ditolak: hubungkan lagi, lalu runner dinyalakan otomatis saat kembali ke aplikasi.
+      if (isAuthError(e)) hero?.append(connectButton('Hubungkan lagi GitHub Codespaces'));
+      else hero?.append(h('button', { class: 'btn', style: 'margin-top:16px', onclick: () => wakeScreen(m, msg, showStatus) }, ic('refresh'), 'Coba lagi'));
     });
 }
 const $view = () => document.getElementById('view');
@@ -460,6 +464,7 @@ export function showMachineMenu() {
           menuItem({ icon: 'clock', t1: 'Berhenti otomatis', t2: idle ? `setelah ${idle} menit tidak dipakai${info.runner?.autoStop ? '' : ' · belum aktif'}` : 'mati — runner terus menyala', onclick: () => idleSheet(showMachineMenu) }),
           isCodespace(m) ? menuItem({ icon: 'stop', t1: 'Hentikan runner sekarang', t2: 'menyala lagi saat kamu membukanya', onclick: () => runnerAction('stop') }) : null,
           isCodespace(m) ? menuItem({ icon: 'github', t1: 'Buka codespace di GitHub', t2: 'log runner: /workspaces/.snugcode/cloud.log', onclick: () => runnerAction('github') }) : null,
+          isCodespace(m) ? menuItem({ icon: 'key', t1: ghcs() ? 'Hubungkan ulang GitHub Codespaces' : 'Hubungkan GitHub Codespaces (perlu)', t2: ghcs() ? `@${ghcs().login || '?'} · untuk menyalakan & menghentikan runner` : 'HP ini belum bisa menyalakan runner', onclick: () => connectCodespaces('wake') }) : null,
           isCodespace(m) ? menuItem({ icon: 'trash', t1: 'Hapus runner', t2: 'codespace beserta sesi & worktree-nya', danger: true, chev: false, onclick: () => runnerAction('remove') }) : null,
         )
       : null,
@@ -525,7 +530,7 @@ async function runnerAction(kind) {
     await removeRunner(m);
     goMachines();
   } catch (e) {
-    toast(e.message, true);
+    if (!(await codespacesError(e))) toast(e.message, true);
   }
 }
 

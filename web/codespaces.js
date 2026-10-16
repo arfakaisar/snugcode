@@ -26,10 +26,12 @@ export function randomPin(n = 10) {
 }
 
 export class Codespaces {
-  /** @param {string} token @param {{ fetchImpl?: typeof fetch }} [opts] */
-  constructor(token, { fetchImpl = globalThis.fetch.bind(globalThis) } = {}) {
+  // onAuthError: dipanggil saat GitHub menolak token (401) — mis. untuk membuang token lama di HP.
+  /** @param {string} token @param {{ fetchImpl?: typeof fetch, onAuthError?: () => void }} [opts] */
+  constructor(token, { fetchImpl = globalThis.fetch.bind(globalThis), onAuthError } = {}) {
     this.token = token;
     this.f = fetchImpl;
+    this.onAuthError = onAuthError;
   }
 
   async req(method, path, body) {
@@ -46,8 +48,9 @@ export class Codespaces {
     if (r.status === 204 || r.status === 202) return r.status === 202 ? await r.json().catch(() => null) : null;
     const data = await r.json().catch(() => null);
     if (!r.ok) {
-      const e = /** @type {Error & { status?: number }} */ (new Error(r.status === 401 ? 'Izin GitHub Codespaces habis atau dicabut. Hubungkan lagi.' : `GitHub ${r.status}: ${data?.message || 'gagal'}`));
+      const e = /** @type {Error & { status?: number }} */ (new Error(r.status === 401 ? 'Izin GitHub Codespaces di HP ini tidak berlaku lagi (dicabut atau kedaluwarsa).' : `GitHub ${r.status}: ${data?.message || 'gagal'}`));
       e.status = r.status;
+      if (r.status === 401) this.onAuthError?.();
       throw e;
     }
     return data;
