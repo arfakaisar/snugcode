@@ -2,6 +2,43 @@
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 
+## 2026-10-17 — Model apa pun, harness terbaik per model: login ChatGPT, API key otomatis, engine Codex
+
+Analisis & alasan desain: [`docs/analisis-harness-dan-provider.md`](docs/analisis-harness-dan-provider.md).
+
+### Koneksi model (pengganti "key 9router")
+- **Model & API key** di HP (Pengaturan PC), `snugcode connect` di terminal, atau `SNUGCODE_API_KEY` di runner:
+  tempel API key apa pun — Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq — atau key router
+  (9router, OmniRoute, LiteLLM, lokal) beserta URL-nya. Jenis key dikenali dari polanya (petunjuk tampil saat diketik),
+  key ambigu diuji ke beberapa provider sekaligus, format endpoint (Anthropic / OpenAI Chat / Responses) dideteksi
+  tanpa memakan token, lalu daftar model dan model default terisi otomatis.
+- **Login ChatGPT** (Plus/Pro) lewat Codex resmi dengan kode perangkat yang bisa diselesaikan di HP
+  (`daemon/codex.js`, RPC `chatgptLogin`; `snugcode connect chatgpt`).
+- Token langganan Claude (`sk-ant-oat…`), OAuth Google, dan admin key ditolak dengan penjelasan: Anthropic & Google
+  melarang langganan Pro/Max / login Gemini CLI dipakai aplikasi pihak ketiga.
+- Banyak koneksi sekaligus; model dirujuk `<koneksi>:<model>`. Router lama (`routerUrl` + `routerKey`) dipindahkan
+  otomatis menjadi koneksi `router` dengan referensi model yang sama, jadi sesi lama tetap jalan. Pemilih model
+  mengelompokkan per koneksi, menampilkan engine, dan koneksi yang gagal.
+
+### Engine per model
+- **Claude Agent SDK** untuk model Claude dan endpoint format Anthropic (langsung ke `api.anthropic.com` dengan
+  `x-api-key` & prompt cache native; endpoint Anthropic DeepSeek/Kimi/GLM/OpenRouter).
+- **Codex** (`codex app-server`, versi dipatok) untuk model GPT (ChatGPT, OpenAI, router dengan Responses API):
+  izin perintah/perubahan file/pertanyaan lewat kebijakan snugcode yang sama, checkpoint sebelum giliran, sandbox
+  OS yang menolak membaca folder data snugcode, tool `dev_*`/`preview_screenshot` lewat jembatan MCP
+  (`daemon/mcp-bridge.js`). Key API tidak pernah diberikan ke Codex (provider kustom → loopback proxy).
+- **Penerjemah format** (`daemon/translate.js`): endpoint yang hanya punya OpenAI Chat Completions (Gemini API, Groq,
+  xAI, router) tetap bisa dipakai Claude Agent SDK — tool call & hasil, gambar, stream, error, cache token, skema tool
+  & thought signature Gemini 3, effort → `reasoning_effort`.
+- Loopback proxy kini multi-rute: satu token lokal per koneksi+format; key yang diganti dari HP langsung berlaku.
+- Model ringan subagen dari koneksi yang sama (Haiku, Flash, …); `SNUGCODE_ENGINE=claude` memaksa Claude Agent SDK.
+
+### Lainnya
+- Branding: snugcode tidak lagi menyebut dirinya "Claude Code" (pedoman Agent SDK).
+- Uji: `test/providers.test.js` (deteksi, routing, penerjemah, proxy, Codex, login ChatGPT tiruan) dan
+  `npm run test:e2e:connections` (koneksi dari HP, penerjemah dengan Claude Agent SDK asli, Codex asli dengan izin dari
+  HP, sandbox, jembatan MCP; juga di CI).
+
 ## 2026-10-16 — Izin Codespaces yang ditolak bisa disambung lagi (#8)
 
 - Saat GitHub menolak token Codespaces di HP (401: dicabut/kedaluwarsa), token itu langsung dibuang
