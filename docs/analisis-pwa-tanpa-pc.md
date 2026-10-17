@@ -6,9 +6,10 @@
 
 ---
 
-## Status implementasi (2026-10-15)
+## Status implementasi (diperbarui 2026-10-17)
 
-Rekomendasi dokumen ini sudah diimplementasikan (fase 1–4 di §9). Ringkasnya:
+Rekomendasi dokumen ini sudah diimplementasikan dan di-merge ke `main` (PR #3), lalu diperkuat di PR #4–#8.
+Dokumentasi pengguna ada di README → *Tanpa PC: runner cloud*; detail teknis di `master.md` → *Runner cloud*.
 
 | Bagian | File | Status |
 |---|---|---|
@@ -17,12 +18,31 @@ Rekomendasi dokumen ini sudah diimplementasikan (fase 1–4 di §9). Ringkasnya:
 | Runner headless + supervisor + berhenti saat menganggur | `daemon/runner.js`, `snugcode cloud` | ✓ diuji unit & e2e |
 | Relay: provision mesin cloud, OAuth scope `codespace` | `relay/src/index.js` | ✓ provision diuji e2e; OAuth butuh GitHub asli |
 | Codespaces dari PWA (wizard, secret sealed box, bangunkan/hentikan/hapus) | `web/codespaces.js`, `web/ui/cloud.js`, `shared/sealedbox.js` | ✓ klien diuji dengan mock API; sealed box diuji dengan vektor libsodium |
-| Runner Codespaces & Docker | `.devcontainer/`, `Dockerfile` | ✓ jalur `npm pack` + instal global diuji; belum dijalankan di Codespaces asli |
+| Runner Codespaces & Docker | `.devcontainer/`, `Dockerfile` | ✓ jalur `npm pack` + instal global diuji |
+| Laporan tahap/error runner ke HP (#5) | `.devcontainer/lib.sh`, `POST /api/runner/status`, `web/ui/cloud.js` | ✓ diuji e2e |
+| Progress bar tahap + perkiraan sisa (#7), hapus mesin dari daftar (#6) | `web/ui/progress.js`, `web/eta.js`, `web/ui/auth.js` | ✓ unit (progress) & e2e (hapus runner offline) |
+| Token Codespaces 401 → "Hubungkan lagi" (#8) | `web/codespaces.js` (`onAuthError`), `web/ui/cloud.js`, `web/ui/machine.js` | ✓ unit & e2e |
+| Deploy relay/PWA dari GitHub Actions (#4) | `.github/workflows/deploy.yml` | ✓ |
 
-**Sebelum dipakai pengguna:**
-1. Merge ke `main` — `.devcontainer/install.sh` memasang `github:arfakaisar/snugcode` (main), dan fork baru menyalin isi `main`.
-2. `npm run deploy` agar relay & PWA baru aktif.
-3. Uji sekali di Codespaces asli (risiko §8 yang hanya bisa dibuktikan di sana): secret tersedia di `postStartCommand`, perilaku idle timeout saat agen bekerja, dan izin `codespace` untuk OAuth App snugcode.
+**Yang masih terbuka:**
+1. Perilaku idle timeout Codespaces saat agen bekerja lama tanpa interaksi editor (risiko §8.1). Runner memakai
+   `idle_timeout_minutes` 240 sebagai pengaman dan menghentikan dirinya sendiri saat benar-benar menganggur.
+2. Fase 4 yang belum dikerjakan: tampilan kuota (API billing), notifikasi "runner berhenti", dan prebuild codespace.
+3. Fase 5 (opsional) belum dimulai: provider Fly/Cloudflare Containers, terminal PTY, file explorer, Mode Ringan.
+
+### Implementasi vs rencana
+Bagian §1–§10 di bawah adalah analisis asli (sebelum implementasi) dan sengaja tidak ditulis ulang; angka baris
+dan "kondisi saat ini" di §2 adalah keadaan sebelum runner cloud dibuat. Perbedaan penting dengan hasil akhirnya:
+
+| Rencana (§5–§6) | Implementasi |
+|---|---|
+| Secret `SNUGCODE_MACHINE_ID` terpisah | Tidak ada: ID mesin & akun dibaca dari payload token mesin. Secret = `SNUGCODE_MACHINE_TOKEN`, `SNUGCODE_PAIR_PIN`, `SNUGCODE_RELAY`, dibatasi ke repo fork. |
+| OAuth `/auth/login?kind=user&scope=codespace` | `/auth/login?kind=gh` → token di fragmen `#gh=…&ghlogin=…`; PWA memeriksa akunnya sama dengan login snugcode. |
+| `web/ui/cloud.js` berisi klien Codespaces; wizard baru `web/ui/setup.js` | Klien tanpa DOM di `web/codespaces.js` (bisa diuji di Node); wizard runner di `web/ui/cloud.js`; setelan mesin (key 9router, perangkat, PIN) di `web/ui/settings.js`. Tidak ada `setup.js`. |
+| Codespace dari "template repo" | Codespace dari **fork** repo snugcode milik pengguna (`RUNNER_REPO`), dibuat dengan `display_name = "snugcode <mid>"` agar bisa ditemukan dari HP lain. |
+| `runtime: 'cloud'` mematikan sesi "Komputer" dan IPC/TUI | Hanya anti-sleep & autostart yang dimatikan. Mode Komputer dan TUI tetap tersedia di runner (bekerja di dalam container; terminal yang tersambung dihitung "aktif"). |
+| Simpan `ref` (nama codespace) di relay; rate-limit `provision` | Nama codespace disimpan di HP (dan dicari lewat `display_name`); relay hanya membatasi 3 mesin cloud per akun. |
+| `RPC runtimeStatus` | Digabung ke `info` (`runtime`, `routerConfigured`, `runner`) + RPC `runnerConfig` untuk token & menit menganggur. |
 
 ---
 
@@ -46,9 +66,9 @@ Codespaces lebih dulu, lalu siapkan image Docker yang sama untuk provider lain.
 
 ---
 
-## 2. Peta sistem saat ini
+## 2. Peta sistem saat ini (sebelum runner cloud)
 
-±13 ribu baris JS tanpa framework, Node 22+, ESM, `tsc --checkJs`, CI di 3 OS + e2e.
+±13 ribu baris JS tanpa framework, Node 22+, ESM, `tsc --checkJs`, CI di 3 OS + e2e. (Kini ±15 ribu baris.)
 
 ```
 HP (PWA, web/)  ──wss E2EE──►  Relay (relay/, CF Worker + DO)  ◄──wss E2EE──  Daemon (daemon/, di PC)
