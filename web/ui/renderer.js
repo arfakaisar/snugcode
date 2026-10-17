@@ -170,7 +170,7 @@ export class Renderer {
       case 'permAnswer':
         return this.permAnswer(e);
       case 'retry':
-        return this.line('note', `↻ 9router error ${e.status ?? ''} — mencoba lagi (${e.attempt}/${e.max})…`);
+        return this.line('note', `↻ error model ${e.status ?? ''} — mencoba lagi${e.attempt ? ` (${e.attempt}/${e.max})` : ''}…`);
       case 'done': {
         this.activity = '';
         const txt = e.ok ? ['selesai', ...doneParts(e)].join(' · ') : `berhenti · ${e.err || 'error'}`;

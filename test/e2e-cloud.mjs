@@ -1,6 +1,6 @@
 // Uji end-to-end runner cloud (tanpa PC): PWA mendaftarkan mesin lewat /api/machines/provision,
 // `snugcode cloud` berjalan dari env saja (seperti di Codespaces/Docker), HP memasangkan diri dengan
-// PIN yang dibuatnya sendiri, lalu seluruh setelan (key 9router, PIN, perangkat) diatur dari HP.
+// PIN yang dibuatnya sendiri, lalu seluruh setelan (API key model, PIN, perangkat) diatur dari HP.
 // Juga memastikan GITHUB_TOKEN dari environment tidak terlihat oleh agen/shell, dan restart dari HP
 // ditangani supervisor.
 //   Terminal 1: npm run dev:relay      Terminal 2: npm run test:e2e:cloud
@@ -81,12 +81,12 @@ await until(() => /Terhubung ke relay/.test(rlog), 'runner tersambung');
 const cfg = JSON.parse(fs.readFileSync(path.join(HOME, 'config.json'), 'utf8'));
 assert.equal(cfg.runtime, 'cloud');
 assert.equal(cfg.machineId, prov.mid);
-assert.match(rlog, /Key 9router belum diisi/);
+assert.match(rlog, /Belum ada model tersambung/);
 ({ machines } = await (await api('/api/machines')).json());
 assert.equal(machines.find((m) => m.id === prov.mid).online, true);
-ok('snugcode cloud: konfigurasi dari env, tersambung ke relay tanpa key 9router');
+ok('snugcode cloud: konfigurasi dari env, tersambung ke relay tanpa API key model');
 
-// ---------- PWA di Chromium: pairing otomatis, key 9router dari HP, menu runner, layar tanpa mesin ----------
+// ---------- PWA di Chromium: pairing otomatis, API key dari HP, menu runner, layar tanpa mesin ----------
 const exe = process.env.CHROME || findBrowser();
 if (exe) {
   const { chromium } = await import('playwright-core');
@@ -108,17 +108,21 @@ if (exe) {
   await P.page.waitForSelector('text=Cloud e2e');
   assert.match(await P.page.locator('.card.pc').first().innerText(), /runner cloud/);
   await P.page.locator('text=Cloud e2e').first().click();
-  await P.page.waitForSelector('text=Satu langkah lagi', { timeout: 20000 });
+  await P.page.waitForSelector('text=Sambungkan model', { timeout: 20000 });
   assert.equal(await P.page.locator('text=Pasangkan HP ini').count(), 0, 'tanpa layar PIN');
   await P.shot('1-key');
-  await P.page.fill('input[aria-label="API key 9router"]', 'salah');
-  await P.page.click('text=Simpan & uji');
-  await P.page.waitForSelector('text=Key ditolak router');
+  // Key yang tidak dikenali: kolom URL router terbuka sendiri; key salah ditolak endpoint-nya.
+  await P.page.fill('input[aria-label="API key"]', 'salah');
+  await P.page.waitForSelector('text=Jenis key tidak dikenali');
+  assert.ok(await P.page.locator('input[aria-label="URL router atau endpoint"]').isVisible(), 'kolom URL terbuka');
+  await P.page.fill('input[aria-label="URL router atau endpoint"]', routerUrl);
+  await P.page.locator('#sheet button', { hasText: /^Sambungkan$/ }).click();
+  await P.page.waitForSelector('text=Key ditolak');
   await P.page.locator('#sheet:not([hidden]) [aria-label="Tutup"]').first().click();
   await P.page.waitForSelector('#sheet', { state: 'hidden' });
   await P.page.click('[aria-label="Pengaturan PC"]');
   await P.page.waitForSelector('text=Runner cloud');
-  for (const t of ['Cloud · container', 'Key 9router (perlu)', 'Perangkat terpasang', 'PIN untuk HP lain', 'Berhenti otomatis']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
+  for (const t of ['Cloud · container', 'Model & API key (perlu)', 'Perangkat terpasang', 'PIN untuk HP lain', 'Berhenti otomatis']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
   await P.shot('2-menu');
   await P.page.locator('#sheet').getByText('Perangkat terpasang').click();
   await P.page.waitForSelector('text=HP ini');
@@ -156,7 +160,7 @@ if (exe) {
   assert.deepEqual(E.errors, []);
   await browser.close();
   await sleep(3100); // batas satu percobaan pairing per 3 detik di daemon
-  ok('PWA: pairing otomatis dengan PIN runner, sheet key 9router + validasi, menu runner, hapus mesin dari daftar, hubungkan lagi Codespaces saat izin ditolak, layar tanpa mesin');
+  ok('PWA: pairing otomatis dengan PIN runner, sheet API key + deteksi + validasi, menu runner, hapus mesin dari daftar, hubungkan lagi Codespaces saat izin ditolak, layar tanpa mesin');
 } else console.log('- Chrome tidak ditemukan: uji PWA runner cloud dilewati');
 
 // ---------- HP: pairing dengan PIN yang dibuat HP ----------
@@ -185,8 +189,8 @@ ok('HP terpasang dengan PIN dari env; info: runtime cloud, router belum dikonfig
 
 // ---------- setelan dari HP ----------
 const s = await A.conn.call('create', { local: repo });
-await assert.rejects(A.conn.call('send', { id: s.id, text: 'halo' }), /Key 9router belum diisi/);
-await assert.rejects(A.conn.call('configure', { routerKey: 'salah' }), /Key ditolak router/);
+await assert.rejects(A.conn.call('send', { id: s.id, text: 'halo' }), /Model & API key/);
+await assert.rejects(A.conn.call('configure', { routerKey: 'salah' }), /Key ditolak/);
 await assert.rejects(A.conn.call('configure', { routerKey: KEY, routerUrl: 'ftp://x' }), /http/);
 const info2 = await A.conn.call('configure', { routerKey: KEY });
 assert.equal(info2.routerConfigured, true);
@@ -198,7 +202,7 @@ await A.conn.call('send', { id: s.id, text: 'halo cloud' });
 await waitEv((e) => e.k === 'done', 'agen selesai');
 assert.ok(A.events.find((e) => e.k === 'done').ok, JSON.stringify(A.events.slice(-3)));
 assert.ok(routerLog.some((l) => l.auth === 'Bearer ' + KEY && l.url.includes('/messages')), 'key dari HP dipakai proxy');
-ok('key 9router dari HP: divalidasi, disimpan, dipakai agen');
+ok('key router dari HP (bentuk lama `configure`): divalidasi, disimpan, dipakai agen');
 
 // GITHUB_TOKEN dari environment runner tidak terlihat oleh `!perintah` maupun proses agen.
 A.events.length = 0;
