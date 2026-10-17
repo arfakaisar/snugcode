@@ -1,9 +1,18 @@
 # Changelog
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
-(Menggantikan `change1.md` dan `fix-native-binary.md`.)
 
-## 2026-10-15 — Progress yang jelas untuk proses lama
+## 2026-10-16 — Izin Codespaces yang ditolak bisa disambung lagi (#8)
+
+- Saat GitHub menolak token Codespaces di HP (401: dicabut/kedaluwarsa), token itu langsung dibuang
+  (`Codespaces` `onAuthError`) dan layar menawarkan jalan keluar, bukan hanya pesan error:
+  - menyalakan runner: tombol **Hubungkan lagi GitHub Codespaces** (setelah kembali ke aplikasi, runner
+    dinyalakan otomatis); kegagalan lain mendapat tombol **Coba lagi**;
+  - menu runner, hapus mesin, dan wizard: 401 membuka konfirmasi / tombol hubungkan lagi;
+  - menu runner: **Hubungkan ulang GitHub Codespaces** selalu tersedia.
+- Uji: unit (`onAuthError`) dan e2e-cloud di Chromium (api.github.com 401 → tombol muncul, token dibuang).
+
+## 2026-10-15 — Progress yang jelas untuk proses lama (#6, #7)
 
 - Komponen progress (`web/ui/progress.js`, perhitungan di `web/eta.js`): bar yang terus bergerak,
   daftar tahap (selesai / sedang / berikutnya), waktu berjalan, dan perkiraan sisa. Di dalam satu
@@ -14,9 +23,32 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   Chromium / snugcode / menyalakan), menyalakan runner yang tidur, menghubungkan ke mesin,
   pembaruan PC dari HP (pasang → restart → tersambung lagi), membuat sesi repo (clone), dan push.
 - Runner melaporkan langkahnya (`step`) ke relay bersama tahap & pesan.
-- Mesin bisa dihapus langsung dari daftar (tombol ⋯), juga saat offline atau macet.
+- Mesin bisa dihapus langsung dari daftar (tombol ⋯ atau tekan lama), juga saat offline atau macet. PC
+  dihapus dari akun (daemon langsung terputus) dan pairing di HP dibersihkan; runner Codespaces ikut
+  menghapus codespace + secret bila HP punya izin Codespaces (bila tidak, diberi tahu untuk menghapus
+  manual); runner server diingatkan menghentikan container-nya.
+- Uji `procs` di Windows memakai batas bawaan `waitPort` (30 dtk), bukan 10 dtk yang lebih ketat dari
+  kodenya sendiri (sebelumnya gagal sesekali di runner CI Windows).
 
-## 2026-10-15 — snugcode tanpa PC: runner cloud dari HP
+## 2026-10-15 — Runner melaporkan tahap & error ke HP, workflow Deploy (#4, #5)
+
+### Runner yang macet tidak lagi diam
+- `.devcontainer/lib.sh`: runner melaporkan tahap (memasang, menyalakan, error + baris log terakhir) ke
+  relay lewat `POST /api/runner/status` dengan token mesinnya; relay menyimpannya sebagai `boot` di
+  `/api/machines`. Folder data dibuat dengan sudo, atau pindah ke `~/.snugcode` bila `/workspaces` tidak
+  bisa ditulis.
+- `install.sh`: log ke `install.log`, kegagalan npm dilaporkan. `start.sh`: binary dicari di PATH & folder
+  global npm; bila paket global gagal, daemon dijalankan dari kode repo codespace; daemon yang langsung
+  mati dilaporkan. `snugcode cloud`: kegagalan konfigurasi dilaporkan ke relay.
+- PWA: wizard & layar menyalakan runner menampilkan tahap/error dari runner, dan gagal cepat bila
+  codespace menyala 6 menit tanpa laporan (secret tidak sampai / skrip tidak jalan).
+
+### Deploy tanpa PC
+- Workflow `Deploy` (`.github/workflows/deploy.yml`): `npm run deploy` otomatis saat `main` berubah di
+  `relay/`, `web/`, atau `shared/`, atau manual lewat *Run workflow*. Butuh secret repo
+  `CLOUDFLARE_API_TOKEN` (`CLOUDFLARE_ACCOUNT_ID` opsional); memeriksa `/api/health` setelah deploy.
+
+## 2026-10-15 — snugcode tanpa PC: runner cloud dari HP (#3)
 
 ### Runner cloud (GitHub Codespaces / Docker)
 - `snugcode cloud` (`daemon/runner.js`): daemon yang sama dengan di PC, dikonfigurasi dari env
@@ -65,6 +97,18 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   135–178 detik / 45–53 request → 52–72 detik / 13–16 request, token input turun ±60%.
 - System prompt: arahan efisiensi diperjelas (gabungkan tool call yang independen, baca file
   utuh, Grep `content`), menggantikan arahan lama yang mendorong membaca potongan offset/limit.
+
+## 2026-10-11 — Mode Komputer: agen dengan akses seluruh PC
+
+- Jenis sesi baru di samping sesi repo (worktree) dan folder lokal: **Komputer** (`computer: true`,
+  repo `Komputer`). Berjalan di folder pilihan (bawaan home) tanpa clone/worktree/branch; agen boleh membaca
+  dan mengedit file di seluruh PC tanpa bertanya (Bash tetap lewat izin). Folder data snugcode dan aksi ke
+  remote tetap dijaga.
+- System prompt sendiri (`SNUGCODE_COMPUTER_PROMPT`): tidak dibatasi satu repo.
+- Tanpa checkpoint/rewind dan template `.env`; git status/diff dicoba di folder kerja (kosong bila bukan
+  repo). Menghapus sesi hanya menghapus riwayatnya.
+- PWA: **Sesi baru** punya tab *Repository* / *Komputer* (folder awal + model). TUI: `snugcode --computer`
+  (`-c`), `/computer`, dan pilihan "Sesi Komputer" di pemilih sesi.
 
 ## 2026-10-09 — Alamat singkat, ikon baru, perbaikan beranda
 
