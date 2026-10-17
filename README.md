@@ -100,7 +100,7 @@ Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan
 <td valign="top">
 
 **Kredensial tidak keluar dari PC**<br>
-<sub>API key AI dan token GitHub hanya tersimpan di `~/.snugcode`, tidak pernah dikirim ke HP maupun relay.</sub>
+<sub>API key AI dan token GitHub hanya tersimpan di `~/.snugcode` (di PC atau runner cloud-mu), tidak pernah dikembalikan ke HP dan tidak terbaca relay.</sub>
 
 </td>
 <td valign="top">
@@ -191,6 +191,7 @@ Tangkapan layar mengikuti tema GitHub-mu: tema gelap atau terang.
 - **Kirim gambar** dari kamera atau galeri (maks. 4 per pesan).
 - **Checkpoint & rewind** ke kondisi sebelum prompt mana pun.
 - **Shell langsung** — `!npm test`, `!git status`, output di-stream ke HP.
+- **Mode Komputer** — sesi tanpa repo/worktree yang bisa membaca, mengedit, dan menjalankan perintah di seluruh PC, seperti `claude` biasa. Lihat [Mode Komputer](#mode-komputer).
 
 </td>
 <td width="50%" valign="top">
@@ -210,8 +211,10 @@ Tangkapan layar mengikuti tema GitHub-mu: tema gelap atau terang.
 #### Sistem
 
 - **Web Push** saat agen selesai, butuh izin, atau bertanya — juga saat PWA ditutup.
-- **Anti-sleep** selama sesi aktif (Away Mode / `caffeinate` / `systemd-inhibit`).
+- **Anti-sleep** selama daemon berjalan di PC (Away Mode / `caffeinate` / `systemd-inhibit`).
 - **Update jarak jauh 1-tap** dari HP, dengan banner saat ada versi baru.
+- **Setelan PC dari HP** — key 9router, perangkat terpasang, PIN, dan login GitHub, tanpa terminal.
+- **Progress yang jelas** untuk proses lama (membuat runner, update, clone, push): tahap, waktu berjalan, dan perkiraan sisa.
 - **Pemilih model** dengan slider effort (`low → max`) dan uji kesehatan model otomatis.
 - **Tema gelap & terang**, mengikuti sistem atau dipilih manual.
 
@@ -328,12 +331,21 @@ flowchart LR
    yang **dienkripsi di HP** (sealed box), lalu membuat codespace. HP langsung terpasang tanpa mengetik PIN.
 5. Tempel **key 9router** (diuji dulu sebelum disimpan) dan login GitHub untuk clone/push — semuanya dari HP.
 
+Selama runner disiapkan, aplikasi menampilkan tahap nyata dari codespace (menyiapkan mesin → Chromium → memasang
+snugcode → menyalakan) beserta perkiraan sisa waktu. Bila skrip runner gagal, pesan error dan baris log terakhirnya
+dikirim ke HP, jadi kamu tidak perlu membuka terminal codespace.
+
 | | |
 |---|---|
 | **Biaya** | Kuota gratis GitHub: 120 core-hour/bulan untuk akun Free (±60 jam runner 2-core), 180 untuk Pro. |
 | **Berhenti sendiri** | Setelah 30 menit tidak dipakai (bisa 15 menit – 2 jam, atau mati) — tidak ada agen/perintah/dev server berjalan dan aplikasi tidak dibuka. |
 | **Menyala lagi** | Otomatis saat kamu membuka runner di aplikasi (±30–60 detik). Sesi, worktree, dan riwayat tetap ada di `/workspaces/.snugcode`. |
 | **Fitur** | Sama dengan PC: agen, izin, Run & Preview (Chromium terpasang), git/PR, Web Push, update jarak jauh. |
+| **Batas** | Satu runner Codespaces dari wizard (bisa *Buat ulang*), maksimal 3 mesin cloud per akun. |
+| **Hapus** | Tombol ⋯ di daftar mesin (juga saat offline/macet): codespace, secret, dan mesinnya ikut dihapus. |
+
+Izin Codespaces di HP dicabut atau kedaluwarsa? Aplikasi menawarkan **Hubungkan lagi GitHub Codespaces**; runner
+dan isinya tidak berubah.
 
 **Server sendiri (Docker / VPS):** di wizard yang sama, *Server sendiri* membuat perintah `docker build … && docker run …`
 lengkap dengan token mesin & PIN (lihat [`Dockerfile`](Dockerfile)). Untuk penyedia lain, jalankan `snugcode cloud`
@@ -368,7 +380,7 @@ snugcode autostart on
 > Tanpa install global: `npx github:arfakaisar/snugcode setup`, lalu `npx github:arfakaisar/snugcode start`.
 
 > [!NOTE]
-> PC harus menyala selama dipakai dari HP. snugcode mencegah PC tertidur selama sesi aktif, tapi kalau PC tertidur karena idle, ubah pengaturan sleep: di Windows, Settings → System → Power → Sleep: *Never* (saat dicolok).
+> PC harus menyala selama dipakai dari HP. snugcode meminta OS agar tidak tidur selama daemon berjalan, tapi kalau PC tetap tertidur karena idle, ubah pengaturan sleep: di Windows, Settings → System → Power → Sleep: *Never* (saat dicolok).
 
 ---
 
@@ -427,6 +439,22 @@ Env `PORT` diisi port bebas, dan `{port}` diganti dengan port yang sama. **Previ
 > [!TIP]
 > File `.env` tidak ikut di worktree baru. Buka menu sesi → **Simpan .env sebagai template**, maka file itu dipulihkan otomatis di setiap sesi baru repo yang sama.
 
+### Mode Komputer
+
+**Sesi baru** punya dua tab: **Repository** (clone + worktree terisolasi, seperti di atas) dan **Komputer**. Sesi
+Komputer berjalan di folder mana pun yang kamu pilih (bawaan: home `~`) tanpa clone, tanpa worktree, dan tanpa
+branch baru. Agen boleh membaca dan mengedit file di seluruh PC, seperti `claude` biasa di terminal.
+
+- Baca dan edit file di mana pun langsung diterapkan; perintah Bash yang tidak read-only tetap meminta izin (kecuali auto-izin).
+- **Tidak ada checkpoint & rewind**, dan template `.env` tidak tersedia. Git hanya menampilkan status/diff bila folder kerjanya repo git.
+- Folder data `~/.snugcode` tetap tertutup untuk agen, dan `git push` / `gh pr create` tetap selalu meminta izin.
+- Menghapus sesi Komputer hanya menghapus riwayatnya; file di PC tidak disentuh.
+- Dari terminal: `snugcode --computer` (atau `-c`), atau `/computer` di dalam TUI.
+
+> [!WARNING]
+> Mode Komputer sengaja tidak terisolasi. Pakai untuk tugas sistem (merapikan file, konfigurasi, skrip lintas
+> folder); untuk mengubah kode repo, sesi Repository lebih aman karena bisa di-rewind.
+
 ---
 
 ## Terminal: `snugcode`
@@ -436,6 +464,7 @@ cd proyek-kamu
 snugcode                     # atau singkatnya: snug
 snugcode "jelaskan repo ini" # langsung kirim prompt
 snugcode --pick              # pilih sesi lain (termasuk sesi dari HP)
+snugcode --computer          # sesi Mode Komputer di folder ini (akses seluruh PC)
 ```
 
 - Folder repo git tempat kamu menjalankan `snugcode` langsung menjadi sesinya, tanpa clone. Sesi terakhir di folder itu otomatis dilanjutkan.
@@ -447,7 +476,7 @@ snugcode --pick              # pilih sesi lain (termasuk sesi dari HP)
 | `enter` | kirim; saat agen bekerja, pesan masuk antrean |
 | `\` + `enter` / `alt+enter` | baris baru |
 | `!` | mode shell (perintah langsung di folder sesi) |
-| `/` | perintah: `/model` `/sessions` `/new` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/edits` `/update` `/help` … |
+| `/` | perintah: `/model` `/default` `/sessions` `/new` `/computer` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/edits` `/login` `/update` `/clean` `/help` … |
 | `esc` | hentikan agen |
 | `ctrl+o` | output lengkap tool terakhir |
 | `ctrl+c` ×2 | keluar (sesi tetap berjalan di PC) |
@@ -459,6 +488,7 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 | Perintah | Fungsi |
 |---|---|
 | `snugcode` / `snug` | UI terminal |
+| `snugcode --computer` / `-c` | UI terminal dengan sesi Mode Komputer |
 | `snugcode setup` | Setup / ubah konfigurasi |
 | `snugcode login` | Login ulang GitHub saja |
 | `snugcode start` | Jalankan daemon di terminal ini |
@@ -466,11 +496,14 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 | `snugcode update` | Periksa dan pasang pembaruan |
 | `snugcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
 | `snugcode clean` | Pindai & bersihkan worktree / repo yatim |
-| `snugcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali |
+| `snugcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali (lalu `snugcode restart`) |
 | `snugcode devices` | Daftar HP yang sudah dipasangkan |
-| `snugcode revoke <id\|all>` | Cabut akses HP |
+| `snugcode revoke <id\|all>` | Cabut akses HP (lalu `snugcode restart`; dari HP langsung berlaku) |
 | `snugcode status` | Ringkasan konfigurasi |
 | `snugcode cloud` | Runner cloud tanpa PC (Codespaces/Docker): konfigurasi dari env, setelan lain dari HP |
+| `snugcode help` | Daftar perintah |
+
+PIN, perangkat, dan key 9router juga bisa diatur dari HP: **Pengaturan PC → Router & akses**.
 
 <details>
 <summary><b>Lokasi data di PC</b></summary>
@@ -481,16 +514,20 @@ Semua data disimpan di `~/.snugcode` (bisa diganti dengan env `SNUGCODE_HOME`). 
 ~/.snugcode/
 ├── config.json          # nama PC, relay, model default, …
 ├── secrets.json         # key 9router, token GitHub, PIN (hash), device secret HP
-├── daemon.log           # log daemon latar belakang
+├── daemon.log           # log daemon latar belakang (daemon.pid, daemon.sock: proses & kanal terminal)
 ├── workspaces/
 │   └── <owner>__<repo>/
-│       ├── _base/       # clone dasar
+│       ├── _base/       # clone dasar (disimpan 3 hari setelah sesi terakhirnya dihapus)
 │       └── s-<id>/      # worktree per sesi
-├── sessions/            # riwayat event per sesi (JSONL)
+├── sessions/            # index.json + riwayat event per sesi (JSONL)
 ├── env/                 # template .env per repo
-├── bin/                 # cloudflared (diunduh otomatis)
-└── claude/              # CLAUDE_CONFIG_DIR terpisah dari Claude Code pribadimu
+├── bin/                 # cloudflared (diunduh otomatis), shim pnpm/yarn di bin/pm
+├── tools/               # corepack (dipasang sekali bila pnpm/yarn tidak ada)
+└── claude/              # CLAUDE_CONFIG_DIR terpisah dari Claude Code pribadimu (termasuk plans/)
 ```
+
+Di runner Codespaces folder ini adalah `/workspaces/.snugcode` (bertahan saat codespace berhenti), ditambah
+`cloud.log` dan `install.log`. Di container Docker: volume `/data`.
 </details>
 
 ---
@@ -524,6 +561,7 @@ sequenceDiagram
 - **`~/.snugcode` tertutup untuk agen** — Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
 - **Tanpa izin hanya yang aman** — tool baca lolos otomatis hanya di dalam worktree sesi. Membaca di luar worktree dan `WebFetch` meminta izin (atau auto-izin), agar prompt injection dari README/issue tidak bisa diam-diam mengirim file ke luar.
 - **Aksi ke remote** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) selalu meminta izin, juga saat auto-izin aktif.
+- **Mode Komputer** melonggarkan batas worktree: baca & edit di seluruh PC lolos tanpa bertanya (Bash yang tidak read-only tetap bertanya). Folder data snugcode dan aksi ke remote tetap dijaga seperti di atas.
 
 > [!WARNING]
 > `CLAUDE.md` dan `.claude/settings.json` dari repo ikut dimuat, termasuk hook di dalamnya. Pakai hanya untuk repo yang kamu percaya. Deteksi perintah push berbasis pola teks: ini pengaman dari kekeliruan agen, bukan sandbox.
@@ -535,14 +573,15 @@ sequenceDiagram
 ```
 snugcode/
 ├── daemon/      # CLI, daemon, sesi Agent SDK, proxy, git, TUI, run & preview, updater
-├── relay/       # Cloudflare Worker + Durable Objects (Hub, Pending)
+├── relay/       # Cloudflare Worker + Durable Objects (Hub, Pending) + worker alias alamat publik
 ├── web/         # PWA (vanilla JS, tanpa framework)
 ├── shared/      # kriptografi (CPace, X25519, XChaCha20), model event & normalisasi model
 ├── scripts/     # build PWA ke relay, ikon, gambar dokumentasi
 ├── test/        # unit, integrasi worktree, simulasi HP end-to-end, uji UI, runner cloud
 ├── .devcontainer/  # runner Codespaces (`snugcode cloud` saat codespace menyala)
+├── .github/workflows/  # CI (3 OS + e2e) dan Deploy relay/PWA
 ├── Dockerfile   # runner di container (VPS, Fly.io, …)
-└── docs/        # gambar, GIF & mockup dokumentasi
+└── docs/        # gambar, GIF & mockup dokumentasi, analisis runner cloud
 ```
 
 Penjelasan arsitektur yang lebih mendalam ada di [`master.md`](master.md), dan riwayat perubahan di [`CHANGELOG.md`](CHANGELOG.md).
@@ -573,7 +612,7 @@ npm run docs:images                        # buat ulang gambar & GIF README (but
 <details>
 <summary><b>Untuk pemilik: deploy relay</b></summary>
 
-Relay (Worker `snugcode-relay`) dan OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
+Relay terdiri dari dua worker: `pocketcode-relay` (relay + Durable Objects; nama lama dipertahankan agar data akun & PC tetap) dan alias `snugcode` yang menyajikan PWA di `snugcode.arfak.workers.dev` dan meneruskan sisanya lewat service binding. OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
 
 ```bash
 npm install && (cd relay && npm install)
@@ -583,6 +622,8 @@ CLOUDFLARE_API_TOKEN=<token> npm run deploy
 Tanpa PC: workflow [`Deploy`](.github/workflows/deploy.yml) menjalankan perintah yang sama setiap kali `main` berubah di `relay/`, `web/`, atau `shared/` (atau manual: tab Actions → Deploy → Run workflow). Butuh secret repo `CLOUDFLARE_API_TOKEN` (template *Edit Cloudflare Workers*).
 
 Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TOKEN_SECRET` diganti, semua login HP dan PC harus diulang.
+
+*Authorization callback URL* OAuth App harus `https://snugcode.arfak.workers.dev/auth/callback` (OAuth App hanya mengizinkan satu host, karena itu login di host lama dialihkan ke alamat ini). Repo yang di-fork untuk runner Codespaces diatur lewat var `RUNNER_REPO` di `relay/wrangler.jsonc`.
 </details>
 
 ---
@@ -607,11 +648,8 @@ npm i -g github:arfakaisar/snugcode --include=optional && { pocketcode stop; npm
 npm i -g github:arfakaisar/snugcode --include=optional; if ($?) { pocketcode stop; npm rm -g pocketcode; snugcode autostart on }
 ```
 
-> [!IMPORTANT]
-> **Callback OAuth App GitHub** harus menunjuk alamat baru: GitHub → Settings → Developer settings → OAuth Apps → (aplikasi snugcode) → *Authorization callback URL* = `https://snugcode.arfak.workers.dev/auth/callback`. OAuth App hanya mengizinkan satu host, karena itu login selalu dilakukan di alamat baru.
-
 > [!NOTE]
-> Repo GitHub perlu diganti namanya menjadi `snugcode` (Settings → Repository name). GitHub otomatis mengalihkan URL lama, jadi `git push` dan pembaruan dari PC yang belum dimigrasi tetap jalan.
+> Repo GitHub sudah bernama `arfakaisar/snugcode`. GitHub mengalihkan URL lama `arfakaisar/pocketcode`, jadi `git push` dan pembaruan dari PC yang belum dimigrasi tetap jalan.
 
 ---
 
@@ -632,7 +670,7 @@ Pastikan daemon berjalan (`snugcode status`, atau `snugcode autostart on`) dan P
 <details>
 <summary><b>PIN-ku terkunci.</b></summary>
 
-Jalankan `snugcode pin` di PC untuk mengganti PIN dan membuka kunci.
+Jalankan `snugcode pin` di PC untuk mengganti PIN dan membuka kunci, lalu `snugcode restart`. Bila ada HP lain yang sudah terpasang, bisa juga dari sana: Pengaturan PC → Ganti PIN (langsung berlaku).
 </details>
 
 <details>
@@ -671,6 +709,8 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 - [x] Update jarak jauh 1-tap
 - [x] Tema gelap & terang
 - [x] Runner cloud tanpa PC (GitHub Codespaces / Docker), semua setelan dari HP
+- [x] Mode Komputer: agen dengan akses seluruh PC, dari HP maupun terminal
+- [ ] Tampilan kuota Codespaces & prebuild untuk start runner yang lebih cepat
 - [ ] Integrasi keychain OS untuk `secrets.json`
 - [ ] Terminal interaktif (PTY) penuh di HP
 - [ ] Tunnel preview E2EE lewat relay sendiri
