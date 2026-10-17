@@ -70,8 +70,8 @@ export class Daemon {
 
   // Simpan koneksi hasil deteksi. Satu koneksi per provider katalog (menimpa yang lama); router &
   // endpoint kustom bisa banyak (router, router2, …). Koneksi `router` = model tanpa awalan.
-  /** @param {any} conn @param {{ replace?: string }} [opts] */
-  saveConnection(conn, { replace } = {}) {
+  /** @param {any} conn @param {{ replace?: string, models?: { id: string, isDefault?: boolean }[] }} [opts] */
+  saveConnection(conn, { replace, models } = {}) {
     const sec = this.secrets;
     const id = putConnection(sec, conn, { replace });
     mirrorLegacy(this.config, sec);
@@ -83,6 +83,11 @@ export class Daemon {
       resolveRoute(sec, this.config.model);
     } catch {
       ok = false;
+    }
+    // Daftar model hasil deteksi sudah ada: model default langsung dipilih (jawaban RPC memuatnya).
+    if ((!ok || !this.config.model) && models?.length) {
+      this.config.model = models.find((m) => m.isDefault)?.id || defaultModel(models.map((m) => m.id));
+      ok = true;
     }
     this.saveSecrets();
     saveConfig(this.config);
@@ -366,7 +371,7 @@ const RPC = {
     const kind = opt(p.kind, 'jenis', { max: 32 });
     const det = await detectConnection({ key, url, kind });
     const { models, ...conn } = det;
-    const id = c.d.saveConnection(conn, { replace: opt(p.replace, 'id', { max: 40 }) });
+    const id = c.d.saveConnection(conn, { replace: opt(p.replace, 'id', { max: 40 }), models });
     return { conn: c.d.connList().find((x) => x.id === id), models: models.length, info: c.info() };
   },
   connRemove(c, p) {
@@ -413,7 +418,7 @@ const RPC = {
     if (!key) throw new Error('Key 9router kosong');
     // Divalidasi dulu: key/URL yang salah tidak menimpa konfigurasi yang sedang berjalan.
     const { models, ...conn } = await detectConnection({ key, url, kind: 'router' });
-    c.d.saveConnection(conn, { replace: 'router' });
+    c.d.saveConnection(conn, { replace: 'router', models });
     return c.info();
   },
   devices: (c) =>

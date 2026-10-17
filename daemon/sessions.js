@@ -15,7 +15,7 @@ import { startProxy } from './proxy.js';
 import { resolveModelEffort, lightModel, parseModelId, nativeEffortModel } from '../shared/models.js';
 import { splitRef, isClaudeId } from '../shared/providers.js';
 import { resolveRoute, authHeaders, knownRefs, allConnections, getConn } from './providers.js';
-import { CodexAgent, codexCommand, installCodex, codexArgs, codexEnv, readOnlyActions } from './codex.js';
+import { CodexAgent, codexCommand, installCodex, codexArgs, codexEnv, readOnlyActions, sandboxWorks } from './codex.js';
 import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
@@ -116,7 +116,7 @@ const isInside = (p, dir) => {
 };
 export const isSensitivePath = (p, { write = false } = {}) =>
   isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
-const SECRET_CMD_RE = /secrets\.json|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|env|bin|tools)\b/i;
+const SECRET_CMD_RE = /secrets\.json|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|env|bin|tools)\b/i;
 
 // Path yang disentuh tool file (Glob dengan pola absolut: bagian sebelum karakter glob pertama).
 export function toolPaths(tool, input = {}, cwd) {
@@ -752,9 +752,15 @@ export class Session extends EventEmitter {
     }
     this.closeAgent();
     const env = codexEnv(await toolchainEnv('', { ...process.env }), { ...(token ? { SNUGCODE_CODEX_TOKEN: token } : {}), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+    const sandbox = await sandboxWorks(cmd);
+    if (!sandbox && !this.mgr.warnedSandbox) {
+      this.mgr.warnedSandbox = true;
+      this.emitEvent({ k: 'note', d: '◆ Sandbox OS tidak tersedia di mesin ini (mis. container tanpa user namespace): perintah Codex berjalan tanpa sandbox, izin tetap lewat snugcode.' });
+    }
     const args = codexArgs({
       provider: token ? { baseUrl: proxyUrl + '/v1', envKey: 'SNUGCODE_CODEX_TOKEN' } : null,
       computer,
+      sandbox,
       mcp: { command: process.execPath, args: [BRIDGE], env: { SNUGCODE_IPC: IPC_PATH, SNUGCODE_BRIDGE: this.mgr.bridgeToken(this) } },
     });
     const agent = new CodexAgent(this, { cmd, args, env, route, instructions: codexPrompt({ computer }), log: (m) => this.mgr.log(m) });
@@ -775,7 +781,9 @@ export class Session extends EventEmitter {
   async decideCodex(kind, p) {
     if (kind === 'command') {
       const input = { command: p.command };
-      const special = isRemoteWrite('Bash', input) || SECRET_CMD_RE.test(p.command);
+      // Membaca folder data snugcode tidak pernah lolos otomatis (penting bila sandbox OS tidak tersedia).
+      const sensitive = (p.actions || []).some((a) => a?.path && isSensitivePath(path.resolve(this.meta.cwd, String(a.path))));
+      const special = isRemoteWrite('Bash', input) || SECRET_CMD_RE.test(p.command) || sensitive;
       // Perintah baca saja (cat/ls/rg …) lolos seperti di Claude Code; sandbox menolak folder data.
       if (!special && readOnlyActions(p.actions)) return 'accept';
       if (!special && [...this.allowRules].some((r) => ruleMatches(r, p.command))) return 'accept';
