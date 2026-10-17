@@ -147,20 +147,20 @@ export function openUrl(url) {
   p.unref();
 }
 // Kotak kode login yang mudah dibaca & disalin.
-function ghCodeBox(p, copied) {
+function ghCodeBox(p, copied, { title = 'Login GitHub', done = 'tekan Authorize — selesai, tidak perlu restart' } = {}) {
   const W = Math.min(cols() - 1, 64);
   const row = (l = '') => c.line('│ ') + pad(trunc(l, W - 4), W - 4) + c.line(' │');
   const code = [...p.code].join(' ');
   const center = (s) => ' '.repeat(Math.max(0, Math.floor((W - 4 - width(s)) / 2))) + s;
   return [
     '',
-    c.line('╭─ ') + bold('Login GitHub') + c.line(' ' + '─'.repeat(Math.max(0, W - 17)) + '╮'),
+    c.line('╭─ ') + bold(title) + c.line(' ' + '─'.repeat(Math.max(0, W - 5 - title.length)) + '╮'),
     row(),
     row(center(bold(gradient(code, PAL.green, PAL.cyan)))),
     row(),
     row(`1. buka ${under(c.blue(p.uri))}`),
     row(`2. masukkan kode di atas${copied ? dim(' (sudah disalin ke clipboard)') : ''}`),
-    row('3. tekan Authorize — selesai, tidak perlu restart'),
+    row('3. ' + done),
     row(),
     c.line('╰' + '─'.repeat(W - 2) + '╯'),
   ];
@@ -184,6 +184,37 @@ export async function loginViaDaemon({ openBrowser = true } = {}) {
       client.on('closed', () => reject(new Error('Koneksi ke daemon terputus')));
     });
     console.log(c.green(`✓ GitHub tersambung: @${res.login}`) + dim(' — langsung dipakai daemon, HP, dan terminal.'));
+  } finally {
+    client.sock.end();
+  }
+}
+
+// Satu RPC ke daemon yang sedang berjalan (perintah CLI seperti `snugcode connect`).
+export async function daemonCall(method, params = {}) {
+  const { client } = await tryConnect(loadSecrets().localToken);
+  try {
+    return await client.call(method, params);
+  } finally {
+    client.sock.end();
+  }
+}
+
+// Login ChatGPT lewat daemon (Codex resmi), kode tampil di terminal; bisa diselesaikan dari HP.
+export async function chatgptLoginViaDaemon({ openBrowser = true } = {}) {
+  const { client } = await tryConnect(loadSecrets().localToken);
+  try {
+    console.log(dim('  menyiapkan Codex & meminta kode login… (pertama kali ±1–2 menit)'));
+    const r = await client.call('chatgptLogin');
+    const copied = copyClipboard(r.code);
+    console.log(ghCodeBox({ code: r.code, uri: r.url }, copied, { title: 'Login ChatGPT', done: 'login dengan akun ChatGPT — selesai' }).join('\n'));
+    if (openBrowser) openUrl(r.url);
+    console.log(dim('  menunggu login ChatGPT… (Ctrl+C untuk batal)'));
+    const res = await new Promise((resolve, reject) => {
+      client.on('chatgpt', (m) => (m.ok ? resolve(m) : reject(new Error(m.err || 'Login ChatGPT gagal'))));
+      client.on('closed', () => reject(new Error('Koneksi ke daemon terputus')));
+    });
+    console.log(c.green('✓ ChatGPT tersambung') + dim(' — model GPT berjalan di harness Codex.'));
+    return res;
   } finally {
     client.sock.end();
   }
@@ -687,7 +718,7 @@ class App {
         break;
       case 'retry':
         this.closeText();
-        this.queue.push({ kind: 'note', done: true, final: () => [c.yellow(`  ↻ 9router error ${e.status ?? ''} — mencoba lagi (${e.attempt}/${e.max})`)], preview: () => [] });
+        this.queue.push({ kind: 'note', done: true, final: () => [c.yellow(`  ↻ error model ${e.status ?? ''} — mencoba lagi${e.attempt ? ` (${e.attempt}/${e.max})` : ''}`)], preview: () => [] });
         break;
       case 'done': {
         for (const it of this.queue) it.done = true;
@@ -823,7 +854,7 @@ class App {
     const kv = (k, v) => row(`  ${dim(k.padEnd(7))} ${v}`);
     const lines = [
       c.line('╭' + '─'.repeat(W - 2) + '╮'),
-      row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— Claude Code harness · 9router')}`),
+      row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— coding agent · ' + (this.info?.engine === 'codex' ? 'Codex' : 'Claude Agent SDK'))}`),
       row(),
       row(`  ${dim('/help')} bantuan  ${dim('/model')} model & effort  ${dim('!')} shell`),
       row(),
@@ -1521,7 +1552,7 @@ class App {
             value: g,
             key: g.key,
             label: g.name,
-            sub: [M.PROVIDER_LABEL[g.provider] || g.provider, g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
+            sub: [g.conn && g.conn !== 'router' ? g.label || M.PROVIDER_LABEL[g.provider] || g.provider : M.PROVIDER_LABEL[g.provider] || g.provider, g.engine === 'codex' ? 'Codex' : '', g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
             tag: inUse ? c.green('● dipakai') : '',
             extra: g.slider ? () => slider(g) : null,
           };

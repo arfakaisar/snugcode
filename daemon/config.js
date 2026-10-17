@@ -100,7 +100,7 @@ export const isCloud = (cfg) => cfg?.runtime === 'cloud';
 // Kredensial di environment yang tidak boleh terwariskan ke proses agen, Bash-nya, dev server, dan `!perintah`:
 // token GitHub (Codespaces selalu mengisi GITHUB_TOKEN) dan env bootstrap runner cloud.
 export const SECRET_ENV_RE =
-  /^(GITHUB_TOKEN|GH_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GITHUB_CODESPACE_TOKEN|(SNUGCODE|POCKETCODE)_(MACHINE_TOKEN|PAIR_PIN|ROUTER_KEY|GITHUB_TOKEN|RUNNER_TOKEN))$/i;
+  /^(GITHUB_TOKEN|GH_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GITHUB_CODESPACE_TOKEN|(SNUGCODE|POCKETCODE)_(MACHINE_TOKEN|PAIR_PIN|ROUTER_KEY|GITHUB_TOKEN|RUNNER_TOKEN|API_KEY|CODEX_TOKEN|BRIDGE))$/i;
 export function scrubSecretEnv(env = process.env) {
   for (const k of Object.keys(env)) if (SECRET_ENV_RE.test(k)) delete env[k];
   return env;

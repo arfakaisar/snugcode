@@ -1,14 +1,16 @@
 // Runner cloud: daemon snugcode di GitHub Codespaces atau container (Docker/Fly/VPS), tanpa PC.
 //
 // `snugcode cloud` membaca konfigurasi dari environment (lihat bootstrapCloud), lalu menjalankan
-// daemon di bawah supervisor kecil. Semua setelan lain (key 9router, model, login GitHub, PIN,
+// daemon di bawah supervisor kecil. Semua setelan lain (API key / login model, login GitHub, PIN,
 // perangkat) diatur dari HP lewat RPC. Saat tidak dipakai, runner berhenti sendiri (stopRunner).
 //
 // Env yang dibaca (semuanya opsional kecuali token mesin):
 //   SNUGCODE_MACHINE_TOKEN  token mesin dari relay (/api/machines/provision); mid & akun dibaca darinya
 //   SNUGCODE_PAIR_PIN       PIN pairing (dibuat di HP); hanya diterapkan bila berubah sejak start terakhir
 //   SNUGCODE_RELAY          URL relay (bawaan: defaults.js)
-//   SNUGCODE_ROUTER         URL 9router;  SNUGCODE_ROUTER_KEY  key 9router;  SNUGCODE_MODEL  model default
+//   SNUGCODE_API_KEY        API key model apa pun (Anthropic, OpenAI, Gemini, OpenRouter, router, …), dideteksi otomatis
+//   SNUGCODE_API_URL        URL router/endpoint untuk key yang bukan key official (9router, OmniRoute, …)
+//   SNUGCODE_ROUTER         URL 9router;  SNUGCODE_ROUTER_KEY  key 9router (bentuk lama);  SNUGCODE_MODEL  model default
 //   SNUGCODE_GITHUB_TOKEN   token GitHub untuk clone/push (bisa juga login dari HP)
 //   SNUGCODE_NAME           nama mesin;  SNUGCODE_IDLE_MINUTES  berhenti setelah N menit menganggur (0 = tidak)
 //   SNUGCODE_IDLE_EXIT=1    container: keluar (exit 0) saat menganggur
