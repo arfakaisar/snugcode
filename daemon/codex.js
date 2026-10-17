@@ -16,7 +16,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { HOME } from './config.js';
 
-export const CODEX_SPEC = process.env.SNUGCODE_CODEX || '@openai/codex@0.163.0';
+// Versi dipatok di codex-version.json (dibaca juga oleh CI); bisa ditimpa SNUGCODE_CODEX.
+export const CODEX_SPEC = process.env.SNUGCODE_CODEX || JSON.parse(fs.readFileSync(new URL('./codex-version.json', import.meta.url), 'utf8')).spec;
 export const CODEX_HOME = path.join(HOME, 'codex');
 const TOOLS_DIR = path.join(HOME, 'tools', 'codex');
 const VERSION = '0.1.0';
@@ -151,20 +152,34 @@ export function deniedPaths() {
   return ['secrets.json', 'config.json', 'codex', 'claude', 'env', 'sessions', 'daemon.log'].map((p) => path.join(HOME, p));
 }
 
+// Sandbox OS Codex (bubblewrap/Landlock di Linux, Seatbelt di macOS) bisa tidak tersedia, mis. di
+// container tanpa user namespace. Diuji sekali per proses daemon dengan perintah kecil.
+let sandboxProbe = null;
+/** @param {string[]} cmd */
+export function sandboxWorks(cmd) {
+  if (process.platform === 'win32') return Promise.resolve(true);
+  sandboxProbe ??= new Promise((resolve) => {
+    execFile(cmd[0], [...cmd.slice(1), 'sandbox', '-c', 'default_permissions=":workspace"', '--', 'echo', 'snug-sandbox-ok'], { env: codexEnv(), timeout: 30_000 }, (err, out) => resolve(!err && String(out).includes('snug-sandbox-ok')));
+  });
+  return sandboxProbe;
+}
+
 /**
  * Argumen `codex app-server`.
- * @param {{ provider?: { baseUrl: string, envKey: string } | null, computer?: boolean, mcp?: { command: string, args: string[], env: Record<string, string> } | null }} o
+ * @param {{ provider?: { baseUrl: string, envKey: string } | null, computer?: boolean, sandbox?: boolean, mcp?: { command: string, args: string[], env: Record<string, string> } | null }} o
  */
-export function codexArgs({ provider, computer = false, mcp } = {}) {
+export function codexArgs({ provider, computer = false, sandbox = true, mcp } = {}) {
   const fsRules = Object.fromEntries(deniedPaths().map((p) => [p, 'deny']));
   // Mode Komputer: tulis di mana saja (seperti sesi Komputer engine Claude), folder data tetap tertutup.
   if (computer) fsRules['/'] = 'write';
-  const args = [
-    '-c', 'default_permissions="snugcode"',
-    '-c', `permissions.snugcode=${inlineTable({ extends: ':workspace', filesystem: fsRules, network: { enabled: true } })}`,
+  const args = sandbox
+    ? ['-c', 'default_permissions="snugcode"', '-c', `permissions.snugcode=${inlineTable({ extends: ':workspace', filesystem: fsRules, network: { enabled: true } })}`]
+    : // Tanpa sandbox OS: setiap perintah tetap lewat izin snugcode (approvalPolicy untrusted).
+      ['-c', 'default_permissions=":danger-full-access"'];
+  args.push(
     // snugcode yang mengatur pembaruan; kabar versi baru Codex tidak relevan bagi pengguna HP.
     '-c', 'check_for_update_on_startup=false',
-  ];
+  );
   if (provider) {
     args.push('-c', 'model_provider="snugcode"');
     args.push('-c', `model_providers.snugcode=${inlineTable({ name: 'snugcode', base_url: provider.baseUrl, env_key: provider.envKey, wire_api: 'responses', requires_openai_auth: false })}`);

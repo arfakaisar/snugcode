@@ -556,12 +556,15 @@ function help() {
   console.log(`${c.b('snugcode')} — coding agent di PC-mu, dari terminal & HP
 
   ${c.g('snugcode')}                 buka UI terminal (folder repo ini jadi sesinya)
-  ${c.g('snugcode --computer')}      buka mode komputer (kontrol seluruh PC seperti Claude Code)
+  ${c.g('snugcode --computer')}      buka mode komputer (agen dengan akses seluruh PC)
   ${c.g('snugcode "prompt"')}        buka UI dan langsung kirim prompt
   ${c.g('snugcode --pick')}          pilih sesi (termasuk sesi dari HP)
 
   snugcode setup            setup / ubah konfigurasi
   snugcode login            login ulang GitHub (token dicabut/kedaluwarsa)
+  snugcode connect <key>    sambungkan API key model (jenis dideteksi otomatis; --url untuk router/endpoint)
+  snugcode connect chatgpt  login ChatGPT (model GPT lewat Codex);  snugcode connect = daftar koneksi
+  snugcode disconnect <id>  hapus koneksi model
   snugcode autostart on     jalankan daemon di latar belakang + saat login
   snugcode start | stop     jalankan / hentikan daemon
   snugcode restart          restart daemon di latar belakang
