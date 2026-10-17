@@ -37,60 +37,82 @@ export function consoleSummary(logs, { maxLine = 400, maxTotal = 5000 } = {}) {
   return out.join('\n');
 }
 
+// Definisi tool dev, dipakai engine Claude (server MCP in-process Agent SDK) dan engine Codex
+// (server MCP stdio, lihat mcp-bridge.js). handler(session, args) -> hasil MCP.
+/** @type {{ name: string, description: string, shape: Record<string, any>, handler: (session: any, args: any) => Promise<any> }[]} */
+const DEV_TOOLS = [
+  {
+    name: 'dev_start',
+    description: 'Start a long-running process (dev server, watcher) in the background of this worktree, e.g. "npm run dev". Never run such commands with Bash (they block). Returns detected port and the first log lines. Env PORT is set to a free port; "{port}" in the command is replaced by it. To restart a server after code changes, dev_stop it first and reuse the same name.',
+    shape: { command: z.string(), name: z.string().optional().describe('Process name, defaults to the script name') },
+    async handler(session, { command, name }) {
+      const procs = session.procs;
+      const p = await procs.start(command, name);
+      const port = await procs.waitPort(p.name, 25000);
+      const st = procs.get(p.name);
+      return text(`${st.status === 'running' ? 'running' : `exited (code ${st.code})`} · name=${p.name}${port ? ` · port=${port} · url=http://localhost:${port}` : ' · port not detected yet'}\n\n${tail(st.log, 3000)}`);
+    },
+  },
+  { name: 'dev_stop', description: 'Stop a background process started with dev_start.', shape: { name: z.string() }, handler: async (session, { name }) => (session.procs.stop(name), text('stopped ' + name)) },
+  { name: 'dev_logs', description: 'Read recent output of a background process (default last 4000 chars).', shape: { name: z.string(), chars: z.number().int().positive().max(20000).optional() }, handler: async (session, { name, chars }) => text(tail(session.procs.logs(name), chars || 4000)) },
+  { name: 'dev_list', description: 'List background processes of this session with status and port.', shape: {}, handler: async (session) => text(JSON.stringify(session.procs.list(), null, 1) || '[]') },
+  {
+    name: 'preview_screenshot',
+    description: 'Open a page in a headless browser on the PC and return a screenshot plus console errors. Use after visual UI changes. Default viewport is a phone (390x844). Pass image:false when only console errors/title are needed (much cheaper).',
+    shape: {
+      url: z.string().optional().describe('Full URL; defaults to the first running dev server'),
+      path: z.string().optional().describe('Path appended to the dev server URL, e.g. /login'),
+      width: z.number().int().min(200).max(2560).optional(),
+      height: z.number().int().min(200).max(2560).optional(),
+      fullPage: z.boolean().optional(),
+      image: z.boolean().optional().describe('Return the screenshot image (default true)'),
+    },
+    async handler(session, { url, path = '/', width, height, fullPage, image = true }) {
+      if (!url) {
+        // Proses terbaru: setelah agen menyalakan ulang server, yang lama bisa masih berjalan dengan kode basi.
+        const p = session.procs.list().filter((x) => x.status === 'running' && x.port).sort((a, b) => b.startedAt - a.startedAt)[0];
+        if (!p) return fail('No running dev server with a detected port. Start one with dev_start or pass url.');
+        url = `http://localhost:${p.port}${path.startsWith('/') ? path : '/' + path}`;
+      }
+      const r = await capture(url, { width, height, fullPage, scale: 1, cfg: session.mgr.config });
+      // Tampilkan juga di HP (bukan riwayat: base64 terlalu besar untuk .jsonl). Batas frame relay ~1MB.
+      if (r.data.length < 450_000) session.live({ k: 'shot', url, mime: r.mime, data: r.data });
+      const logs = consoleSummary(r.logs);
+      const info = { type: 'text', text: `${url} — "${r.title}"\nconsole:\n${logs || '(empty)'}` };
+      return { content: image ? [{ type: 'image', data: r.data, mimeType: r.mime }, info] : [info] };
+    },
+  },
+];
+
+/** @param {(...a: any[]) => Promise<any>} fn */
+const safeRun = (fn) => async (/** @type {any[]} */ ...a) => {
+  try {
+    return await fn(...a);
+  } catch (e) {
+    return fail(e.message);
+  }
+};
+
 export function devToolsServer(session) {
-  const procs = session.procs;
-  const run = (fn) => async (args) => {
-    try {
-      return await fn(args);
-    } catch (e) {
-      return fail(e.message);
-    }
-  };
   return createSdkMcpServer({
     name: 'snugcode',
     version: '1.0.0',
     alwaysLoad: true,
-    tools: [
-      tool(
-        'dev_start',
-        'Start a long-running process (dev server, watcher) in the background of this worktree, e.g. "npm run dev". Never run such commands with Bash (they block). Returns detected port and the first log lines. Env PORT is set to a free port; "{port}" in the command is replaced by it. To restart a server after code changes, dev_stop it first and reuse the same name.',
-        { command: z.string(), name: z.string().optional().describe('Process name, defaults to the script name') },
-        run(async ({ command, name }) => {
-          const p = await procs.start(command, name);
-          const port = await procs.waitPort(p.name, 25000);
-          const st = procs.get(p.name);
-          return text(`${st.status === 'running' ? 'running' : `exited (code ${st.code})`} · name=${p.name}${port ? ` · port=${port} · url=http://localhost:${port}` : ' · port not detected yet'}\n\n${tail(st.log, 3000)}`);
-        }),
-      ),
-      tool('dev_stop', 'Stop a background process started with dev_start.', { name: z.string() }, run(async ({ name }) => (procs.stop(name), text('stopped ' + name)))),
-      tool('dev_logs', 'Read recent output of a background process (default last 4000 chars).', { name: z.string(), chars: z.number().int().positive().max(20000).optional() }, run(async ({ name, chars }) => text(tail(procs.logs(name), chars || 4000)))),
-      tool('dev_list', 'List background processes of this session with status and port.', {}, run(async () => text(JSON.stringify(procs.list(), null, 1) || '[]'))),
-      tool(
-        'preview_screenshot',
-        'Open a page in a headless browser on the PC and return a screenshot plus console errors. Use after visual UI changes. Default viewport is a phone (390x844). Pass image:false when only console errors/title are needed (much cheaper).',
-        {
-          url: z.string().optional().describe('Full URL; defaults to the first running dev server'),
-          path: z.string().optional().describe('Path appended to the dev server URL, e.g. /login'),
-          width: z.number().int().min(200).max(2560).optional(),
-          height: z.number().int().min(200).max(2560).optional(),
-          fullPage: z.boolean().optional(),
-          image: z.boolean().optional().describe('Return the screenshot image (default true)'),
-        },
-        run(async ({ url, path = '/', width, height, fullPage, image = true }) => {
-          if (!url) {
-            // Proses terbaru: setelah agen menyalakan ulang server, yang lama bisa masih berjalan dengan kode basi.
-            const p = procs.list().filter((x) => x.status === 'running' && x.port).sort((a, b) => b.startedAt - a.startedAt)[0];
-            if (!p) return fail('No running dev server with a detected port. Start one with dev_start or pass url.');
-            url = `http://localhost:${p.port}${path.startsWith('/') ? path : '/' + path}`;
-          }
-          const r = await capture(url, { width, height, fullPage, scale: 1, cfg: session.mgr.config });
-          // Tampilkan juga di HP (bukan riwayat: base64 terlalu besar untuk .jsonl). Batas frame relay ~1MB.
-          if (r.data.length < 450_000) session.live({ k: 'shot', url, mime: r.mime, data: r.data });
-          const logs = consoleSummary(r.logs);
-          const info = { type: 'text', text: `${url} — "${r.title}"\nconsole:\n${logs || '(empty)'}` };
-          return { content: image ? [{ type: 'image', data: r.data, mimeType: r.mime }, info] : [info] };
-        }),
-      ),
-    ],
+    tools: DEV_TOOLS.map((t) => tool(t.name, t.description, t.shape, safeRun((args) => t.handler(session, args)))),
   });
+}
+
+// Untuk server MCP stdio (engine Codex): skema JSON tiap tool.
+export const devToolList = () => DEV_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(z.object(t.shape)) }));
+
+// Dipanggil lewat jembatan MCP (engine Codex). Di engine Claude izin dicek canUseTool sebelum tool
+// jalan; di sini izin yang sama dicek lebih dulu (dev_start menjalankan perintah, screenshot URL luar).
+export async function callDevTool(session, name, args = {}) {
+  const t = DEV_TOOLS.find((x) => x.name === name);
+  if (!t) return fail('unknown tool ' + name);
+  const parsed = z.object(t.shape).safeParse(args);
+  if (!parsed.success) return fail('invalid arguments: ' + parsed.error.message.slice(0, 300));
+  const perm = await session.askPermission('mcp__snugcode__' + name, parsed.data, {});
+  if (perm.behavior !== 'allow') return fail('Denied by the user: ' + (perm.message || 'not allowed'));
+  return safeRun(() => t.handler(session, perm.updatedInput || parsed.data))();
 }
