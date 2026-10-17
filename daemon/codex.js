@@ -1,0 +1,516 @@
+// Engine Codex: harness resmi OpenAI (`codex app-server`, JSON-RPC lewat stdio) untuk model GPT,
+// baik lewat login ChatGPT (diizinkan OpenAI untuk aplikasi pihak ketiga) maupun API key / router
+// yang melayani Responses API. Event Codex diubah ke model event snugcode (shared/events.js), dan
+// setiap perintah/perubahan file melewati kebijakan izin snugcode yang sama dengan engine Claude.
+//
+// Codex dipasang sekali ke ~/.snugcode/tools/codex (versi dipatok: protokol app-server masih
+// eksperimental). CODEX_HOME = ~/.snugcode/codex (login ChatGPT, riwayat thread).
+//
+// Keamanan: key API tidak pernah diberikan ke Codex. Untuk koneksi API key, Codex memakai provider
+// kustom yang menunjuk ke loopback proxy dengan token lokal (lihat proxy.js). Perintah agen
+// berjalan di sandbox Codex (bubblewrap/Seatbelt) dengan profil yang menolak membaca folder data
+// snugcode (secrets.json, login ChatGPT, template .env, riwayat), jaringan diizinkan.
+import { spawn, execFile } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import { HOME } from './config.js';
+
+export const CODEX_SPEC = process.env.SNUGCODE_CODEX || '@openai/codex@0.163.0';
+export const CODEX_HOME = path.join(HOME, 'codex');
+const TOOLS_DIR = path.join(HOME, 'tools', 'codex');
+const VERSION = '0.1.0';
+
+// ---------- binary ----------
+// [command, ...args] untuk menjalankan codex; null bila belum terpasang.
+export function codexCommand(cfg = {}) {
+  if (cfg.codexExecutable) return fs.existsSync(cfg.codexExecutable) ? [cfg.codexExecutable] : null;
+  const js = path.join(TOOLS_DIR, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+  return fs.existsSync(js) ? [process.execPath, js] : null;
+}
+
+let installing = null;
+// Pasang Codex (sekali). onProgress(teks) untuk ditampilkan di HP/terminal.
+/** @param {any} [cfg] @param {{ onProgress?: (msg: string) => void }} [opts] @returns {Promise<string[]>} */
+export function installCodex(cfg = {}, { onProgress = () => {} } = {}) {
+  const have = codexCommand(cfg);
+  if (have) return Promise.resolve(have);
+  if (installing) return installing;
+  fs.mkdirSync(TOOLS_DIR, { recursive: true });
+  if (!fs.existsSync(path.join(TOOLS_DIR, 'package.json'))) fs.writeFileSync(path.join(TOOLS_DIR, 'package.json'), '{"private":true}\n');
+  onProgress('Memasang Codex (sekali, ±1–2 menit)…');
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  installing = new Promise((resolve, reject) => {
+    execFile(npm, ['install', '--no-audit', '--no-fund', '--include=optional', CODEX_SPEC], { cwd: TOOLS_DIR, timeout: 10 * 60_000, shell: process.platform === 'win32', maxBuffer: 8 * 1024 * 1024 }, (err, _out, stderr) => {
+      installing = null;
+      const cmd = codexCommand(cfg);
+      if (cmd) return resolve(cmd);
+      reject(new Error('Gagal memasang Codex: ' + String(err?.message || stderr || 'binary tidak ditemukan').split('\n').slice(-3).join(' ').slice(0, 300)));
+    });
+  });
+  return installing;
+}
+
+// ---------- JSON-RPC ----------
+export class CodexRpc extends EventEmitter {
+  /** @param {string[]} cmd @param {string[]} args @param {{ env: NodeJS.ProcessEnv, cwd?: string, log?: (m: string) => void }} opts */
+  constructor(cmd, args, { env, cwd, log = () => {} }) {
+    super();
+    this.log = log;
+    this.pending = new Map();
+    this.nextId = 1;
+    this.closed = false;
+    fs.mkdirSync(env.CODEX_HOME || CODEX_HOME, { recursive: true });
+    this.proc = spawn(cmd[0], [...cmd.slice(1), 'app-server', ...args], { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    let buf = '';
+    this.proc.stdout.setEncoding('utf8');
+    this.proc.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (line.trim()) this.onLine(line);
+      }
+    });
+    this.proc.stderr.setEncoding('utf8');
+    this.proc.stderr.on('data', (d) => log('[codex] ' + String(d).trim().slice(0, 500)));
+    this.exited = new Promise((r) => this.proc.on('exit', (code) => r(code)));
+    this.proc.on('exit', (code) => {
+      this.closed = true;
+      for (const p of this.pending.values()) p.reject(new Error(`Codex berhenti (exit ${code})`));
+      this.pending.clear();
+      this.emit('exit', code);
+    });
+    this.proc.on('error', (e) => this.emit('error', e));
+  }
+
+  onLine(line) {
+    let m;
+    try {
+      m = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (m.id != null && !m.method) {
+      const p = this.pending.get(m.id);
+      if (!p) return;
+      this.pending.delete(m.id);
+      return m.error ? p.reject(new Error(m.error.message || 'Codex error')) : p.resolve(m.result);
+    }
+    if (m.method && m.id != null) return this.emit('request', m);
+    if (m.method) this.emit('notification', m);
+  }
+
+  send(obj) {
+    if (!this.closed) this.proc.stdin.write(JSON.stringify(obj) + '\n');
+  }
+
+  call(method, params, { timeout = 60_000 } = {}) {
+    if (this.closed) return Promise.reject(new Error('Codex tidak berjalan'));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => this.pending.delete(id) && reject(new Error(`Codex tidak menjawab ${method}`)), timeout);
+      t.unref?.();
+      this.pending.set(id, { resolve: (v) => (clearTimeout(t), resolve(v)), reject: (e) => (clearTimeout(t), reject(e)) });
+      this.send({ id, method, params });
+    });
+  }
+
+  respond(id, result) {
+    this.send({ id, result });
+  }
+
+  async init() {
+    await this.call('initialize', { clientInfo: { name: 'snugcode', title: 'snugcode', version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } }, { timeout: 30_000 });
+    this.send({ method: 'initialized' });
+    return this;
+  }
+
+  close() {
+    if (this.closed) return;
+    try {
+      this.proc.stdin.end();
+      this.proc.kill();
+    } catch {}
+  }
+}
+
+// ---------- konfigurasi ----------
+const toml = (v) => JSON.stringify(v); // string TOML = string JSON untuk teks biasa
+const inlineTable = (o) =>
+  '{' +
+  Object.entries(o)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${/^[A-Za-z0-9_-]+$/.test(k) ? k : toml(k)}=${typeof v === 'object' && !Array.isArray(v) ? inlineTable(v) : Array.isArray(v) ? '[' + v.map(toml).join(',') + ']' : toml(v)}`)
+    .join(',') +
+  '}';
+
+// Folder data snugcode yang tidak boleh dibaca perintah agen (sandbox Codex menolaknya di tingkat OS).
+export function deniedPaths() {
+  return ['secrets.json', 'config.json', 'codex', 'claude', 'env', 'sessions', 'daemon.log'].map((p) => path.join(HOME, p));
+}
+
+/**
+ * Argumen `codex app-server`.
+ * @param {{ provider?: { baseUrl: string, envKey: string } | null, computer?: boolean, mcp?: { command: string, args: string[], env: Record<string, string> } | null }} o
+ */
+export function codexArgs({ provider, computer = false, mcp } = {}) {
+  const fsRules = Object.fromEntries(deniedPaths().map((p) => [p, 'deny']));
+  // Mode Komputer: tulis di mana saja (seperti sesi Komputer engine Claude), folder data tetap tertutup.
+  if (computer) fsRules['/'] = 'write';
+  const args = [
+    '-c', 'default_permissions="snugcode"',
+    '-c', `permissions.snugcode=${inlineTable({ extends: ':workspace', filesystem: fsRules, network: { enabled: true } })}`,
+    // snugcode yang mengatur pembaruan; kabar versi baru Codex tidak relevan bagi pengguna HP.
+    '-c', 'check_for_update_on_startup=false',
+  ];
+  if (provider) {
+    args.push('-c', 'model_provider="snugcode"');
+    args.push('-c', `model_providers.snugcode=${inlineTable({ name: 'snugcode', base_url: provider.baseUrl, env_key: provider.envKey, wire_api: 'responses', requires_openai_auth: false })}`);
+  }
+  if (mcp) args.push('-c', `mcp_servers.snugcode=${inlineTable({ command: mcp.command, args: mcp.args, env: mcp.env })}`);
+  return args;
+}
+
+export function codexEnv(base = process.env, extra = {}) {
+  const env = { ...base, CODEX_HOME, ...extra };
+  for (const k of Object.keys(env)) if (/^(OPENAI_API_KEY|OPENAI_BASE_URL|CODEX_API_KEY|ANTHROPIC_)/.test(k)) delete env[k];
+  return env;
+}
+
+// ---------- akun ChatGPT ----------
+/** @template T @param {any} cfg @param {(rpc: CodexRpc) => Promise<T>} fn @param {{ log?: (m: string) => void }} [opts] @returns {Promise<T>} */
+async function withClient(cfg, fn, { log } = {}) {
+  const cmd = await installCodex(cfg);
+  const rpc = await new CodexRpc(cmd, codexArgs(), { env: codexEnv(), log }).init();
+  try {
+    return await fn(rpc);
+  } finally {
+    rpc.close();
+  }
+}
+
+export async function chatgptAccount(cfg) {
+  if (!codexCommand(cfg)) return null;
+  return withClient(cfg, async (rpc) => (await rpc.call('account/read', { refreshToken: false })).account);
+}
+
+// Login ChatGPT dengan device code (bisa diselesaikan dari HP). Mengembalikan kode segera;
+// onDone({ ok, account, err }) dipanggil saat pengguna selesai (atau gagal / 15 menit).
+/** @type {CodexRpc | null} */
+let activeLogin = null;
+/** @param {any} cfg @param {{ onDone?: (r: { ok: boolean, account: any, err: string | null }) => void, log?: (m: string) => void }} [opts] */
+export async function chatgptLoginStart(cfg, { onDone, log } = {}) {
+  activeLogin?.close();
+  const cmd = await installCodex(cfg);
+  const rpc = await new CodexRpc(cmd, codexArgs(), { env: codexEnv(), log }).init();
+  activeLogin = rpc;
+  let r;
+  try {
+    r = await rpc.call('account/login/start', { type: 'chatgptDeviceCode' });
+  } catch (e) {
+    rpc.close();
+    throw e;
+  }
+  const finish = async (ok, err) => {
+    clearTimeout(timer);
+    let account = null;
+    if (ok) account = await rpc.call('account/read', { refreshToken: false }).then((x) => x.account, () => null);
+    rpc.close();
+    if (activeLogin === rpc) activeLogin = null;
+    onDone?.({ ok: ok && account?.type === 'chatgpt', account, err: ok && account?.type !== 'chatgpt' ? 'Login selesai tapi akun ChatGPT tidak terbaca' : err });
+  };
+  const timer = setTimeout(() => finish(false, 'Kode login kedaluwarsa'), 15 * 60_000);
+  timer.unref?.();
+  rpc.on('notification', (m) => {
+    if (m.method === 'account/login/completed' && (!m.params.loginId || m.params.loginId === r.loginId)) finish(!!m.params.success, m.params.error || null);
+  });
+  rpc.on('exit', () => clearTimeout(timer));
+  return { url: r.verificationUrl, code: r.userCode, loginId: r.loginId };
+}
+
+export async function chatgptLogout(cfg) {
+  if (!codexCommand(cfg)) return false;
+  await withClient(cfg, (rpc) => rpc.call('account/logout', {}).catch(() => {}));
+  return true;
+}
+
+// Daftar model ChatGPT/Codex -> format daftar model snugcode (lihat providers.normalizeModels).
+export async function chatgptModels(cfg, connId = 'chatgpt') {
+  const data = await withClient(cfg, async (rpc) => {
+    const out = [];
+    let cursor = null;
+    for (let i = 0; i < 5; i++) {
+      const r = await rpc.call('model/list', { cursor, limit: 100 });
+      out.push(...(r.data || []));
+      if (!r.nextCursor) break;
+      cursor = r.nextCursor;
+    }
+    return out;
+  });
+  return data
+    .filter((m) => !m.hidden)
+    .map((m) => ({ id: `${connId}:${m.model || m.id}`, efforts: (m.supportedReasoningEfforts || []).map((e) => e.reasoningEffort).filter((e) => ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(e)), label: 'ChatGPT', engine: 'codex', vision: (m.inputModalities || []).includes('image'), isDefault: !!m.isDefault }));
+}
+
+// ---------- sesi agen ----------
+// Perintah Codex dibungkus shell ("/bin/bash -lc '…'"); untuk pola izin & tampilan pakai isi aslinya.
+export function unwrapCommand(cmd) {
+  const s = String(cmd || '');
+  const m = s.match(/^(?:\/\S*\/)?(?:bash|sh|zsh)\s+-l?c\s+(['"])([\s\S]*)\1$/);
+  return m ? (m[1] === "'" ? m[2].replace(/'\\''/g, "'") : m[2]) : s;
+}
+
+// Aksi baca saja (cat/ls/rg/grep …) menurut parser Codex: setara perintah read-only yang diloloskan
+// Claude Code tanpa bertanya. Sandbox tetap menolak folder data snugcode.
+export const readOnlyActions = (actions) => Array.isArray(actions) && actions.length > 0 && actions.every((a) => ['read', 'listFiles', 'search'].includes(a?.type));
+
+const PLAN_STATE = { completed: 'done', inProgress: 'doing', in_progress: 'doing' };
+
+/**
+ * Satu proses app-server per sesi (seperti satu proses claude per sesi), dipakai ulang antar prompt.
+ * `host` = Session: emitEvent, pushText, pushThinking, flushText, clearThinking, live, endTurn,
+ * decideCodex(kind, params) -> Promise<decision>, idle, meta.
+ */
+export class CodexAgent {
+  constructor(host, { cmd, args, env, route, instructions, log }) {
+    this.kind = /** @type {const} */ ('codex');
+    this.key = '';
+    this.host = host;
+    this.route = route;
+    this.instructions = instructions;
+    this.log = log;
+    this.dead = false;
+    this.idle = null;
+    this.lastUsed = Date.now();
+    this.threadId = null;
+    this.turnId = null;
+    this.items = new Map();
+    this.streamed = new Set();
+    this.rpc = new CodexRpc(cmd, args, { env, cwd: host.meta.cwd, log });
+    this.loop = this.rpc.exited.then(() => {
+      this.dead = true;
+      clearTimeout(this.idle);
+      if (this.host.agent === this) this.host.agent = null;
+      if (this.host.turn?.agent === this) {
+        this.host.emitEvent({ k: 'error', d: 'Codex berhenti di tengah prompt.' });
+        this.host.endTurn();
+      }
+    });
+    this.rpc.on('notification', (m) => this.onNotification(m));
+    this.rpc.on('request', (m) => this.onRequest(m));
+  }
+
+  async start() {
+    await this.rpc.init();
+    const meta = this.host.meta;
+    const common = { model: this.route.model, cwd: meta.cwd, approvalPolicy: 'untrusted', developerInstructions: this.instructions };
+    let r = null;
+    if (meta.codexThreadId) r = await this.rpc.call('thread/resume', { threadId: meta.codexThreadId, ...common, excludeTurns: true }).catch((e) => (this.log('! resume thread Codex gagal, mulai thread baru: ' + e.message), null));
+    if (!r) r = await this.rpc.call('thread/start', common);
+    this.threadId = r.thread.id;
+    if (meta.codexThreadId !== this.threadId) {
+      meta.codexThreadId = this.threadId;
+      this.host.mgr.saveIndex();
+    }
+    return this;
+  }
+
+  // content: teks + gambar (data URI dari HP). model/effort berlaku mulai prompt ini.
+  async push({ text, images = [] }) {
+    clearTimeout(this.idle);
+    this.idle = null;
+    this.lastUsed = Date.now();
+    this.turnStart = Date.now();
+    this.usageAtStart = this.usageTotal || null;
+    this.toolCount = 0;
+    const input = [...images.map((i) => ({ type: 'image', url: `data:${i.mime};base64,${i.data}` })), ...(text ? [{ type: 'text', text, text_elements: [] }] : [])];
+    const plan = !!this.host.meta.plan;
+    const r = await this.rpc.call('turn/start', {
+      threadId: this.threadId,
+      input,
+      model: this.route.model,
+      effort: this.route.effort || null,
+      approvalPolicy: 'untrusted',
+      // Mode rencana: hanya baca. Codex tidak punya ExitPlanMode; rencana tampil sebagai jawaban.
+      ...(plan ? { sandboxPolicy: { type: 'readOnly', networkAccess: true } } : {}),
+    });
+    this.turnId = r.turn?.id || null;
+  }
+
+  setRoute(route) {
+    this.route = route;
+  }
+
+  async interrupt() {
+    if (this.threadId && this.turnId) await this.rpc.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }, { timeout: 10_000 }).catch(() => {});
+  }
+
+  close() {
+    this.dead = true;
+    clearTimeout(this.idle);
+    this.rpc.close();
+  }
+
+  // ---------- notifikasi -> event snugcode ----------
+  onNotification({ method, params: p }) {
+    const h = this.host;
+    if (p?.threadId && this.threadId && p.threadId !== this.threadId) return;
+    switch (method) {
+      case 'turn/started':
+        this.turnId = p.turn?.id || this.turnId;
+        break;
+      case 'item/agentMessage/delta':
+        h.clearThinking();
+        this.streamed.add(p.itemId);
+        h.pushText(p.delta);
+        break;
+      case 'item/reasoning/summaryTextDelta':
+      case 'item/reasoning/textDelta':
+        h.pushThinking(p.delta);
+        break;
+      case 'item/started':
+        this.onItemStarted(p.item);
+        break;
+      case 'item/completed':
+        this.onItemCompleted(p.item);
+        break;
+      case 'turn/plan/updated':
+        h.emitEvent({ k: 'tool', id: 'plan-' + (this.turnId || ''), name: 'TodoWrite', s: '', todos: (p.plan || []).map((s) => ({ st: PLAN_STATE[s.status] || 'todo', t: String(s.step || '') })) });
+        break;
+      case 'thread/tokenUsage/updated':
+        this.usageTotal = p.tokenUsage?.total || this.usageTotal;
+        this.ctxMax = p.tokenUsage?.modelContextWindow || this.ctxMax;
+        this.lastIn = p.tokenUsage?.last?.inputTokens || this.lastIn;
+        break;
+      case 'error':
+        if (p.willRetry) h.emitEvent({ k: 'retry', attempt: undefined, max: undefined, status: p.error?.codexErrorInfo ? JSON.stringify(p.error.codexErrorInfo).slice(0, 40) : undefined });
+        else h.emitEvent({ k: 'error', d: String(p.error?.message || 'Codex error') + (p.error?.additionalDetails ? ' — ' + p.error.additionalDetails : '') });
+        break;
+      case 'turn/completed':
+        this.onTurnCompleted(p.turn);
+        break;
+    }
+  }
+
+  onItemStarted(it) {
+    if (!it) return;
+    const h = this.host;
+    this.items.set(it.id, it);
+    const tool = (name, s, x) => {
+      h.clearThinking();
+      h.flushText();
+      this.toolCount++;
+      h.emitEvent({ k: 'tool', id: it.id, name, s, x });
+    };
+    if (it.type === 'commandExecution') tool('Bash', unwrapCommand(it.command));
+    else if (it.type === 'fileChange') tool('Edit', (it.changes || []).map((c) => rel(c.path, h.meta.cwd)).join(', '), diffDetail(it.changes));
+    else if (it.type === 'mcpToolCall') tool(it.server === 'snugcode' ? it.tool : `${it.server}:${it.tool}`, summarizeArgs(it.arguments));
+    else if (it.type === 'webSearch') tool('WebSearch', it.query || it.action?.query || '');
+    else if (it.type === 'collabAgentToolCall' || it.type === 'subAgentActivity') tool('Agent', it.prompt || it.description || '');
+  }
+
+  onItemCompleted(it) {
+    if (!it) return;
+    const h = this.host;
+    const prev = this.items.get(it.id);
+    this.items.delete(it.id);
+    if (it.type === 'agentMessage') {
+      if (!this.streamed.has(it.id) && it.text) h.emitEvent({ k: 'text', d: it.text });
+      h.flushText();
+      return;
+    }
+    if (!prev) return;
+    if (it.type === 'commandExecution') {
+      const out = it.aggregatedOutput || '';
+      h.emitEvent({ k: 'result', id: it.id, ok: it.status === 'completed' && (it.exitCode ?? 0) === 0, d: cutText(it.status === 'declined' ? 'ditolak' : out || `(exit ${it.exitCode ?? '?'})`) });
+    } else if (it.type === 'fileChange') h.emitEvent({ k: 'result', id: it.id, ok: it.status === 'completed', d: it.status === 'completed' ? `${(it.changes || []).length} file diubah` : String(it.status) });
+    else if (it.type === 'mcpToolCall') h.emitEvent({ k: 'result', id: it.id, ok: it.status === 'completed' && !it.error, d: cutText(it.error?.message || textFromMcp(it.result)) });
+    else if (it.type === 'webSearch') h.emitEvent({ k: 'result', id: it.id, ok: true, d: '' });
+  }
+
+  onTurnCompleted(turn) {
+    const h = this.host;
+    h.flushText();
+    const status = turn?.status;
+    const ok = status === 'completed';
+    const t = this.usageTotal;
+    const s0 = this.usageAtStart;
+    const d = (k) => (t?.[k] || 0) - (s0?.[k] || 0);
+    const usage = t ? { in: d('inputTokens'), out: d('outputTokens'), cr: d('cachedInputTokens'), cw: d('cacheWriteInputTokens') } : undefined;
+    h.emitEvent({
+      k: 'done',
+      ok,
+      turns: this.toolCount,
+      ms: turn?.durationMs ?? Date.now() - (this.turnStart || Date.now()),
+      usage,
+      ctx: this.ctxMax && this.lastIn ? Math.round((this.lastIn / this.ctxMax) * 100) : undefined,
+      err: ok ? undefined : status === 'interrupted' ? 'interrupted' : cutText(turn?.error?.message || status || 'gagal', 600),
+    });
+    const last = [...(turn?.items || [])].reverse().find((i) => i.type === 'agentMessage')?.text || '';
+    h.mgr.notify(h, ok ? `✓ selesai · ${last.replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(turn?.error?.message || status).slice(0, 140)}`);
+    this.streamed.clear();
+    this.turnId = null;
+    if (h.turn?.agent === this) h.endTurn();
+    if (!this.dead) h.idleAgent(this);
+  }
+
+  // ---------- permintaan dari Codex (izin, pertanyaan) ----------
+  async onRequest(m) {
+    const { id, method, params: p } = m;
+    const answer = (result) => this.rpc.respond(id, result);
+    try {
+      if (method === 'item/commandExecution/requestApproval') {
+        const command = unwrapCommand(p.command || p.commandActions?.map((a) => a.command).join(' && ') || '');
+        return answer({ decision: await this.host.decideCodex('command', { command, actions: p.commandActions, reason: p.reason, amendment: p.proposedExecpolicyAmendment }) });
+      }
+      if (method === 'item/fileChange/requestApproval') {
+        const it = this.items.get(p.itemId);
+        return answer({ decision: await this.host.decideCodex('file', { changes: it?.changes || [], reason: p.reason, grantRoot: p.grantRoot }) });
+      }
+      if (method === 'item/tool/requestUserInput') {
+        const answers = await this.host.decideCodex('question', { questions: p.questions || [] });
+        return answer({ answers });
+      }
+      if (method === 'item/permissions/requestApproval') {
+        const ok = await this.host.decideCodex('permissions', { reason: p.reason, permissions: p.permissions });
+        return answer(ok ? { permissions: { ...(p.permissions?.network ? { network: p.permissions.network } : {}), ...(p.permissions?.fileSystem ? { fileSystem: p.permissions.fileSystem } : {}) }, scope: 'turn' } : { permissions: {}, scope: 'turn' });
+      }
+      // Tool MCP snugcode sudah menegakkan izinnya sendiri (lihat mcp-bridge.js).
+      if (method === 'mcpServer/elicitation/request') return answer({ action: p.serverName === 'snugcode' ? 'accept' : 'decline', content: null, _meta: null });
+      // Versi protokol lama.
+      if (method === 'execCommandApproval') return answer({ decision: (await this.host.decideCodex('command', { command: unwrapCommand([].concat(p.command || []).join(' ')) })) === 'decline' ? 'denied' : 'approved' });
+      if (method === 'applyPatchApproval') return answer({ decision: (await this.host.decideCodex('file', { changes: Object.keys(p.fileChanges || {}).map((f) => ({ path: f })) })) === 'decline' ? 'denied' : 'approved' });
+      this.rpc.send({ id, error: { code: -32601, message: 'snugcode tidak mendukung ' + method } });
+    } catch (e) {
+      this.rpc.send({ id, error: { code: -32000, message: String(e?.message || e) } });
+    }
+  }
+}
+
+function rel(p, cwd) {
+  const r = path.relative(cwd, String(p || ''));
+  return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.replace(/\\/g, '/') : String(p || '');
+}
+
+const cutText = (s, n = 4000) => {
+  s = typeof s === 'string' ? s : JSON.stringify(s ?? '');
+  return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} karakter dipotong)` : s;
+};
+
+function diffDetail(changes) {
+  const diff = (changes || []).map((c) => c.diff || '').join('\n').slice(0, 3000);
+  return diff ? { new: diff } : undefined;
+}
+
+function summarizeArgs(a) {
+  if (!a || typeof a !== 'object') return String(a ?? '');
+  return String(a.command || a.url || a.path || a.name || a.query || JSON.stringify(a)).slice(0, 400);
+}
+
+function textFromMcp(r) {
+  const c = r?.content;
+  if (Array.isArray(c)) return c.map((x) => (x.type === 'text' ? x.text : `[${x.type}]`)).join('\n');
+  return typeof r === 'string' ? r : JSON.stringify(r ?? '');
+}

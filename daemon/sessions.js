@@ -1,5 +1,7 @@
-// Sesi agen: menjalankan Claude Code (Agent SDK) dengan model dari 9router,
-// mengubah pesan SDK menjadi event ringkas untuk HP, dan menyimpan riwayatnya.
+// Sesi agen: menjalankan harness agen yang paling cocok untuk model sesi — Claude Agent SDK
+// (model Claude & endpoint format Anthropic/OpenAI) atau Codex (model GPT: login ChatGPT / Responses
+// API) — mengubah pesannya menjadi event ringkas untuk HP, dan menyimpan riwayatnya. Izin,
+// checkpoint, dan tool dev snugcode sama untuk kedua engine.
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -7,15 +9,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, anthropicBaseUrl, writeJson, readSessionIndex } from './config.js';
+import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, IPC_PATH, writeJson, readSessionIndex } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
-import { startRouterProxy } from './proxy.js';
+import { startProxy } from './proxy.js';
 import { resolveModelEffort, lightModel, parseModelId, nativeEffortModel } from '../shared/models.js';
-import { knownModelIds } from './router.js';
+import { splitRef, isClaudeId } from '../shared/providers.js';
+import { resolveRoute, authHeaders, knownRefs, allConnections, getConn } from './providers.js';
+import { CodexAgent, codexCommand, installCodex, codexArgs, codexEnv, readOnlyActions } from './codex.js';
 import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
-import { SNUGCODE_SYSTEM_PROMPT, snugcodePrompt } from './prompt.js';
+import { SNUGCODE_SYSTEM_PROMPT, snugcodePrompt, codexPrompt } from './prompt.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
@@ -26,6 +30,7 @@ import { devToolsServer, SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtool
 import { closeBrowser } from './browser.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BRIDGE = path.join(ROOT, 'daemon', 'mcp-bridge.js');
 // Diteruskan ke SDK lewat settings.plansDirectory, jadi lokasinya pasti (bukan ~/.claude milik pengguna).
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const OUT_LIMIT = 4000;
@@ -70,7 +75,7 @@ const NO_WIDEN_EXT = /\.(pdf|ipynb|png|jpe?g|gif|webp|bmp|ico|svg)$/i;
 // Model Claude: cc/…, claude-… tanpa provider, atau claude-… lewat provider lain (ag/claude-sonnet-4-6).
 const isClaudeModel = (id) => {
   const p = parseModelId(id || '');
-  return nativeEffortModel(p.provider, p.base) || p.base.startsWith('claude-');
+  return (p.conn === 'router' && nativeEffortModel(p.provider, p.base)) || isClaudeId(p.base);
 };
 
 /** Input tool yang dilebarkan, atau null bila dibiarkan apa adanya. */
@@ -244,6 +249,15 @@ export function suggestedRules(tool, suggestions) {
     .filter((r) => r?.toolName === tool && typeof r.ruleContent === 'string' && r.ruleContent);
 }
 const ruleText = (r) => `${r.toolName}(${r.ruleContent})`;
+// Aturan "Bash(npm test *)" cocok dengan perintah berawalan "npm test" (dipakai engine Codex;
+// engine Claude mencocokkannya sendiri lewat settings.permissions.allow).
+export function ruleMatches(rule, command) {
+  const m = String(rule).match(/^Bash\((.*)\)$/);
+  if (!m) return false;
+  const pat = m[1].replace(/:\*$|\s*\*$/, '').trim();
+  const cmd = String(command || '').trim();
+  return !!pat && !/[;&|`$<>]/.test(cmd) && (cmd === pat || cmd.startsWith(pat + ' '));
+}
 
 
 // Antrean pesan user untuk query() dalam mode streaming input: satu proses claude per sesi
@@ -445,7 +459,11 @@ export class Session extends EventEmitter {
     const m = this.meta;
     // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
     const branch = (m.local && currentBranch(m.cwd)) || m.branch || '-';
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
+    let engine = null;
+    try {
+      engine = resolveRoute(this.mgr.secrets, m.model).engine;
+    } catch {}
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -532,8 +550,8 @@ export class Session extends EventEmitter {
     images = checkImages(images);
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
-    // Runner cloud baru dikonfigurasi dari HP: key 9router bisa belum ada.
-    if (!this.mgr.secrets.routerKey) throw new Error('Key 9router belum diisi. Buka Pengaturan PC → Key 9router di aplikasi HP (atau jalankan `snugcode setup`).');
+    // Model tanpa koneksi (runner baru, koneksi dihapus): pesan yang jelas sebelum prompt dicatat.
+    resolveRoute(this.mgr.secrets, this.meta.model);
     if (!this.meta.title) this.meta.title = (text || 'gambar').slice(0, 80);
     const u = this.emitEvent({ k: 'user', d: text, img: images.length || undefined });
     this.run(text, images, u.seq).catch((err) => {
@@ -568,7 +586,7 @@ export class Session extends EventEmitter {
   setPlan(on) {
     this.meta.plan = !!on;
     this.mgr.saveIndex();
-    this.agent?.q.setPermissionMode(on ? 'plan' : 'default').catch(() => {});
+    this.agent?.setPlan?.(on);
     this.live({ k: 'mode', plan: !!on });
   }
 
@@ -587,18 +605,22 @@ export class Session extends EventEmitter {
   }
 
   async startAgent() {
+    const route = resolveRoute(this.mgr.secrets, this.meta.model);
+    if (route.engine === 'codex') return this.startCodexAgent(route);
     const cfg = this.mgr.config;
     const sec = this.mgr.secrets;
     const claudeExe = claudeExecutable(cfg);
-    const { actualModel, effort } = resolveModelEffort(this.meta.model);
-    // Subagen & tugas utilitas: Claude Haiku 5.5 / Gemini 3.8 Flash (lihat lightModel).
-    const light = lightModel(this.meta.model, knownModelIds(cfg, sec.routerKey));
+    const actualModel = route.model;
+    const effort = /** @type {import('@anthropic-ai/claude-agent-sdk').EffortLevel | null} */ (route.effort);
+    // Subagen & tugas utilitas: model ringan dari koneksi yang sama (Haiku / Flash, lihat lightModel).
+    const light = lightModel(this.meta.model, knownRefs(sec, route.conn.id));
+    const lightId = splitRef(resolveModelEffort(light.id).actualModel).id;
     const proxy = this.mgr.proxy;
-    const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
-    const baseUrl = proxyUrl || anthropicBaseUrl(cfg.routerUrl);
-    // Lewat proxy, proses claude hanya memegang token lokal; key asli disuntikkan oleh proxy.
-    const authToken = proxyUrl ? proxy.token : sec.routerKey;
-    const key = [claudeExe, light.id, baseUrl, authToken].join('|');
+    const baseUrl = proxy ? await proxy.ready().catch(() => null) : null;
+    if (!baseUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
+    // Proses claude hanya memegang token lokal untuk koneksi ini; key asli disuntikkan oleh proxy.
+    const authToken = this.mgr.tokenFor(route.conn, route.wire);
+    const key = ['claude', claudeExe, lightId, baseUrl, authToken].join('|');
     const cur = this.agent;
     if (cur && !cur.dead && cur.key === key) {
       clearTimeout(cur.idle);
@@ -617,15 +639,15 @@ export class Session extends EventEmitter {
     this.closeAgent();
 
     const env = { ...process.env };
-    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_SUBAGENT_MODEL)/.test(k)) delete env[k];
+    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_SUBAGENT_MODEL|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)/.test(k)) delete env[k];
     Object.assign(env, {
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN: authToken,
       ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
       ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: light.id,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: lightId,
       // _FORCE: tanpa ini subagen bawaan (Explore, …) tetap memakai model utama.
-      CLAUDE_CODE_SUBAGENT_MODEL: light.id,
+      CLAUDE_CODE_SUBAGENT_MODEL: lightId,
       CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
       CLAUDE_CONFIG_DIR: CLAUDE_DIR,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
@@ -672,10 +694,116 @@ export class Session extends EventEmitter {
         stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
       },
     });
-    const agent = { key, q, input, model: actualModel, effort, streamed: new Set(), currentMsgId: null, dead: false, idle: null, lastUsed: Date.now() };
+    const agent = {
+      kind: 'claude',
+      key,
+      q,
+      input,
+      model: actualModel,
+      effort,
+      streamed: new Set(),
+      currentMsgId: null,
+      dead: false,
+      idle: null,
+      lastUsed: Date.now(),
+      loop: /** @type {Promise<void> | null} */ (null),
+      // Gambar dikirim sebagai blok konten pesan user.
+      push({ text, images = [] }) {
+        const content = images.length ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(text ? [{ type: 'text', text }] : [])] : text;
+        input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+      },
+      interrupt: () => q.interrupt(),
+      setPlan: (on) => q.setPermissionMode(on ? 'plan' : 'default').catch(() => {}),
+      close() {
+        input.end();
+        try {
+          q.close();
+        } catch {}
+      },
+    };
     this.agent = agent;
     agent.loop = this.consume(agent);
     return agent;
+  }
+
+  // Engine Codex (model GPT): satu proses `codex app-server` per sesi, dipakai ulang antar prompt.
+  // Model & effort berlaku per prompt, jadi ganti model tidak membuat proses baru.
+  async startCodexAgent(route) {
+    const cfg = this.mgr.config;
+    let cmd = codexCommand(cfg);
+    if (!cmd) {
+      this.emitEvent({ k: 'note', d: '◆ Memasang Codex untuk model ini (sekali saja, ±1–2 menit)…' });
+      cmd = await installCodex(cfg);
+      this.emitEvent({ k: 'note', d: '✓ Codex terpasang' });
+    }
+    const proxy = this.mgr.proxy;
+    const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
+    // API key / router: Codex hanya melihat proxy lokal + token lokal. ChatGPT: login milik Codex sendiri.
+    const token = route.wire === 'responses' ? this.mgr.tokenFor(route.conn, 'responses') : null;
+    if (token && !proxyUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
+    const computer = !!this.meta.computer;
+    const key = ['codex', cmd.join(' '), route.conn.id, route.wire, token, proxyUrl, computer].join('|');
+    const cur = this.agent;
+    if (cur && !cur.dead && cur.key === key) {
+      clearTimeout(cur.idle);
+      cur.idle = null;
+      cur.setRoute(route);
+      return cur;
+    }
+    this.closeAgent();
+    const env = codexEnv(await toolchainEnv('', { ...process.env }), { ...(token ? { SNUGCODE_CODEX_TOKEN: token } : {}), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+    const args = codexArgs({
+      provider: token ? { baseUrl: proxyUrl + '/v1', envKey: 'SNUGCODE_CODEX_TOKEN' } : null,
+      computer,
+      mcp: { command: process.execPath, args: [BRIDGE], env: { SNUGCODE_IPC: IPC_PATH, SNUGCODE_BRIDGE: this.mgr.bridgeToken(this) } },
+    });
+    const agent = new CodexAgent(this, { cmd, args, env, route, instructions: codexPrompt({ computer }), log: (m) => this.mgr.log(m) });
+    agent.key = key;
+    this.agent = agent;
+    try {
+      await agent.start();
+    } catch (e) {
+      agent.close();
+      if (this.agent === agent) this.agent = null;
+      throw new Error('Codex gagal dimulai: ' + e.message);
+    }
+    return agent;
+  }
+
+  // Keputusan izin untuk permintaan Codex, memakai kebijakan yang sama dengan engine Claude.
+  // kind: 'command' | 'file' | 'question' | 'permissions'.
+  async decideCodex(kind, p) {
+    if (kind === 'command') {
+      const input = { command: p.command };
+      const special = isRemoteWrite('Bash', input) || SECRET_CMD_RE.test(p.command);
+      // Perintah baca saja (cat/ls/rg …) lolos seperti di Claude Code; sandbox menolak folder data.
+      if (!special && readOnlyActions(p.actions)) return 'accept';
+      if (!special && [...this.allowRules].some((r) => ruleMatches(r, p.command))) return 'accept';
+      const suggestions = Array.isArray(p.amendment) && p.amendment.length ? [{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: p.amendment.join(' ') + ' *' }] }] : undefined;
+      const r = await this.askPermission('Bash', input, { suggestions, title: p.reason || undefined });
+      return r.behavior === 'allow' ? 'accept' : 'decline';
+    }
+    if (kind === 'file') {
+      const cwd = this.meta.cwd;
+      const paths = (p.changes || []).map((c) => path.resolve(cwd, String(c.path || '')));
+      if (paths.some((x) => isSensitivePath(x, { write: true }))) return 'decline';
+      if (this.cpReady) await this.cpReady;
+      const inside = paths.length > 0 && (this.meta.computer || paths.every((x) => isInside(x, cwd)));
+      if (!this.meta.plan && ((inside && !this.meta.askEdits) || this.meta.auto)) return 'accept';
+      const diff = (p.changes || []).map((c) => c.diff || '').join('\n');
+      const r = await this.requestUser('Edit', { file_path: paths.map((x) => path.relative(cwd, x) || x).join(', '), old_string: '', new_string: diff }, { title: p.reason || undefined });
+      return r.behavior === 'allow' ? 'accept' : 'decline';
+    }
+    if (kind === 'question') {
+      const qs = p.questions || [];
+      const questions = qs.map((q) => ({ question: q.question, header: q.header, multiSelect: false, options: (q.options || []).map((o) => ({ label: o.label, description: o.description || '' })) }));
+      const r = await this.requestUser('AskUserQuestion', { questions }, {});
+      const given = r.behavior === 'allow' ? r.updatedInput?.answers || {} : {};
+      return Object.fromEntries(qs.map((q) => [q.id, { answers: given[q.question] != null ? [String(given[q.question])] : [] }]));
+    }
+    // Izin tambahan (jaringan / tulis di luar worktree) yang diminta agen.
+    const r = await this.requestUser('Izin', { command: [p.reason, JSON.stringify(p.permissions || {})].filter(Boolean).join('\n') }, {});
+    return r.behavior === 'allow';
   }
 
   // Hook PreToolUse untuk tool yang bisa mengubah file. Berjalan juga untuk tool yang lolos lewat
@@ -822,10 +950,7 @@ export class Session extends EventEmitter {
     if (!agent) return;
     agent.dead = true;
     clearTimeout(agent.idle);
-    agent.input.end();
-    try {
-      agent.q.close();
-    } catch {}
+    agent.close();
     if (this.agent === agent) this.agent = null;
     if (this.turn?.agent === agent) this.endTurn();
   }
@@ -847,17 +972,18 @@ export class Session extends EventEmitter {
     }
     const agent = await this.ensureAgent();
     const done = new Promise((resolve) => (this.turn = { resolve, agent }));
-    // Gambar dikirim sebagai blok konten pesan user.
-    const content = images.length ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(prompt ? [{ type: 'text', text: prompt }] : [])] : prompt;
-    agent.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+    // Codex tidak punya hook "tunggu sebelum tool": checkpoint harus selesai sebelum giliran dimulai.
+    if (agent.kind === 'codex' && this.cpReady) await this.cpReady;
+    await agent.push({ text: prompt, images });
     return done;
   }
 
   // Pertanyaan pilihan (AskUserQuestion) dan persetujuan rencana (ExitPlanMode) selalu
   // menunggu pengguna, termasuk saat auto-izin aktif.
+  /** @returns {Promise<import('@anthropic-ai/claude-agent-sdk').PermissionResult>} */
   async askPermission(tool, input, opts) {
     const cwd = this.meta.cwd;
-    const allow = { behavior: 'allow', updatedInput: input };
+    const allow = { behavior: /** @type {const} */ ('allow'), updatedInput: input };
     const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
     const write = FILE_TOOLS.has(tool) && !READ_TOOLS.has(tool);
     if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'Folder data snugcode berisi kredensial dan tidak boleh diakses agen.' };
@@ -875,6 +1001,12 @@ export class Session extends EventEmitter {
     // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
     if (!safe && this.cpReady) await this.cpReady;
     if (!needsUser && (planFile || safe || editInside || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
+    return this.requestUser(tool, input, opts);
+  }
+
+  // Tanya pengguna (kartu izin di HP/terminal + notifikasi) dan tunggu jawabannya.
+  /** @returns {Promise<import('@anthropic-ai/claude-agent-sdk').PermissionResult>} */
+  requestUser(tool, input, opts) {
     const pid = randomBytes(6).toString('hex');
     return new Promise((resolve) => {
       const p = { resolve, tool, input, title: opts?.title, suggestions: opts?.suggestions };
@@ -930,7 +1062,7 @@ export class Session extends EventEmitter {
     const agent = this.agent;
     const turn = this.turn;
     if (!agent || turn?.agent !== agent) return;
-    await agent.q.interrupt().catch(() => {});
+    await Promise.resolve(agent.interrupt()).catch(() => {});
     // Normalnya agen membalas dengan `result`; bila tidak dalam 8 detik, matikan prosesnya.
     setTimeout(() => this.turn === turn && this.closeAgent(agent), 8000).unref?.();
   }
@@ -1037,12 +1169,14 @@ export class SessionManager {
     this.sessions = new Map();
     this.busyRepos = new Map(); // folder repo (huruf kecil) -> jumlah sesi yang sedang dibuat
     try {
-      this.proxy = startRouterProxy(config.routerUrl, { getKey: () => this.secrets.routerKey });
+      this.proxy = startProxy({ log: (m) => this.log(m) });
     } catch (e) {
       this.log('! gagal memulai loopback proxy: ' + e.message);
     }
-    // Daftar model router diambil di latar belakang: pemilihan model ringan subagen membacanya dari cache.
-    if (secrets.routerKey) knownModelIds(config, secrets.routerKey);
+    this.routeTokens = new Map(); // `${koneksi}|${format}` -> token lokal proxy
+    this.bridges = new Map(); // token jembatan MCP (engine Codex) -> sesi
+    // Daftar model diambil di latar belakang: pemilihan model ringan subagen membacanya dari cache.
+    for (const id of Object.keys(allConnections(secrets))) knownRefs(secrets, id);
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     const idx = readSessionIndex({ quarantine: true });
     let index = idx.list;
@@ -1102,17 +1236,46 @@ export class SessionManager {
     return active.length;
   }
 
-  // URL router diganti dari HP: proxy baru di port baru. Proses claude yang hidup memakai URL proxy
-  // lama di kuncinya (lihat startAgent), jadi otomatis dibuat ulang pada prompt berikutnya.
-  resetRouter() {
-    this.proxy?.close();
-    try {
-      this.proxy = startRouterProxy(this.config.routerUrl, { getKey: () => this.secrets.routerKey });
-    } catch (e) {
-      this.proxy = null;
-      this.log('! gagal memulai loopback proxy: ' + e.message);
+  // Token lokal proxy untuk satu koneksi + format. Alamat & key dibaca dari secrets pada setiap
+  // request, jadi key yang diganti dari HP langsung berlaku tanpa membuat ulang proses agen.
+  tokenFor(conn, wire) {
+    const k = `${conn.id}|${wire}`;
+    let t = this.routeTokens.get(k);
+    if (t) return t;
+    if (!this.proxy) throw new Error('Loopback proxy snugcode tidak berjalan.');
+    const id = conn.id;
+    const cur = () => getConn(this.secrets, id) || conn;
+    t = this.proxy.register({
+      wire: /** @type {any} */ (wire),
+      base: () => (wire === 'anthropic' ? cur().anthropic : cur().openai) || '',
+      auth: () => authHeaders(cur(), wire === 'anthropic' ? 'anthropic' : 'openai'),
+      router: !!(conn.router || conn.kind === 'router'),
+      kind: conn.kind,
+    });
+    this.routeTokens.set(k, t);
+    return t;
+  }
+
+  // Koneksi diubah/dihapus dari HP: token lamanya dicabut, proses agen yang memakainya dibuat ulang
+  // pada prompt berikutnya (kuncinya memuat token).
+  resetRouter(connId = 'router') {
+    for (const [k, t] of this.routeTokens) {
+      if (!k.startsWith(connId + '|')) continue;
+      this.proxy?.unregister(t);
+      this.routeTokens.delete(k);
     }
-    if (this.secrets.routerKey) knownModelIds(this.config, this.secrets.routerKey);
+    if (getConn(this.secrets, connId)) knownRefs(this.secrets, connId);
+  }
+
+  // Token jembatan MCP: hanya bisa memanggil tool dev untuk satu sesi (lihat server.js LocalConn).
+  bridgeToken(session) {
+    for (const [t, s] of this.bridges) if (s === session) return t;
+    const t = 'bridge-' + randomBytes(24).toString('hex');
+    this.bridges.set(t, session);
+    return t;
+  }
+  bridgeSession(token) {
+    return typeof token === 'string' ? this.bridges.get(token) || null : null;
   }
 
   // Ada pekerjaan yang berjalan (agen, `!perintah`, dev server, atau tunnel preview)?
@@ -1200,6 +1363,7 @@ export class SessionManager {
   async remove(id) {
     const s = this.get(id);
     await s.close();
+    for (const [t, x] of this.bridges) if (x === s) this.bridges.delete(t);
     await new Promise((r) => setTimeout(r, 150)); // claude.exe melepas file worktree
     this.sessions.delete(id);
     this.saveIndex();
