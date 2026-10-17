@@ -10,7 +10,7 @@ import { enableNotifications, localNotify, syncPush } from './push.js';
 import { reattach } from './session.js';
 import { sessionSub, showSessions, showSessionsMeta } from './sessions.js';
 import { cloudPin, codespacesError, connectButton, connectCodespaces, ghcs, idleSheet, isAuthError, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
-import { routerSheet, settingsItems } from './settings.js';
+import { connectionsSheet, settingsItems } from './settings.js';
 import { progress } from './progress.js';
 
 // ---------- Koneksi ke satu PC ----------
@@ -77,12 +77,20 @@ export function openMachine(m, { sid } = {}) {
     if (first) {
       showSessions();
       if (info.runtime === 'cloud') setupCloud(info);
-      else if (info.routerConfigured === false) routerSheet({ first: true });
+      else if (info.routerConfigured === false) connectionsSheet({ first: true });
     } else if (app.current.session) (reattach(), ui.sub(sessionSub(app.current.session)));
     else showSessionsMeta();
   });
   app.conn.on('events', (msg) => app.current?.onEvents?.(msg));
   app.conn.on('github', (msg) => onGithubStatus(msg));
+  // Login ChatGPT selesai (atau gagal) di mesin; daftar koneksi & model default berubah.
+  app.conn.on('chatgpt', (msg) => app.current?.onChatgpt?.(msg));
+  app.conn.on('connections', (msg) => app.current?.info && (app.current.info = { ...app.current.info, connections: msg.list, routerConfigured: msg.list.length > 0 }));
+  app.conn.on('info', (msg) => {
+    if (!app.current?.info) return;
+    app.current.info = { ...app.current.info, ...msg.info };
+    showSessionsMeta();
+  });
   app.conn.on('update', (st) => onUpdateStatus(st, true));
   app.conn.on('notice', (msg) => {
     if (app.current?.session?.id === msg.sid && document.visibilityState === 'visible') return;
@@ -128,12 +136,12 @@ function wakeScreen(m, msg, showStatus) {
 const $view = () => document.getElementById('view');
 
 // Runner cloud tersambung: beri token Codespaces (agar bisa berhenti sendiri saat menganggur), lalu
-// minta key 9router bila belum ada — runner baru tidak punya terminal untuk `snugcode setup`.
+// minta model (login ChatGPT / API key) bila belum ada — runner baru tidak punya terminal untuk `snugcode setup`.
 function setupCloud(info) {
   const t = ghcs();
   if (t && info.runner?.provider === 'codespace' && info.caps?.includes('runnerConfig'))
     app.conn.call('runnerConfig', { token: t.token }).then((runner) => app.current && (app.current.info = { ...app.current.info, runner })).catch(() => {});
-  if (!info.routerConfigured) routerSheet({ first: true, after: () => (ghBad() ? githubLoginSheet() : ui.closeSheet()) });
+  if (!info.routerConfigured) connectionsSheet({ first: true, after: () => (ghBad() ? githubLoginSheet() : ui.closeSheet()) });
 }
 
 export function showPin(m) {
@@ -417,7 +425,8 @@ export async function githubLoginSheet() {
 }
 
 export function modelItem(t1, id, onclick) {
-  return menuItem({ icon: 'cpu', t1, t2: M.modelLabel(id) || '(belum dipilih)', onclick });
+  const engine = app.current?.info?.model === id ? app.current.info.engine : null;
+  return menuItem({ icon: 'cpu', t1, t2: (M.modelLabel(id, { provider: true }) || '(belum dipilih)') + (engine ? ' · ' + (engine === 'codex' ? 'Codex' : 'Claude Agent SDK') : ''), onclick });
 }
 
 export function showMachineMenu() {
@@ -449,14 +458,14 @@ export function showMachineMenu() {
       modelItem('Default untuk sesi baru', info.model, () => pick('Model default', 'model')),
       // Model ringan subagen dipilih otomatis oleh daemon (Claude Haiku 5.5 / Gemini 3.8 Flash).
       info.lightModel
-        ? menuItem({ icon: 'bolt', t1: 'Model ringan (subagen) · otomatis', t2: M.modelLabel(info.lightModel), chev: false, onclick: () => toast('Dipilih otomatis: Haiku 5.5 untuk model Claude, Gemini 3.8 Flash untuk model lain') })
+        ? menuItem({ icon: 'bolt', t1: 'Model ringan (subagen) · otomatis', t2: M.modelLabel(info.lightModel) + (info.engine === 'codex' ? ' · diatur Codex' : ''), chev: false, onclick: () => toast('Dipilih otomatis dari koneksi yang sama: Haiku untuk Claude, Flash untuk Gemini/DeepSeek. Model GPT memakai subagen Codex.') })
         : modelItem('Model kecil (tugas ringan)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
     ),
     h('div', { class: 'label' }, 'GitHub'),
     h('div', { class: 'group' },
       menuItem({ icon: 'github', t1: ghBad() ? 'Login GitHub (perlu)' : 'Login ulang GitHub', t2: info.github && !ghBad() ? '@' + info.github + ' · tersambung' : 'push, PR, dan daftar repo', onclick: () => githubLoginSheet() }),
     ),
-    settings.length ? h('div', { class: 'label' }, 'Router & akses') : null,
+    settings.length ? h('div', { class: 'label' }, 'Model & akses') : null,
     settings.length ? h('div', { class: 'group' }, ...settings) : null,
     cloud ? h('div', { class: 'label' }, 'Runner cloud') : null,
     cloud

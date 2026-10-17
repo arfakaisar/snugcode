@@ -4,16 +4,24 @@ import { app } from './state.js';
 import { busyButton, h, haptic, ic, isOldDaemon, loading, toast, ui } from './dom.js';
 
 // ---------- Pemilih model + slider effort ----------
-export const modelCache = { list: null, at: 0, probes: new Map() };
+export const modelCache = { list: null, errors: [], at: 0, probes: new Map() };
 
 export async function loadModels(fresh = false) {
   if (!fresh && modelCache.list && Date.now() - modelCache.at < 5 * 60 * 1000) return modelCache.list;
   let list;
-  try {
-    list = await app.conn.call('modelsInfo', { fresh });
-  } catch (e) {
-    if (!isOldDaemon(e)) throw e;
-    list = await app.conn.call('models'); // daemon versi lama: hanya ID
+  modelCache.errors = [];
+  if (app.current?.info?.caps?.includes('modelsAll')) {
+    // Semua koneksi sekaligus; koneksi yang gagal dilaporkan tanpa menggagalkan yang lain.
+    const r = await app.conn.call('modelsAll', { fresh });
+    list = r.models;
+    modelCache.errors = r.errors || [];
+  } else {
+    try {
+      list = await app.conn.call('modelsInfo', { fresh });
+    } catch (e) {
+      if (!isOldDaemon(e)) throw e;
+      list = await app.conn.call('models'); // daemon versi lama: hanya ID
+    }
   }
   modelCache.list = list;
   modelCache.at = Date.now();
@@ -46,13 +54,18 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
   } catch (e) {
     return list.replaceChildren(h('div', { class: 'err' }, e.message));
   }
-  if (!groups.length) return list.replaceChildren(h('div', { class: 'err' }, 'Tidak ada model dengan tool calling di 9router.'));
-  // Daftar model 9router bisa berubah kapan saja (model mati dihapus).
+  const errs = modelCache.errors.map((e) => h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), `${e.conn}: ${e.err}`));
+  if (!groups.length) {
+    const add = app.current?.info?.caps?.includes('connAdd') ? h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: async () => (await import('./settings.js')).connectionsSheet({ back: onBack }) }, ic('key'), 'Tambah API key / login ChatGPT') : null;
+    return list.replaceChildren(...errs, h('div', { class: 'empty' }, 'Belum ada model yang bisa dipakai agen.'), add || '');
+  }
+  if (errs.length) list.before(...errs);
+  // Daftar model bisa berubah kapan saja (model mati dihapus, koneksi dihapus).
   const exact = cur ? M.findGroup(groups, cur) : null;
   const p = cur ? M.parseModelId(cur) : null;
-  const sameGroup = !exact && p ? groups.find((g) => g.key === (p.provider ? p.provider + '/' : '') + p.base) : null;
+  const sameGroup = !exact && p ? groups.find((g) => g.key === (p.conn !== 'router' ? `${p.conn}:${p.base}` : (p.provider ? p.provider + '/' : '') + p.base)) : null;
   if (cur && !exact)
-    list.before(h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), sameGroup ? `Varian ${cur} sudah tidak ada di 9router. Pilih tingkat effort lain.` : `${cur} sudah tidak ada di 9router. Pilih model lain.`));
+    list.before(h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), sameGroup ? `Varian ${M.modelLabel(cur)} sudah tidak tersedia. Pilih tingkat effort lain.` : `${M.modelLabel(cur, { provider: true })} sudah tidak tersedia. Pilih model lain.`));
   const g0 = exact || sameGroup || groups[0];
   const sel = { group: g0, effort: M.defaultChoice(g0, cur) };
   let probeTimer;
@@ -140,11 +153,13 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
     for (const g of shown) {
       if (g.provider !== lastProvider) {
         lastProvider = g.provider;
-        out.push(h('div', { class: 'mprov' }, (M.PROVIDER_LABEL[g.provider] || g.provider || 'lainnya') + (g.provider ? ` · ${g.provider}/` : '')));
+        // Koneksi (Claude API, ChatGPT, OpenRouter, …) atau provider di router lama (cc/, ag/, …).
+        const head = g.conn && g.conn !== 'router' ? (g.label || M.PROVIDER_LABEL[g.provider] || g.provider) : (M.PROVIDER_LABEL[g.provider] || g.provider || 'lainnya') + (g.provider ? ` · ${g.provider}/` : '');
+        out.push(h('div', { class: 'mprov' }, head));
       }
       const isSel = g === sel.group;
       const inUse = g.variants.some((v) => v.id === cur);
-      const badges = [g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'gambar' : null].filter(Boolean);
+      const badges = [g.engine === 'codex' ? 'Codex' : null, g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'gambar' : null].filter(Boolean);
       out.push(
         h('div', { class: 'model' + (isSel ? ' sel' : ''), role: 'button', tabindex: '0', onclick: () => {
           if (sel.group === g) return;

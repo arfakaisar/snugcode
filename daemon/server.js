@@ -6,8 +6,11 @@ import net from 'node:net';
 import * as C from '../shared/crypto.js';
 import { loadSecrets, saveSecrets, saveConfig, IPC_PATH, isCloud, scrubSecretEnv } from './config.js';
 import { SessionManager } from './sessions.js';
-import { listModels, probeModel, knownModelIds } from './router.js';
 import { lightModel } from '../shared/models.js';
+import { splitRef, joinRef } from '../shared/providers.js';
+import { migrateLegacy, mirrorLegacy, putConnection, allConnections, getConn, connSummary, detectConnection, listConnModels, listAllModels, knownRefs, forgetModels, resolveRoute, probeRoute } from './providers.js';
+import { chatgptLoginStart, chatgptLogout, chatgptModels } from './codex.js';
+import { devToolList, callDevTool } from './devtools.js';
 import { mergeText } from '../shared/events.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, currentBranch, TOKEN_INVALID } from './github.js';
 import { GithubAuth } from './ghauth.js';
@@ -27,6 +30,8 @@ export class Daemon {
     this.config = config;
     this.secrets = loadSecrets();
     this.log = log;
+    // Router lama (config.routerUrl + secrets.routerKey) menjadi koneksi `router`.
+    if (migrateLegacy(config, this.secrets)) saveSecrets(this.secrets);
     this.updaterMeta = getInstallInfo(config);
     // Token GitHub di env (mis. GITHUB_TOKEN dari Codespaces) & env bootstrap runner tidak boleh
     // terwariskan ke agen, Bash-nya, dev server, atau `!perintah`.
@@ -48,6 +53,77 @@ export class Daemon {
 
   saveSecrets() {
     saveSecrets(this.secrets);
+  }
+
+  // ---------- koneksi model ----------
+  models({ fresh = false } = {}) {
+    return listAllModels(this.secrets, { fresh, codexModels: (c) => chatgptModels(this.config, c.id) });
+  }
+
+  connList() {
+    const sec = this.secrets;
+    return Object.values(allConnections(sec)).map((c) => {
+      const refs = knownRefs(sec, c.id);
+      return { ...connSummary(c), models: refs ? refs.length : null };
+    });
+  }
+
+  // Simpan koneksi hasil deteksi. Satu koneksi per provider katalog (menimpa yang lama); router &
+  // endpoint kustom bisa banyak (router, router2, …). Koneksi `router` = model tanpa awalan.
+  /** @param {any} conn @param {{ replace?: string, models?: { id: string, isDefault?: boolean }[] }} [opts] */
+  saveConnection(conn, { replace, models } = {}) {
+    const sec = this.secrets;
+    const id = putConnection(sec, conn, { replace });
+    mirrorLegacy(this.config, sec);
+    forgetModels(id);
+    this.sessions.resetRouter(id);
+    // Model default: tetap bila masih bisa dipakai; selain itu pilih dari koneksi baru (di latar belakang).
+    let ok = true;
+    try {
+      resolveRoute(sec, this.config.model);
+    } catch {
+      ok = false;
+    }
+    // Daftar model hasil deteksi sudah ada: model default langsung dipilih (jawaban RPC memuatnya).
+    if ((!ok || !this.config.model) && models?.length) {
+      this.config.model = models.find((m) => m.isDefault)?.id || defaultModel(models.map((m) => m.id));
+      ok = true;
+    }
+    this.saveSecrets();
+    saveConfig(this.config);
+    if (!ok || !this.config.model) this.pickDefaultModel(id);
+    return id;
+  }
+
+  async pickDefaultModel(connId) {
+    try {
+      const c = getConn(this.secrets, connId);
+      if (!c) return;
+      const list = await listConnModels(c, { fresh: true, codexModels: (x) => chatgptModels(this.config, x.id) });
+      const def = list.find((m) => m.isDefault)?.id || defaultModel(list.map((m) => m.id));
+      if (!def) return;
+      this.config.model = def;
+      saveConfig(this.config);
+      this.broadcast({ ev: 'info', info: { model: def } });
+    } catch (e) {
+      this.log('! gagal memilih model default: ' + e.message);
+    }
+  }
+
+  removeConnection(id) {
+    const sec = this.secrets;
+    if (!sec.connections?.[id]) throw new Error('Koneksi tidak ditemukan');
+    delete sec.connections[id];
+    mirrorLegacy(this.config, sec);
+    forgetModels(id);
+    this.sessions.resetRouter(id);
+    if (splitRef(this.config.model || '').conn === id) {
+      this.config.model = '';
+      const next = Object.keys(sec.connections)[0];
+      if (next) this.pickDefaultModel(next);
+    }
+    this.saveSecrets();
+    saveConfig(this.config);
   }
 
   start() {
@@ -231,9 +307,10 @@ function need(v, name, { type = 'string', max = 100_000 } = {}) {
 }
 const opt = (v, name, o) => (v == null || v === '' ? undefined : need(v, name, o));
 
-// Model default saat router baru dipasang dari HP: Claude Sonnet/Opus bila ada, lalu Claude lain, lalu yang pertama.
+// Model default saat koneksi baru dipasang dari HP: Claude Sonnet/Opus bila ada, lalu Claude lain,
+// lalu model GPT Codex, Gemini Pro, lalu yang pertama.
 export function defaultModel(ids) {
-  const pref = [/^cc\/claude-sonnet/, /^cc\/claude-opus/, /^(cc\/)?claude-/, /claude/, /gemini.*pro/, /gemini/];
+  const pref = [/^cc\/claude-sonnet/, /^cc\/claude-opus/, /^(cc\/|[a-z]+:)?claude-sonnet/, /^(cc\/|[a-z]+:)?claude-opus/, /^(cc\/)?claude-/, /claude/, /gpt-[\d.]+-codex(?!-mini)/, /gpt-[\d.]+$/, /gemini.*pro/, /gemini/];
   for (const re of pref) {
     const hit = ids.find((id) => re.test(id));
     if (hit) return hit;
@@ -265,39 +342,83 @@ const RPC = {
   },
   githubStatus: (c, p) => (p.check ? c.d.github.check() : c.d.github.status()),
   githubLogin: (c) => c.d.github.begin(),
-  models: async (c) => (await listModels(c.d.config, c.d.secrets.routerKey)).map((m) => m.id), // versi lama: daftar ID saja
-  modelsInfo: (c, p) => listModels(c.d.config, c.d.secrets.routerKey, { fresh: !!p.fresh }),
-  probeModel: (c, p) => probeModel(c.d.config, c.d.secrets.routerKey, need(p.model, 'model', { max: 200 })),
+  models: async (c) => (await c.d.models()).models.map((m) => m.id), // versi lama: daftar ID saja
+  modelsInfo: async (c, p) => (await c.d.models({ fresh: !!p.fresh })).models,
+  // Model semua koneksi + koneksi yang gagal dihubungi (ditampilkan di pemilih model).
+  modelsAll: (c, p) => c.d.models({ fresh: !!p.fresh }),
+  async probeModel(c, p) {
+    const route = resolveRoute(c.d.secrets, need(p.model, 'model', { max: 300 }));
+    // ChatGPT: kesehatan model dijamin Codex; menguji lewat app-server terlalu mahal untuk tiap pilihan.
+    if (route.wire === 'chatgpt') return { ok: true, ms: 0, text: 'ChatGPT' };
+    return probeRoute(route);
+  },
   setModel(c, p) {
-    // Model ringan (subagen) tidak lagi bisa dipilih: otomatis Haiku 5.5 / Gemini 3.8 Flash.
-    if (p.model) c.d.config.model = need(p.model, 'model', { max: 200 });
+    // Model ringan (subagen) tidak lagi bisa dipilih: otomatis dari koneksi yang sama (Haiku / Flash).
+    if (p.model) {
+      const model = need(p.model, 'model', { max: 300 });
+      resolveRoute(c.d.secrets, model); // koneksi model ini harus ada
+      c.d.config.model = model;
+    }
     saveConfig(c.d.config);
     return c.info();
   },
+  // ---------- koneksi model (API key official, router, endpoint kustom, login ChatGPT) ----------
+  // Key dikirim lewat kanal E2EE, divalidasi ke endpoint-nya dulu, dan tidak pernah dikembalikan ke klien.
+  connections: (c) => c.d.connList(),
+  async connAdd(c, p) {
+    const key = opt(p.key, 'API key', { max: 2000 })?.trim();
+    const url = opt(p.url, 'URL', { max: 400 })?.trim();
+    const kind = opt(p.kind, 'jenis', { max: 32 });
+    const det = await detectConnection({ key, url, kind });
+    const { models, ...conn } = det;
+    const id = c.d.saveConnection(conn, { replace: opt(p.replace, 'id', { max: 40 }), models });
+    return { conn: c.d.connList().find((x) => x.id === id), models: models.length, info: c.info() };
+  },
+  connRemove(c, p) {
+    c.d.removeConnection(need(p.id, 'id', { max: 40 }));
+    return c.info();
+  },
+  // Login ChatGPT (langganan Plus/Pro) lewat Codex resmi, dengan kode perangkat yang bisa diselesaikan dari HP.
+  async chatgptLogin(c) {
+    const d = c.d;
+    const r = await chatgptLoginStart(d.config, {
+      log: (m) => d.log(m),
+      onDone: ({ ok, account, err }) => {
+        if (ok) {
+          d.saveConnection({ kind: 'chatgpt', label: 'ChatGPT', formats: {}, account: { email: account?.email || null, plan: account?.planType || null } }, { replace: 'chatgpt' });
+          d.log(`✓ ChatGPT tersambung${account?.email ? ' sebagai ' + account.email : ''}`);
+        }
+        d.broadcast({ ev: 'chatgpt', ok, err: ok ? null : err || 'Login ChatGPT gagal', info: null });
+        d.broadcast({ ev: 'connections', list: d.connList() });
+      },
+    });
+    return r;
+  },
+  async chatgptLogout(c) {
+    await chatgptLogout(c.d.config).catch(() => {});
+    if (getConn(c.d.secrets, 'chatgpt')) c.d.removeConnection('chatgpt');
+    return c.info();
+  },
+  // ---------- jembatan MCP engine Codex (hanya koneksi jembatan satu sesi) ----------
+  devTools(c) {
+    if (!c.bridge) throw new Error('Hanya untuk jembatan MCP');
+    return devToolList();
+  },
+  devTool(c, p) {
+    if (!c.bridge) throw new Error('Hanya untuk jembatan MCP');
+    return callDevTool(c.bridge, need(p.name, 'tool', { max: 64 }), p.args && typeof p.args === 'object' ? p.args : {});
+  },
   // ---------- setelan dari HP (dulu hanya `snugcode setup` / `pin` / `devices` / `revoke`) ----------
-  // Key 9router dikirim lewat kanal E2EE dan tidak pernah dikembalikan ke klien.
+  // Bentuk lama (aplikasi versi lama): satu router = koneksi `router`.
   async configure(c, p) {
-    const cfg = c.d.config;
-    const sec = c.d.secrets;
-    const url = p.routerUrl != null && p.routerUrl !== '' ? need(p.routerUrl, 'URL router', { max: 300 }).trim().replace(/\/+$/, '') : cfg.routerUrl;
+    const cur = getConn(c.d.secrets, 'router');
+    const url = p.routerUrl != null && p.routerUrl !== '' ? need(p.routerUrl, 'URL router', { max: 300 }).trim().replace(/\/+$/, '') : cur?.openai || c.d.config.routerUrl;
     if (!/^https?:\/\/[^\s/]+/i.test(url || '')) throw new Error('URL router harus diawali http:// atau https://');
-    const key = p.routerKey ? need(p.routerKey, 'key 9router', { max: 1000 }).trim() : sec.routerKey;
+    const key = p.routerKey ? need(p.routerKey, 'key 9router', { max: 1000 }).trim() : cur?.key;
     if (!key) throw new Error('Key 9router kosong');
     // Divalidasi dulu: key/URL yang salah tidak menimpa konfigurasi yang sedang berjalan.
-    let models;
-    try {
-      models = await listModels({ routerUrl: url }, key, { fresh: true });
-    } catch (e) {
-      throw new Error(/\b40[13]\b/.test(e.message) ? 'Key ditolak router (401). Periksa lagi key-nya.' : 'Router tidak bisa dihubungi: ' + e.message);
-    }
-    if (!models.length) throw new Error('Router tidak punya model yang mendukung tool calling.');
-    const urlChanged = url !== cfg.routerUrl;
-    cfg.routerUrl = url;
-    sec.routerKey = key;
-    if (!cfg.model || !models.some((m) => m.id === cfg.model)) cfg.model = defaultModel(models.map((m) => m.id));
-    saveConfig(cfg);
-    c.d.saveSecrets();
-    if (urlChanged) c.d.sessions.resetRouter();
+    const { models, ...conn } = await detectConnection({ key, url, kind: 'router' });
+    c.d.saveConnection(conn, { replace: 'router', models });
     return c.info();
   },
   devices: (c) =>
@@ -514,6 +635,8 @@ const RPC = {
 class RpcConn {
   constructor(daemon) {
     this.d = daemon;
+    /** @type {import('./sessions.js').Session | null} sesi milik jembatan MCP (hanya tool dev) */
+    this.bridge = null;
     this.ready = false;
     this.sub = null; // { session, listener }
     this.queue = [];
@@ -534,6 +657,7 @@ class RpcConn {
 
   async handleRpc({ id, m, p }) {
     try {
+      if (this.bridge && m !== 'devTools' && m !== 'devTool') throw new Error('Tidak diizinkan untuk jembatan MCP');
       const fn = Object.hasOwn(RPC, m) ? RPC[m] : null;
       if (!fn) throw new Error('Metode tidak dikenal: ' + m);
       const r = await fn(this, p && typeof p === 'object' ? p : {});
@@ -546,12 +670,19 @@ class RpcConn {
 
   info() {
     const c = this.d.config;
+    const sec = this.d.secrets;
+    let engine = null;
+    try {
+      engine = resolveRoute(sec, c.model).engine;
+    } catch {}
     return {
       name: c.machineName,
       model: c.model,
+      engine,
       // Model ringan subagen untuk model default (tiap sesi menghitungnya dari model sesinya).
-      lightModel: lightModel(c.model, knownModelIds(c, this.d.secrets.routerKey)).id,
-      router: c.routerUrl,
+      lightModel: c.model ? lightModel(c.model, knownRefs(sec, splitRef(c.model).conn)).id : null,
+      router: getConn(sec, 'router')?.openai || c.routerUrl,
+      connections: this.d.connList(),
       github: c.githubLogin || null,
       githubState: this.d.github.state,
       platform: process.platform,
@@ -563,7 +694,8 @@ class RpcConn {
       // 'pc' | 'cloud' (Codespaces / container). PWA menyembunyikan fitur khusus PC & menampilkan setelan runner.
       runtime: c.runtime || 'pc',
       machineId: c.machineId,
-      routerConfigured: !!this.d.secrets.routerKey,
+      // Ada koneksi model (dulu: key 9router). Nama lama dipertahankan untuk aplikasi versi lama.
+      routerConfigured: Object.keys(sec.connections || {}).length > 0,
       runner: isCloud(c) ? { ...(c.runner || {}), idleStopMinutes: idleMinutes(c), autoStop: !!this.d.secrets.runnerToken || !!c.runner?.idleExit } : null,
       // Fitur protokol yang didukung daemon ini: klien memeriksa ini, bukan menebak dari pesan error.
       proto: PROTO,
@@ -640,6 +772,17 @@ class LocalConn extends RpcConn {
       return;
     }
     if (!this.ready) {
+      // Jembatan MCP engine Codex: token per sesi, hanya untuk tool dev sesi itu.
+      if (m.t === 'hello' && m.bridge) {
+        const s = this.d.sessions.bridgeSession(m.bridge);
+        if (!s) {
+          this.push({ ev: 'denied' });
+          return this.sock.end();
+        }
+        this.ready = true;
+        this.bridge = s;
+        return this.push({ ev: 'ready' });
+      }
       const want = Buffer.from(String(this.d.secrets.localToken));
       const got = Buffer.from(String(m.token || ''));
       if (m.t !== 'hello' || got.length !== want.length || !timingSafeEqual(got, want)) {
