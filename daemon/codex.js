@@ -158,8 +158,14 @@ let sandboxProbe = null;
 /** @param {string[]} cmd */
 export function sandboxWorks(cmd) {
   if (process.platform === 'win32') return Promise.resolve(true);
+  // CODEX_HOME harus sudah ada: tanpa itu Codex gagal sebelum menguji sandbox (dulu terbaca "tidak tersedia").
+  fs.mkdirSync(CODEX_HOME, { recursive: true });
   sandboxProbe ??= new Promise((resolve) => {
-    execFile(cmd[0], [...cmd.slice(1), 'sandbox', '-c', 'default_permissions=":workspace"', '--', 'echo', 'snug-sandbox-ok'], { env: codexEnv(), timeout: 30_000 }, (err, out) => resolve(!err && String(out).includes('snug-sandbox-ok')));
+    execFile(cmd[0], [...cmd.slice(1), 'sandbox', '-c', 'default_permissions=":workspace"', '--', 'echo', 'snug-sandbox-ok'], { env: codexEnv(), timeout: 30_000 }, (err, out, errOut) => {
+      const ok = !err && String(out).includes('snug-sandbox-ok');
+      if (!ok) console.error('! sandbox Codex tidak tersedia: ' + String(errOut || err?.message || '').split('\n').filter((l) => /error|denied|permission|namespace/i.test(l)).slice(0, 2).join(' ').slice(0, 300));
+      resolve(ok);
+    });
   });
   return sandboxProbe;
 }
