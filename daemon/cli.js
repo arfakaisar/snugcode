@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // snugcode — CLI daemon.
-//   snugcode setup     : setup awal (relay, 9router, GitHub, PIN)
+//   snugcode setup     : setup awal (API key model, GitHub, PIN)
 //   snugcode start     : jalankan daemon
 //   snugcode stop      : hentikan daemon yang berjalan di latar belakang
 //   snugcode autostart : jalankan otomatis saat login (on|off)
@@ -20,11 +20,13 @@ import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC }
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { lightModel } from '../shared/models.js';
+import { keyCandidates, splitRef, ENGINE_LABEL, engineFor } from '../shared/providers.js';
+import { detectConnection, putConnection, mirrorLegacy, migrateLegacy, hasConnections, allConnections, connSummary } from './providers.js';
 import { checkUpdate, performUpdate } from './updater.js';
 import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'login', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud'];
+const COMMAND_NAMES = ['setup', 'login', 'connect', 'disconnect', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: snugcode "jelaskan repo ini".
@@ -69,17 +71,11 @@ function openBrowser(url) {
   p.unref();
 }
 
-async function fetchModels(routerUrl, key) {
-  const r = await fetch(routerUrl.replace(/\/+$/, '') + '/models', { headers: { authorization: 'Bearer ' + key } });
-  if (r.status === 401) throw new Error('API key ditolak 9router');
-  if (!r.ok) throw new Error('9router menjawab ' + r.status);
-  const j = await r.json();
-  return j.data.filter((m) => m.capabilities?.tools !== false).map((m) => m.id);
-}
-
 async function pickModel(models, label, def) {
   if (flags[label]) return flags[label];
-  models.forEach((m, i) => console.log(c.d(String(i + 1).padStart(3)) + '  ' + m));
+  // OpenRouter & router besar punya ratusan model: tampilkan sebagian, nama lain tetap bisa diketik.
+  models.slice(0, 40).forEach((m, i) => console.log(c.d(String(i + 1).padStart(3)) + '  ' + m));
+  if (models.length > 40) console.log(c.d(`  … ${models.length - 40} model lain (ketik namanya)`));
   const a = await ask(`Pilih ${label === 'model' ? 'model utama' : 'model kecil (tugas ringan)'} (nomor atau nama)`, def);
   return /^\d+$/.test(a) ? models[+a - 1] : a;
 }
@@ -107,27 +103,43 @@ async function setup() {
   const sec = loadSecrets();
   console.log(c.b('\nsnugcode setup') + c.d(`  (data disimpan di ${HOME})\n`));
 
-  // 1. 9router
-  console.log(c.b('1) 9router'));
-  cfg.routerUrl = flags.router || (flags.key ? cfg.routerUrl || DEFAULT_ROUTER_URL : await ask('URL 9router', cfg.routerUrl || DEFAULT_ROUTER_URL));
+  // 1. Model: API key apa pun (official / router / endpoint sendiri), jenisnya dideteksi otomatis.
+  migrateLegacy(cfg, sec);
+  console.log(c.b('1) Model & API key'));
+  console.log(c.d('   Tempel API key: Anthropic (sk-ant-api…), OpenAI, Gemini (AIza…), OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq,'));
+  console.log(c.d('   atau key router (9router, OmniRoute, LiteLLM, …) beserta URL-nya. Login ChatGPT: dari aplikasi HP → Model & API key.'));
+  const have = hasConnections(sec);
   let models;
   for (;;) {
-    const key = flags.key || (await ask('API key 9router milikmu', sec.routerKey ? '(tetap)' : '', { hidden: true }));
-    if (key && key !== '(tetap)') sec.routerKey = key;
+    const key = flags.key || (await ask('API key', have ? '(tetap)' : '', { hidden: true }));
+    if (key === '(tetap)' && have) break;
+    let url = flags.router || flags.url || '';
+    if (!url && key && !keyCandidates(key).length && !flags.key) url = await ask('URL router / endpoint (key ini bukan key official yang dikenal)', cfg.routerUrl || DEFAULT_ROUTER_URL);
+    else if (!url && key && !keyCandidates(key).length) url = cfg.routerUrl || DEFAULT_ROUTER_URL;
     try {
-      models = await fetchModels(cfg.routerUrl, sec.routerKey);
-      console.log(c.g(`✓ Key valid, ${models.length} model tersedia.`));
+      const det = await detectConnection({ key, url });
+      const { models: list, ...conn } = det;
+      const id = putConnection(sec, conn);
+      mirrorLegacy(cfg, sec);
+      const fmt = Object.entries(conn.formats || {}).filter(([, v]) => v).map(([k]) => k).join(', ');
+      console.log(c.g(`✓ ${conn.label}: ${list.length} model`) + c.d(` · format ${fmt || '-'} · koneksi "${id}"`));
+      models = list.map((m) => m.id);
       break;
     } catch (e) {
       console.log(c.r('✗ ' + e.message));
       if (flags.key) process.exit(1);
     }
   }
-  cfg.model = await pickModel(models, 'model', cfg.model || models[0]);
-  // Subagen selalu memakai model ringan: Claude Haiku 5.5 / Gemini 3.8 Flash (otomatis per model utama).
-  delete cfg.smallModel;
-  const light = lightModel(cfg.model, models);
-  console.log(c.d(`  model ringan (subagen): ${light.kind === 'main' ? 'Haiku 5.5 & Gemini 3.8 Flash tidak ada di router, memakai model utama' : light.id}`));
+  if (models?.length) {
+    const { defaultModel } = await import('./server.js');
+    cfg.model = await pickModel(models, 'model', models.includes(cfg.model) ? cfg.model : defaultModel(models));
+    // Subagen selalu memakai model ringan dari koneksi yang sama (otomatis per model utama).
+    delete cfg.smallModel;
+    const light = lightModel(cfg.model, models);
+    const conn = allConnections(sec)[splitRef(cfg.model).conn];
+    const route = conn && engineFor(conn, splitRef(cfg.model).id);
+    console.log(c.d(`  harness: ${route ? ENGINE_LABEL[route.engine] : '-'} · model ringan (subagen): ${light.kind === 'main' ? 'model utama' : light.id}`));
+  }
 
   // 2. Semua pertanyaan dulu, supaya langkah login bisa diselesaikan sekaligus.
   console.log(c.b('\n2) GitHub (untuk clone, push, dan PR)'));
@@ -308,7 +320,7 @@ async function start() {
   const cfg = loadConfig();
   const sec = loadSecrets();
   // Runner cloud dikonfigurasi dari HP: key 9router boleh belum ada saat start pertama.
-  if (isCloud(cfg) ? !cfg.relayUrl || !sec.machineToken : !cfg.relayUrl || !sec.machineToken || !sec.routerKey || !sec.prs) {
+  if (isCloud(cfg) ? !cfg.relayUrl || !sec.machineToken : !cfg.relayUrl || !sec.machineToken || !hasConnections(sec) || !sec.prs) {
     if (isCloud(cfg)) throw new Error('Runner belum dikonfigurasi. Jalankan `snugcode cloud` dengan SNUGCODE_MACHINE_TOKEN.');
     console.log(c.y('Belum setup. Menjalankan setup dulu…\n'));
     await setup();
@@ -349,9 +361,9 @@ function status() {
     relay: cfg.relayUrl,
     account: cfg.relayLogin,
     machine: cfg.machineName,
-    router: cfg.routerUrl,
+    connections: Object.values(allConnections(sec)).map((x) => `${x.id}: ${connSummary(x).label}${x.key ? ' ' + connSummary(x).key : ''}`),
     model: cfg.model,
-    lightModel: lightModel(cfg.model).id,
+    lightModel: cfg.model ? lightModel(cfg.model).id : null,
     github: cfg.githubLogin || null,
     devices: Object.keys(sec.devices).length,
     pinLocked: sec.pinFails >= 5,
@@ -395,10 +407,69 @@ async function login() {
   }
 }
 
+// `snugcode connect <api key> [--url URL]` · `snugcode connect chatgpt` · `snugcode connect` (daftar).
+// Daemon berjalan: lewat daemon (langsung berlaku). Tidak berjalan: ditulis ke secrets.json.
+async function connect() {
+  const arg = args.find((a) => !a.startsWith('-'));
+  const url = flags.url || flags.router || undefined;
+  const pid = runningPid();
+  if (arg === 'chatgpt') {
+    if (!pid) throw new Error('Login ChatGPT berjalan lewat daemon: jalankan `snugcode start` (atau autostart) dulu, lalu ulangi.');
+    const { chatgptLoginViaDaemon } = await import('./tui.js');
+    return chatgptLoginViaDaemon({ openBrowser: !flags['no-browser'] });
+  }
+  if (!arg && !url) {
+    const sec = loadSecrets();
+    migrateLegacy(loadConfig(), sec);
+    const list = Object.values(allConnections(sec)).map(connSummary);
+    if (!list.length) return console.log(c.y('Belum ada model tersambung.') + c.d(' snugcode connect <api key> [--url URL] · snugcode connect chatgpt'));
+    for (const x of list) console.log(`${c.b(x.id.padEnd(10))} ${x.label}${x.key ? c.d(' ' + x.key) : ''}${x.account?.email ? c.d(' ' + x.account.email) : ''}${x.url ? c.d(' · ' + x.url) : ''}`);
+    return;
+  }
+  if (pid) {
+    const { daemonCall } = await import('./tui.js');
+    const r = await daemonCall('connAdd', { key: arg, url });
+    return console.log(c.g(`✓ ${r.conn.label}: ${r.models} model`) + c.d(` · koneksi "${r.conn.id}" · model default ${r.info.model || '-'}`));
+  }
+  const cfg = loadConfig();
+  const sec = loadSecrets();
+  migrateLegacy(cfg, sec);
+  const { models, ...conn } = await detectConnection({ key: arg, url });
+  const id = putConnection(sec, conn);
+  mirrorLegacy(cfg, sec);
+  if (!cfg.model || splitRef(cfg.model).conn === id || !allConnections(sec)[splitRef(cfg.model).conn]) {
+    const { defaultModel } = await import('./server.js');
+    cfg.model = defaultModel(models.map((m) => m.id)) || cfg.model;
+  }
+  saveSecrets(sec);
+  saveConfig(cfg);
+  console.log(c.g(`✓ ${conn.label}: ${models.length} model`) + c.d(` · koneksi "${id}" · model default ${cfg.model}`));
+}
+
+async function disconnect() {
+  const id = args.find((a) => !a.startsWith('-'));
+  if (!id) throw new Error('Pakai: snugcode disconnect <id koneksi>  (lihat `snugcode connect`)');
+  if (runningPid()) {
+    const { daemonCall } = await import('./tui.js');
+    await daemonCall(id === 'chatgpt' ? 'chatgptLogout' : 'connRemove', { id });
+  } else {
+    const cfg = loadConfig();
+    const sec = loadSecrets();
+    migrateLegacy(cfg, sec);
+    if (!sec.connections?.[id]) throw new Error('Koneksi tidak ditemukan: ' + id);
+    delete sec.connections[id];
+    mirrorLegacy(cfg, sec);
+    if (splitRef(cfg.model || '').conn === id) cfg.model = '';
+    saveSecrets(sec);
+    saveConfig(cfg);
+  }
+  console.log(c.g('✓ Koneksi dihapus: ' + id));
+}
+
 function isSetUp() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  return !!(cfg.relayUrl && sec.machineToken && sec.routerKey && sec.prs);
+  return !!(cfg.relayUrl && sec.machineToken && hasConnections(sec) && sec.prs);
 }
 
 async function tui() {
@@ -508,6 +579,9 @@ function help() {
 // container ikut berhenti. --no-supervise: jalankan daemon langsung di proses ini.
 async function cloud() {
   ensureDirs();
+  // Dibaca sebelum env rahasia dibuang (scrubSecretEnv).
+  const apiKey = process.env.SNUGCODE_API_KEY || '';
+  const apiUrl = process.env.SNUGCODE_API_URL || '';
   const { bootstrapCloud, reportStatus } = await import('./runner.js');
   const cfg = loadConfig();
   const sec = loadSecrets();
@@ -525,7 +599,21 @@ async function cloud() {
   console.log(c.b('snugcode cloud') + c.d(` — ${cfg.machineName} · @${cfg.relayLogin || '?'} · ${cfg.runner?.provider}${cfg.runner?.name ? ' ' + cfg.runner.name : ''} · data ${HOME}`));
   if (relinked) console.log(c.g('✓ Runner ditautkan ke mesin ' + cfg.machineId));
   for (const w of warnings) console.log(c.y('! ' + w));
-  if (!sec.routerKey) console.log(c.y('! Key 9router belum diisi: buka aplikasi di HP → Pengaturan PC.'));
+  // SNUGCODE_API_KEY (+ SNUGCODE_API_URL): koneksi model apa pun, dideteksi seperti dari HP.
+  if (apiKey && sec.envApplied?.apiKey !== apiKey.slice(-12) + '|' + apiUrl) {
+    try {
+      const { models: _m, ...conn } = await detectConnection({ key: apiKey, url: apiUrl });
+      putConnection(sec, conn);
+      mirrorLegacy(cfg, sec);
+      sec.envApplied = { ...sec.envApplied, apiKey: apiKey.slice(-12) + '|' + apiUrl };
+      saveSecrets(sec);
+      saveConfig(cfg);
+      console.log(c.g('✓ Koneksi model dari SNUGCODE_API_KEY: ' + conn.label));
+    } catch (e) {
+      console.log(c.y('! SNUGCODE_API_KEY diabaikan: ' + e.message));
+    }
+  }
+  if (!hasConnections(sec)) console.log(c.y('! Belum ada model tersambung: buka aplikasi di HP → Pengaturan → Model & API key.'));
   // Container yang dinyalakan ulang memakai PID kecil yang sama lagi: daemon.pid dari sesi lalu bisa
   // menunjuk proses lain yang kebetulan hidup. Anggap berjalan hanya bila itu memang daemon snugcode.
   const other = runningPid();
@@ -560,7 +648,7 @@ async function cloud() {
   run();
 }
 
-const commands = { tui, help, cloud, setup, login, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+const commands = { tui, help, cloud, setup, login, connect, disconnect, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);
