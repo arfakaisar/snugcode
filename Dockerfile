@@ -3,7 +3,7 @@
 #   docker run -d --restart unless-stopped -v snugcode:/data -e SNUGCODE_RELAY=https://snugcode.arfak.workers.dev \
 #     -e SNUGCODE_MACHINE_TOKEN=<token> -e SNUGCODE_PAIR_PIN=<pin> snugcode
 # Perintah lengkap (token & PIN) dibuat aplikasi HP: Tambah mesin → Runner cloud → Server sendiri.
-# Key 9router, model, dan login GitHub diatur dari aplikasi HP. Platform yang menyalakan container
+# Model (API key / login ChatGPT) dan login GitHub diatur dari aplikasi HP (atau env SNUGCODE_API_KEY). Platform yang menyalakan container
 # saat dibutuhkan (mis. Fly.io): SNUGCODE_IDLE_EXIT=1 membuat container keluar setelah
 # SNUGCODE_IDLE_MINUTES (bawaan 30) tidak dipakai.
 FROM node:22-bookworm-slim

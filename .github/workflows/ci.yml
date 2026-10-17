@@ -52,6 +52,16 @@ jobs:
           cat wrangler.log; exit 1
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
+      # Koneksi multi-provider: endpoint OpenAI-only lewat penerjemah (Claude Agent SDK) dan model GPT
+      # lewat Codex app-server asli (sandbox bubblewrap butuh user namespace tanpa batasan AppArmor).
+      - name: Siapkan Codex untuk uji koneksi
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          mkdir -p "$RUNNER_TEMP/codex" && cd "$RUNNER_TEMP/codex" && echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --include=optional "$(node -p "require('$GITHUB_WORKSPACE/daemon/codex-version.json').spec")"
+      - run: npm run test:e2e:connections
+        env:
+          SNUGCODE_E2E_CODEX: ${{ runner.temp }}/codex
       - run: npm run test:ui
         env:
           SHOTS: ${{ runner.temp }}/shots
