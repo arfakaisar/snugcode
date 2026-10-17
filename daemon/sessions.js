@@ -742,7 +742,10 @@ export class Session extends EventEmitter {
     const token = route.wire === 'responses' ? this.mgr.tokenFor(route.conn, 'responses') : null;
     if (token && !proxyUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
     const computer = !!this.meta.computer;
-    const key = ['codex', cmd.join(' '), route.conn.id, route.wire, token, proxyUrl, computer].join('|');
+    // Mode rencana = profil sandbox read-only milik proses (codexArgs); berganti mode = proses baru. Override
+    // sandbox per giliran tidak dipakai: tersimpan di thread dan menimpa profil snugcode di giliran berikutnya.
+    const plan = !!this.meta.plan;
+    const key = ['codex', cmd.join(' '), route.conn.id, route.wire, token, proxyUrl, computer, plan].join('|');
     const cur = this.agent;
     if (cur && !cur.dead && cur.key === key) {
       clearTimeout(cur.idle);
@@ -760,6 +763,7 @@ export class Session extends EventEmitter {
     const args = codexArgs({
       provider: token ? { baseUrl: proxyUrl + '/v1', envKey: 'SNUGCODE_CODEX_TOKEN' } : null,
       computer,
+      plan,
       sandbox,
       mcp: { command: process.execPath, args: [BRIDGE], env: { SNUGCODE_IPC: IPC_PATH, SNUGCODE_BRIDGE: this.mgr.bridgeToken(this) } },
     });

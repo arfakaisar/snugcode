@@ -190,6 +190,25 @@ if (!codexSrc) {
     ok('Codex: tool MCP snugcode (dev_list) lewat jembatan daemon');
   } else console.log('… tool MCP snugcode belum terdaftar di Codex: ' + toolNames.join(','));
 
+  // Mode rencana: giliran Codex read-only; setelah dimatikan, sandbox profil snugcode berlaku lagi.
+  const runOnce = async () => {
+    await waitFor((e) => e.k === 'status' && e.s === 'idle');
+    events.length = 0;
+    await conn.call('send', { id: s.id, text: 'RUNCMD lagi' });
+    const pm = await waitFor((e) => e.k === 'perm', 60_000);
+    await conn.call('perm', { id: s.id, pid: pm.pid, decision: 'allow' });
+    assert.ok((await waitFor((e) => e.k === 'done', 60_000)).ok);
+    return events.find((e) => e.k === 'result')?.d || '';
+  };
+  fs.rmSync(path.join(repo, 'hasil-codex.txt'), { force: true });
+  await conn.call('plan', { id: s.id, on: true });
+  assert.match(await runOnce(), /Read-only/i);
+  assert.ok(!fs.existsSync(path.join(repo, 'hasil-codex.txt')), 'mode rencana: tidak ada file yang ditulis');
+  await conn.call('plan', { id: s.id, on: false });
+  assert.match(await runOnce(), /TERTUTUP/);
+  assert.ok(fs.existsSync(path.join(repo, 'hasil-codex.txt')), 'setelah mode rencana: bisa menulis lagi');
+  ok('Codex: mode rencana read-only, lalu sandbox snugcode (folder data tertutup) berlaku lagi');
+
   // Key asli tidak pernah sampai ke Codex: env proses app-server hanya punya token lokal proxy.
   if (process.platform === 'linux') {
     const { execFileSync } = await import('node:child_process');

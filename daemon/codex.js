@@ -172,16 +172,18 @@ export function sandboxWorks(cmd) {
 
 /**
  * Argumen `codex app-server`.
- * @param {{ provider?: { baseUrl: string, envKey: string } | null, computer?: boolean, sandbox?: boolean, mcp?: { command: string, args: string[], env: Record<string, string> } | null }} o
+ * @param {{ provider?: { baseUrl: string, envKey: string } | null, computer?: boolean, plan?: boolean, sandbox?: boolean, mcp?: { command: string, args: string[], env: Record<string, string> } | null }} o
  */
-export function codexArgs({ provider, computer = false, sandbox = true, mcp } = {}) {
+export function codexArgs({ provider, computer = false, plan = false, sandbox = true, mcp } = {}) {
   const fsRules = Object.fromEntries(deniedPaths().map((p) => [p, 'deny']));
   // Mode Komputer: tulis di mana saja (seperti sesi Komputer engine Claude), folder data tetap tertutup.
-  if (computer) fsRules['/'] = 'write';
+  if (computer && !plan) fsRules['/'] = 'write';
+  // Mode rencana: hanya baca (Codex tidak punya ExitPlanMode; rencana tampil sebagai jawaban).
+  const base = plan ? ':read-only' : ':workspace';
   const args = sandbox
-    ? ['-c', 'default_permissions="snugcode"', '-c', `permissions.snugcode=${inlineTable({ extends: ':workspace', filesystem: fsRules, network: { enabled: true } })}`]
+    ? ['-c', 'default_permissions="snugcode"', '-c', `permissions.snugcode=${inlineTable({ extends: base, filesystem: fsRules, network: { enabled: true } })}`]
     : // Tanpa sandbox OS: setiap perintah tetap lewat izin snugcode (approvalPolicy untrusted).
-      ['-c', 'default_permissions=":danger-full-access"'];
+      ['-c', `default_permissions="${plan ? ':read-only' : ':danger-full-access'}"`];
   args.push(
     // snugcode yang mengatur pembaruan; kabar versi baru Codex tidak relevan bagi pengguna HP.
     '-c', 'check_for_update_on_startup=false',
@@ -347,15 +349,12 @@ export class CodexAgent {
     this.usageAtStart = this.usageTotal || null;
     this.toolCount = 0;
     const input = [...images.map((i) => ({ type: 'image', url: `data:${i.mime};base64,${i.data}` })), ...(text ? [{ type: 'text', text, text_elements: [] }] : [])];
-    const plan = !!this.host.meta.plan;
     const r = await this.rpc.call('turn/start', {
       threadId: this.threadId,
       input,
       model: this.route.model,
       effort: this.route.effort || null,
       approvalPolicy: 'untrusted',
-      // Mode rencana: hanya baca. Codex tidak punya ExitPlanMode; rencana tampil sebagai jawaban.
-      ...(plan ? { sandboxPolicy: { type: 'readOnly', networkAccess: true } } : {}),
     });
     this.turnId = r.turn?.id || null;
   }
@@ -363,6 +362,7 @@ export class CodexAgent {
   setRoute(route) {
     this.route = route;
   }
+
 
   async interrupt() {
     if (this.threadId && this.turnId) await this.rpc.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }, { timeout: 10_000 }).catch(() => {});

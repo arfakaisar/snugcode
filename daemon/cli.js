@@ -132,7 +132,9 @@ async function setup() {
   }
   if (models?.length) {
     const { defaultModel } = await import('./server.js');
-    cfg.model = await pickModel(models, 'model', models.includes(cfg.model) ? cfg.model : defaultModel(models));
+    const def = models.includes(cfg.model) ? cfg.model : defaultModel(models);
+    // Non-interaktif (--key tanpa --model): model default dipilih otomatis.
+    cfg.model = flags.key && !flags.model ? def : await pickModel(models, 'model', def);
     // Subagen selalu memakai model ringan dari koneksi yang sama (otomatis per model utama).
     delete cfg.smallModel;
     const light = lightModel(cfg.model, models);
