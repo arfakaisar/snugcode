@@ -5,6 +5,12 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 ## Belum dirilis
 
 ### Perbaikan
+- **Mengetik di terminal dari HP Android kini langsung tampil.** Keyboard HP (Gboard, Samsung, SwiftKey) mengetik
+  lewat komposisi IME; xterm.js baru meneruskan kata setelah spasi/Enter (layar tampak diam saat mengetik), dan huruf
+  dengan keydown 229 di luar komposisi bisa hilang sama sekali. Di layar sentuh, perubahan isi textarea xterm kini
+  dikirim sendiri ke shell begitu terjadi sebagai selisih (`imeDelta` di `web/termkeys.js`: DEL untuk karakter yang
+  hilang + karakter baru), termasuk Backspace lewat IME, koreksi otomatis, ketik geser, dan input suara. Keyboard
+  fisik tetap ditangani xterm tanpa huruf ganda. Diuji `test/e2e-ui.mjs` (komposisi IME lewat CDP) dan unit test.
 - **PWA tidak lagi macet di "Menghubungi relay" setelah HP dibuka lagi.** Soket WebSocket yang tertahan di tahap
   menyambung (HP baru bangun, jaringan seluler yang menelan paket) dulu tidak punya batas waktu, dan `wake()`
   mengabaikannya, jadi layar bisa diam bermenit-menit padahal daftar PC (lewat HTTP biasa) menampilkan "online". Kini
@@ -12,6 +18,14 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   tertahan, PC yang tidak menjawab auth dalam 20 dtk dicoba lewat kanal baru, dan layar menyambung menampilkan
   percobaan ke berapa serta tombol **Coba sekarang**. Diuji `test/e2e-resume.mjs` (proxy yang menahan koneksi).
 - Folder data snugcode tetap tertutup di file explorer bila path-nya lewat symlink (macOS `/var` → `/private/var`).
+
+### Peningkatan
+- **Zoom PWA dikunci seperti aplikasi native**: meta viewport `maximum-scale=1, user-scalable=no`, `touch-action:
+  pan-x pan-y` di semua elemen (cubit & ketuk-dua-kali tidak memperbesar, geser tetap jalan), dan gestur cubit Safari
+  iOS (yang mengabaikan `user-scalable`) dibatalkan di `web/ui/dom.js`.
+- **Terminal HP**: cubit dua jari mengubah ukuran huruf (8–24 px, diingat per perangkat); tombol **Tempel** (isi
+  clipboard lewat bracketed paste — menekan lama layar xterm tidak memberi menu Tempel), **Home**, dan **End**.
+- Menekan lama tombol tidak lagi menyeleksi teks atau memunculkan menu salin.
 
 ## 2026-10-20 — v0.4.0: keamanan relay, koneksi tahan banting, izin bertingkat risiko, biaya sesi
 
