@@ -19,7 +19,9 @@ import { startKeepAwake } from './keepawake.js';
 import { detectProject, saveEnv } from './project.js';
 import { capture } from './browser.js';
 import { checkPush, sendPush } from './webpush.js';
-import { idleMinutes, stopRunner } from './runner.js';
+import { idleMinutes, stopRunner, tickUsage, usageSummary } from './runner.js';
+import { listDir, readFile, writeFile, revertChange } from './files.js';
+import { Terminals } from './pty.js';
 
 // Versi protokol daemon <-> klien. 2 = kanal biner + daftar `caps` di info.
 const PROTO = 2;
@@ -44,6 +46,7 @@ export class Daemon {
     this.lastPairAttempt = 0;
     this.locals = new Set();
     this.github = new GithubAuth(this);
+    this.terms = new Terminals({ log: (m) => this.log(m) });
     // Kabari semua HP & terminal yang tersambung saat status login GitHub berubah.
     this.github.on('change', (st) => {
       for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'github', ...st });
@@ -139,12 +142,16 @@ export class Daemon {
   startIdleWatch() {
     this.lastActive = Date.now();
     clearInterval(this.idleTimer);
-    this.idleTimer = setInterval(() => this.checkIdle(), 60_000);
+    if (this.config.runner?.provider === 'codespace') tickUsage();
+    this.idleTimer = setInterval(() => {
+      if (this.config.runner?.provider === 'codespace') tickUsage();
+      this.checkIdle();
+    }, 60_000);
     this.idleTimer.unref?.();
   }
 
   isActive() {
-    return this.sessions.busy() || this.locals.size > 0 || [...this.conns.values()].some((c) => c.ready && c.visible);
+    return this.sessions.busy() || this.terms.active() || this.locals.size > 0 || [...this.conns.values()].some((c) => c.ready && c.visible);
   }
 
   async checkIdle(now = Date.now()) {
@@ -178,6 +185,7 @@ export class Daemon {
     clearInterval(this.idleTimer);
     this.ws?.close();
     this.ipc?.close();
+    this.terms?.closeAll();
     return this.sessions?.close();
   }
 
@@ -572,6 +580,29 @@ const RPC = {
     if (s.meta.local || s.meta.computer) throw new Error('Fitur template .env hanya untuk sesi repository git.');
     return saveEnv(s.meta.repo, s.meta.cwd);
   },
+  // ---------- terminal interaktif (PTY) ----------
+  async termOpen(c, p) {
+    const t = await c.d.terms.open(c.d.sessions.get(p.id), { cols: p.cols, rows: p.rows });
+    return c.d.terms.attach(t.tid, c);
+  },
+  termList: (c, p) => c.d.terms.list(c.d.sessions.get(p.id).id).map((t) => c.d.terms.summary(t)),
+  termAttach: (c, p) => c.d.terms.attach(need(p.tid, 'tid', { max: 32 }), c),
+  termDetach(c, p) {
+    c.d.terms.detach(p.tid, c);
+    return true;
+  },
+  termIn(c, p) {
+    c.d.terms.write(need(p.tid, 'tid', { max: 32 }), need(p.d, 'input', { max: 64 * 1024 }));
+    return true;
+  },
+  termResize(c, p) {
+    c.d.terms.resize(need(p.tid, 'tid', { max: 32 }), p.cols, p.rows);
+    return true;
+  },
+  termClose(c, p) {
+    c.d.terms.close(p.tid);
+    return true;
+  },
   // ---------- Web Push (HP) ----------
   pushSub(c, p) {
     const dev = c.d.secrets.devices[c.deviceId];
@@ -597,6 +628,7 @@ const RPC = {
     return s.summary();
   },
   async delete(c, p) {
+    c.d.terms.closeSession(p.id);
     await c.d.sessions.remove(p.id);
     return true;
   },
@@ -623,6 +655,27 @@ const RPC = {
       }
     }
     return gitDiff(s.meta.cwd, { limit: c.big ? 2 * 1024 * 1024 : 400 * 1024 });
+  },
+  // ---------- file explorer & review diff per hunk ----------
+  files: (c, p) => listDir(c.d.sessions.get(p.id).meta.cwd, opt(p.path, 'path', { max: 4096 }) || ''),
+  fileRead(c, p) {
+    const r = readFile(c.d.sessions.get(p.id).meta.cwd, need(p.path, 'path', { max: 4096 }));
+    // Kanal teks relay dibatasi ±1 MB: file besar hanya lewat kanal biner.
+    if (!c.big && (r.text?.length > 400_000 || r.image?.data.length > 400_000)) throw new Error('File terlalu besar untuk koneksi ini; perbarui aplikasi.');
+    return r;
+  },
+  fileWrite(c, p) {
+    const s = c.d.sessions.get(p.id);
+    const r = writeFile(s.meta.cwd, need(p.path, 'path', { max: 4096 }), typeof p.text === 'string' ? p.text : need(p.text, 'isi'), { hash: opt(p.hash, 'hash', { max: 64 }), create: !!p.create });
+    s.userChanged(`${p.create ? 'created' : 'edited'} ${r.path}`, `✎ ${r.path} ${p.create ? 'dibuat' : 'diedit'} dari HP`);
+    return r;
+  },
+  async revert(c, p) {
+    const s = c.d.sessions.get(p.id);
+    if (s.status === 'running') throw new Error('Hentikan agen dulu sebelum membatalkan perubahan.');
+    const r = await revertChange(s.meta.cwd, need(p.path, 'path', { max: 4096 }), opt(p.hunk, 'hunk', { max: 2_000_000 }));
+    s.userChanged(`reverted ${p.hunk ? 'part of the changes' : 'all uncommitted changes'} in ${r.path}`, `↺ ${p.hunk ? 'satu hunk' : 'semua perubahan'} ${r.path} dibatalkan dari HP`);
+    return r;
   },
   commit(c, p) {
     if (!p.message?.trim()) throw new Error('Pesan commit kosong');
@@ -669,6 +722,7 @@ class RpcConn {
   closed() {
     this.queue = [];
     this.unsubscribe();
+    this.d.terms.detachConn(this);
   }
 
   async handleRpc({ id, m, p }) {
@@ -712,7 +766,7 @@ class RpcConn {
       machineId: c.machineId,
       // Ada koneksi model (dulu: key 9router). Nama lama dipertahankan untuk aplikasi versi lama.
       routerConfigured: Object.keys(sec.connections || {}).length > 0,
-      runner: isCloud(c) ? { ...(c.runner || {}), idleStopMinutes: idleMinutes(c), autoStop: !!this.d.secrets.runnerToken || !!c.runner?.idleExit } : null,
+      runner: isCloud(c) ? { ...(c.runner || {}), idleStopMinutes: idleMinutes(c), autoStop: !!this.d.secrets.runnerToken || !!c.runner?.idleExit, ...(c.runner?.provider === 'codespace' ? { usage: usageSummary() } : {}) } : null,
       // Fitur protokol yang didukung daemon ini: klien memeriksa ini, bukan menebak dari pesan error.
       proto: PROTO,
       caps: Object.keys(RPC),

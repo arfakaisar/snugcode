@@ -1164,3 +1164,68 @@ html.kb.short #modes { display: none; }
 .hero .prog { width: 100%; max-width: 420px; margin: 18px auto 0; }
 @media (prefers-reduced-motion: reduce) { .prog .pbar i::after { animation: none; } }
 #sheetBody .prog { margin: 12px 0; }
+
+/* ---------- file explorer ---------- */
+.fbar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; flex-wrap: wrap; }
+.fbar .grow { flex: 1; min-width: 0; }
+.fbar .chip svg { width: 15px; height: 15px; }
+.flist { border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.frow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); font: 13px var(--mono); animation: rise .35s var(--spring) both; animation-delay: calc(var(--i, 0) * 18ms); }
+.frow:last-child { border-bottom: 0; }
+.frow:active { background: var(--surface-2); }
+.frow .fi { flex: none; width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--dim); background: var(--surface-2); }
+.frow .fi.dir { color: var(--accent); background: var(--accent-soft); }
+.frow .fi svg { width: 16px; height: 16px; }
+.frow .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fs { flex: none; color: var(--dim); font-size: 11.5px; }
+.frow .fm { flex: none; font-size: 11px; font-weight: 700; color: var(--warn); }
+.frow .fm.A { color: var(--ok); }
+.frow .fm.D { color: var(--bad); }
+.frow .chev { width: 16px; height: 16px; color: var(--dim); flex: none; }
+.codeview { font: 12px/1.55 var(--mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto; padding: 6px 0; }
+.codeview .cl { display: flex; white-space: pre; min-width: max-content; }
+.codeview .ln { flex: none; width: 4.2ch; padding: 0 10px 0 6px; text-align: right; color: var(--dim); user-select: none; position: sticky; left: 0; background: var(--code-bg); }
+.codeview .lt { padding-right: 12px; color: var(--fg); }
+.fimg { text-align: center; background: var(--code-bg); border-radius: var(--r); padding: 12px; }
+.fimg img { max-width: 100%; height: auto; image-rendering: auto; }
+textarea.field.editor { font: 12.5px/1.5 var(--mono); min-height: 52vh; white-space: pre; overflow: auto; tab-size: 2; }
+.mono { font-family: var(--mono); }
+
+/* review diff: komentar per baris/hunk, batalkan hunk */
+.difffile .dfa { display: flex; gap: 6px; padding: 4px 10px 8px; flex-wrap: wrap; }
+.difffile .dfa .chip svg { width: 14px; height: 14px; }
+.chip.danger { color: var(--bad); }
+.hunk.hbar { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 12px; position: sticky; left: 0; }
+.hunk.hbar .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hunk.hbar .hb { flex: none; width: 34px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--dim); }
+.hunk.hbar .hb:active { background: var(--surface-2); }
+.hunk.hbar .hb svg { width: 15px; height: 15px; }
+.dl { position: relative; padding-left: 46px !important; cursor: pointer; }
+.dl::before { content: attr(data-n); position: absolute; left: 0; width: 38px; text-align: right; color: var(--dim); opacity: .7; }
+.cbox2 { padding: 8px 10px; background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: normal; font-family: var(--sans); }
+.cbox2 .field { min-height: 64px; font-size: 14px; margin-bottom: 8px; }
+.cbox2 .btnrow { justify-content: flex-end; }
+.chip.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.cmt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; margin: 2px 8px; border-radius: 12px; background: var(--accent-soft); color: var(--fg); font: 13px/1.45 var(--sans); white-space: pre-wrap; }
+.cmt svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
+.revcount { text-align: center; align-self: center; }
+
+/* ---------- terminal interaktif ---------- */
+.termview { position: fixed; inset: 0; z-index: 18; display: flex; flex-direction: column; background: var(--code-bg); padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l); animation: rise .3s var(--spring) both; }
+html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); padding-bottom: 0; }
+.termview.closing { animation: fadeOut .2s ease-in both; }
+.termview .tbar { display: flex; align-items: center; gap: 4px; padding: 6px 6px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.termview .ttabs { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.termview .ttab { flex: none; display: flex; align-items: center; border-radius: 10px; color: var(--dim); font-size: 13px; }
+.termview .ttab.on { background: var(--surface); color: var(--fg); }
+.termview .ttab .tt { padding: 8px 10px; white-space: nowrap; }
+.termview .ttab .tx { width: 30px; height: 30px; display: grid; place-items: center; color: var(--dim); }
+.termview .ttab .tx svg { width: 14px; height: 14px; }
+.termview .tbody { flex: 1; min-height: 0; position: relative; }
+.termview .tscreen { position: absolute; inset: 4px 2px 0 6px; }
+.termview .tempty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; padding: 24px; }
+.termview .tempty .btn { width: auto; }
+.termview .tkeys { display: flex; gap: 4px; overflow-x: auto; padding: 6px; border-top: 1px solid var(--line); background: var(--bg); scrollbar-width: none; }
+.termview .tk { flex: none; min-width: 40px; height: 36px; padding: 0 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); font: 13px var(--mono); color: var(--fg); }
+.termview .tk.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.termview .tk:active { transform: scale(.94); }

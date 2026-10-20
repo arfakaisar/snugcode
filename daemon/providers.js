@@ -104,6 +104,7 @@ async function req(url, { method = 'GET', headers = {}, body, timeout = TIMEOUT,
 // Header otentikasi per format. Anthropic official memakai x-api-key; endpoint format Anthropic
 // lain (DeepSeek, Kimi, GLM, OpenRouter, router) mengikuti ANTHROPIC_AUTH_TOKEN Claude Code (Bearer).
 export function authHeaders(c, wire) {
+  if (wire === 'gemini') return { 'x-goog-api-key': c.key };
   if (wire === 'anthropic') return c.kind === 'anthropic' ? { 'x-api-key': c.key, 'anthropic-version': '2023-06-01' } : { authorization: 'Bearer ' + c.key, 'anthropic-version': '2023-06-01' };
   if (c.kind === 'openrouter') return { authorization: 'Bearer ' + c.key, 'http-referer': 'https://github.com/arfakaisar/snugcode', 'x-title': 'snugcode' };
   return { authorization: 'Bearer ' + c.key };
@@ -295,9 +296,21 @@ export function forgetModels(connId) {
   cache.delete(connId);
 }
 
+// Root Gemini API (format asli, untuk Gemini CLI) dari base OpenAI-compatible koneksi Gemini.
+export const geminiRoot = (c) => String(c.openai || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '').replace(/\/v1(beta)?\/openai$/, '');
+
+/** @param {Conn} c @param {string} engine @returns {ReturnType<typeof engineFor>} */
+function forcedEngine(c, engine) {
+  const f = c.formats || {};
+  if (engine === 'claude' && (f.anthropic || f.openai)) return { engine: 'claude', wire: f.anthropic ? 'anthropic' : 'openai' };
+  if (engine === 'codex' && f.responses) return { engine: 'codex', wire: 'responses' };
+  if (engine === 'gemini' && c.kind === 'gemini') return { engine: 'gemini', wire: 'gemini' };
+  return null;
+}
+
 /**
  * Rute satu referensi model: koneksi, ID asli di endpoint, effort, dan engine/format yang dipakai.
- * @returns {{ conn: Conn, model: string, effort: string | null, engine: 'claude' | 'codex', wire: string }}
+ * @returns {{ conn: Conn, model: string, effort: string | null, engine: 'claude' | 'codex' | 'gemini', wire: string }}
  */
 export function resolveRoute(sec, ref) {
   const { actualModel, effort } = resolveModelEffort(ref);
@@ -305,8 +318,10 @@ export function resolveRoute(sec, ref) {
   const c = getConn(sec, connId);
   if (!c) throw new Error(connId === 'router' ? 'Belum ada model yang tersambung. Buka Pengaturan PC → Model & API key di aplikasi, lalu tempel API key-mu.' : `Koneksi "${connId}" untuk model ${ref} sudah dihapus. Pilih model lain atau sambungkan lagi.`);
   let r = engineFor(c, id);
-  // SNUGCODE_ENGINE=claude: paksa Claude Agent SDK untuk endpoint yang juga punya format Anthropic/OpenAI.
-  if (r?.engine === 'codex' && process.env.SNUGCODE_ENGINE === 'claude' && (c.formats?.anthropic || c.formats?.openai)) r = { engine: 'claude', wire: c.formats.anthropic ? 'anthropic' : 'openai' };
+  // SNUGCODE_ENGINE=claude|codex|gemini: paksa engine itu bila endpoint-nya mendukung (mis. Claude Agent SDK
+  // untuk model Gemini/GPT, atau perbandingan engine di `npm run bench`).
+  const want = process.env.SNUGCODE_ENGINE;
+  if (r && want && want !== r.engine) r = forcedEngine(c, want) || r;
   if (!r) throw new Error(`${c.label || c.kind} tidak punya format API yang bisa dipakai agen.`);
   return { conn: c, model: id, effort, ...r };
 }

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { isSealed, openSealed, seal, enableKeychain, disableKeychain } from './keychain.js';
 
 // Instalasi lama (sebelum ganti nama dari pocketcode) tetap memakai ~/.pocketcode bila folder itu sudah ada:
 // worktree, riwayat agen, dan pairing HP tersimpan dengan path absolut di dalamnya.
@@ -82,8 +83,12 @@ export function saveConfig(cfg) {
   writeJson(CONFIG_FILE, cfg, 0o644);
 }
 
+// secrets.json bisa terenkripsi dengan kunci di keychain OS (`snugcode keychain on`, lihat keychain.js).
+// Gagal membuka file terenkripsi = error (bukan secrets kosong yang lalu menimpa file aslinya).
 export function loadSecrets() {
-  return { devices: {}, pinFails: 0, ...readJson(SECRETS_FILE, {}) };
+  let raw = readJson(SECRETS_FILE, {});
+  if (isSealed(raw)) raw = openSealed(raw, HOME);
+  return { devices: {}, pinFails: 0, ...raw };
 }
 
 // Kunci pairing PIN: setelah 5 percobaan gagal, pairing dikunci sementara (15 menit, berlipat dua tiap
@@ -109,8 +114,29 @@ export function pinAttempt(sec, now = Date.now()) {
   }
   return { ok: true, left: MAX_PIN_FAILS - sec.pinFails };
 }
+// Mode (terenkripsi atau tidak) mengikuti file di disk, jadi `snugcode keychain on|off` saat daemon
+// berjalan langsung berlaku untuk penyimpanan berikutnya daemon itu.
 export function saveSecrets(sec) {
+  const cur = readJson(SECRETS_FILE, null);
+  writeJson(SECRETS_FILE, isSealed(cur) ? seal(sec, HOME, cur.kc) : sec, 0o600);
+}
+
+export const secretsSealed = () => isSealed(readJson(SECRETS_FILE, null));
+
+/** @param {boolean} on @returns {string} nama keychain yang dipakai / dilepas */
+export function setKeychain(on) {
+  const cur = readJson(SECRETS_FILE, {});
+  const sec = loadSecrets();
+  if (on) {
+    if (isSealed(cur)) return 'sudah aktif';
+    const b = enableKeychain(HOME);
+    writeJson(SECRETS_FILE, seal(sec, HOME, b.name), 0o600);
+    return b.label;
+  }
+  if (!isSealed(cur)) return 'sudah mati';
   writeJson(SECRETS_FILE, sec, 0o600);
+  disableKeychain(HOME);
+  return 'mati';
 }
 
 export function ensureDirs() {

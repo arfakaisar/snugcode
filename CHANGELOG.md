@@ -2,6 +2,51 @@
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 
+## 2026-10-20 — v0.3.0: file & terminal dari HP, engine Gemini CLI, keychain OS
+
+### Dari HP
+- **File explorer** (menu sesi → File) — `daemon/files.js`, `web/ui/files.js`. Telusuri worktree, baca teks &
+  gambar, edit atau buat file. Menyimpan file yang sudah berubah di PC ditolak (hash), dan agen diberi tahu di prompt
+  berikutnya bahwa pengguna mengubah file. Hanya di dalam folder sesi: folder data snugcode ditolak, symlink keluar
+  disembunyikan. *Tanya agen* mengisi composer dengan path file.
+- **Review diff per hunk** — layar Git: komentar per baris/hunk dikirim sebagai satu pesan ke agen (*Kirim ke agen*),
+  dan *Batalkan hunk / file* (`git apply -R`; file baru dihapus). Ditolak saat agen berjalan.
+- **Terminal interaktif (PTY)** (menu sesi → Terminal) — `daemon/pty.js`, `web/ui/terminal.js`. xterm.js (dimuat
+  terpisah, app.js tetap ringan), baris tombol Esc/Tab/Ctrl/Alt/panah, sampai 4 tab per sesi. Shell tetap hidup saat
+  layar ditutup atau koneksi putus; membukanya lagi memutar ulang output terakhir. Paket opsional `@lydell/node-pty`.
+
+### Engine
+- **Gemini CLI (ACP)** untuk model Gemini dengan API key Google AI — `daemon/gemini.js`, `daemon/engine-gemini.js`.
+  Harness resmi Google dengan format API asli (tanpa penerjemah), dipasang otomatis sekali (versi dipatok di
+  `gemini-version.json`); bila gagal dipasang, model dijalankan Claude Agent SDK seperti sebelumnya. Key asli tetap
+  hanya di proxy (`x-goog-api-key` ditukar), izin lewat kebijakan snugcode yang sama, edit file lewat snugcode
+  (checkpoint, folder data ditolak), sesi dilanjutkan dengan `session/load`. Konfigurasi `.gemini/` milik repo tidak
+  dijalankan (folder tidak tepercaya); instruksi proyek (`GEMINI.md`/`AGENTS.md`/`CLAUDE.md`) disisipkan snugcode.
+  Gemini CLI tidak punya sandbox OS, jadi perintah shell tetap bertanya saat auto-izin.
+- **Tabel engine & benchmark** — `shared/engine-table.js` dibaca `engineFor` sebelum aturan format; `npm run bench`
+  (`scripts/bench.mjs`) mengukur engine per model dengan tugas yang sama dan mencetak saran baris tabel.
+  `SNUGCODE_ENGINE` kini menerima `claude`, `codex`, atau `gemini`.
+
+### Keamanan
+- **`snugcode keychain on|off|status`** — `daemon/keychain.js`. `secrets.json` dienkripsi (XChaCha20-Poly1305) dengan
+  kunci di keychain OS: macOS Keychain, Secret Service (GNOME Keyring / KWallet, `secret-tool`), atau DPAPI di
+  Windows. Bila kunci tidak bisa dibuka, daemon berhenti dengan pesan jelas tanpa menimpa secrets.
+- `.gemini/` di repo ikut dilindungi (edit selalu bertanya), dan `secrets.key` & folder `gemini/` ikut dalam
+  pola perintah yang selalu bertanya.
+
+### Runner cloud
+- **Perkiraan kuota Codespaces** di menu runner: core-jam bulan ini (dicatat runner sendiri, karena billing GitHub
+  tidak bisa dibaca dengan izin `codespace`).
+- **Prebuild**: pemasangan dipindah ke `onCreateCommand` agar ikut snapshot prebuild (runner baru ±1 menit). Prebuild
+  diatur di setelan Codespaces fork (tidak ada API); panduan di `.devcontainer/README.md` dan tautan di wizard.
+
+### Proyek
+- Uji baru: `test/features.test.js` (explorer, konflik, revert hunk, PTY, keychain, Gemini, kuota runner),
+  `test/e2e-gemini.mjs` (Gemini CLI asli vs Gemini API tiruan, juga di CI), skenario UI explorer/review/terminal di
+  `test/e2e-ui.mjs`. Versi 0.3.0.
+- Ditunda dengan alasan: tunnel preview E2EE lewat relay (butuh origin terpisah dari PWA & WebSocket HMR), Amazon
+  Bedrock / Vertex AI (butuh penandatanganan SigV4 / OAuth di proxy).
+
 ## 2026-10-20 — v0.2.0: pengamanan agen & relay, rilis bertag + rollback
 
 ### Agen

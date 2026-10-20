@@ -108,11 +108,20 @@ export async function cloudSetupSheet() {
       h('div', { class: 'tags', style: 'justify-content:center;margin-bottom:14px' }, h('span', { class: 'tag' }, '@' + user.login), h('span', { class: 'tag' }, repo.full_name)),
       go,
       fine,
+      prebuildTip(repo.full_name),
     );
   } catch (e) {
     body.replaceChildren(h('div', { class: 'err' }, e.message), h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => (e.status === 401 ? connectCodespaces('create') : cloudSetupSheet()) }, ic('refresh'), e.status === 401 ? 'Hubungkan lagi' : 'Coba lagi'));
   }
 }
+
+// Prebuild Codespaces (opsional, hanya bisa diatur di setelan repo fork): runner baru menyala ±1 menit, bukan 3–5.
+const prebuildTip = (fork) =>
+  h('details', { class: 'addpc' },
+    h('summary', {}, ic('bolt'), 'Runner lebih cepat dengan prebuild'),
+    h('div', { class: 'muted small' }, 'Opsional. Di setelan fork: Codespaces → Set up prebuild, branch main, trigger "On configuration change". Snapshot prebuild memakai kuota penyimpanan Codespaces.'),
+    h('a', { class: 'btn', style: 'margin-top:10px', href: `https://github.com/${fork}/settings/codespaces`, target: '_blank', rel: 'noopener' }, ic('github'), 'Buka setelan Codespaces fork'),
+  );
 
 // Runner di server sendiri (VPS, Fly.io, Railway, NAS): image Docker yang sama, token & PIN dari HP.
 function dockerOption() {
@@ -162,7 +171,7 @@ const CREATE_STEPS = [
 ];
 
 // Langkah progress dari status codespace + laporan runner. Codespace baru yang sudah menyala tapi
-// skripnya belum melapor masih "menyiapkan mesin" (postCreate baru mulai).
+// skripnya belum melapor masih "menyiapkan mesin" (onCreate baru mulai).
 export function runnerPhase(state, boot) {
   if (boot?.step) return boot.step;
   if (boot?.stage === 'starting') return 'start';

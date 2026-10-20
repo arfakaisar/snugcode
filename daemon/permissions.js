@@ -21,13 +21,13 @@ export const isInside = (p, dir) => {
 export const isSensitivePath = (p, { write = false } = {}) =>
   isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
 // Hanya penangkap kasus jelas untuk Bash; perlindungan sebenarnya adalah sandbox OS (lihat sandbox.js).
-export const SECRET_CMD_RE = /secrets\.json|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|env|bin|tools)\b|\$\{?(?:SNUGCODE|POCKETCODE)_HOME\b/i;
+export const SECRET_CMD_RE = /secrets\.(?:json|key)|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|gemini|env|bin|tools)\b|\$\{?(?:SNUGCODE|POCKETCODE)_HOME\b/i;
 
 // File di repo yang mengubah perilaku tool tanpa dijalankan pengguna: setelan & hook Claude Code
-// (.claude/), konfigurasi Codex (.codex/), server MCP proyek (.mcp.json), dan isi .git (hook, config
+// (.claude/), konfigurasi Codex (.codex/) & Gemini CLI (.gemini/), server MCP proyek (.mcp.json), dan isi .git (hook, config
 // core.fsmonitor/hooksPath yang dijalankan saat daemon memanggil git). Mengubahnya selalu bertanya,
 // termasuk saat auto-izin: README/issue yang berisi prompt injection tidak boleh memasang hook diam-diam.
-const PROTECTED_DIRS = new Set(['.git', '.claude', '.codex']);
+const PROTECTED_DIRS = new Set(['.git', '.claude', '.codex', '.gemini']);
 export function isProtectedRepoPath(p, cwd) {
   const rel = path.relative(cwd, p);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;

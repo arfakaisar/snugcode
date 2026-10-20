@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { loadSecrets, HOME, IPC_PATH } from './config.js';
 import * as M from '../shared/models.js';
+import { ENGINE_LABEL } from '../shared/providers.js';
 import { EventCursor, doneParts, todoItems, toolActivity } from '../shared/events.js';
 import { PAL, c, bold, dim, under, strike, userBg, gradient, cw, width, cols, rowsN, hardWrap, wrapWords, pad, trunc, renderMd } from './term.js';
 
@@ -854,7 +855,7 @@ class App {
     const kv = (k, v) => row(`  ${dim(k.padEnd(7))} ${v}`);
     const lines = [
       c.line('╭' + '─'.repeat(W - 2) + '╮'),
-      row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— coding agent · ' + (this.info?.engine === 'codex' ? 'Codex' : 'Claude Agent SDK'))}`),
+      row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— coding agent · ' + (ENGINE_LABEL[this.info?.engine] || 'Claude Agent SDK'))}`),
       row(),
       row(`  ${dim('/help')} bantuan  ${dim('/model')} model & effort  ${dim('!')} shell`),
       row(),
@@ -1552,7 +1553,7 @@ class App {
             value: g,
             key: g.key,
             label: g.name,
-            sub: [g.conn && g.conn !== 'router' ? g.label || M.PROVIDER_LABEL[g.provider] || g.provider : M.PROVIDER_LABEL[g.provider] || g.provider, g.engine === 'codex' ? 'Codex' : '', g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
+            sub: [g.conn && g.conn !== 'router' ? g.label || M.PROVIDER_LABEL[g.provider] || g.provider : M.PROVIDER_LABEL[g.provider] || g.provider, g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : '', g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
             tag: inUse ? c.green('● dipakai') : '',
             extra: g.slider ? () => slider(g) : null,
           };

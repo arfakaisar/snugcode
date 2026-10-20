@@ -16,15 +16,14 @@ const oldMsg = 'Perbarui snugcode di PC dulu untuk mengatur ini dari HP.';
 // ---------- Model & API key (koneksi) ----------
 const KIND_ICON = { chatgpt: 'spark', router: 'globe', custom: 'globe' };
 const connName = (c) => c.label || PROVIDERS[c.kind]?.label || c.kind;
-// Engine yang dipakai koneksi ini (untuk ditampilkan): Codex untuk ChatGPT/OpenAI, Claude Agent SDK untuk lainnya.
+// Engine yang dipakai koneksi ini (untuk ditampilkan): Codex untuk ChatGPT/OpenAI, Gemini CLI untuk Gemini API,
+// Claude Agent SDK untuk lainnya.
 function engineText(c) {
   const engines = new Set();
   if (c.kind === 'chatgpt') engines.add('codex');
-  else {
-    const any = engineFor(c, 'x');
-    const gpt = engineFor(c, 'gpt-5');
-    if (any) engines.add(any.engine);
-    if (gpt) engines.add(gpt.engine);
+  else for (const id of c.kind === 'gemini' ? ['gemini-x'] : ['x', 'gpt-5']) {
+    const r = engineFor(c, id);
+    if (r) engines.add(r.engine);
   }
   return [...engines].map((e) => ENGINE_LABEL[e]).join(' + ');
 }

@@ -16,10 +16,12 @@
 //   SNUGCODE_IDLE_EXIT=1    container: keluar (exit 0) saat menganggur
 //   CODESPACE_NAME          diisi Codespaces: runner dihentikan lewat GitHub API (token dari HP)
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pinToPrs, bytesToHex, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { DEFAULT_RELAY_URL, DEFAULT_ROUTER_URL } from './defaults.js';
-import { resetPinLock } from './config.js';
+import { resetPinLock, HOME } from './config.js';
 
 export const IDLE_MINUTES_DEFAULT = 30;
 
@@ -143,4 +145,49 @@ export async function reportStatus(env, stage, msg, { fetchImpl = fetch } = {}) 
   } catch {
     return false;
   }
+}
+
+// ---------- Perkiraan pemakaian kuota ----------
+// API billing GitHub tidak bisa dibaca dengan scope `codespace`, jadi runner mencatat sendiri berapa lama
+// ia menyala per bulan (UTC, seperti siklus kuota Codespaces) dikali jumlah core. Ini perkiraan: waktu
+// codespace menyala sebelum daemon berjalan (build, start) dan pemakaian codespace lain tidak terhitung.
+const USAGE_FILE = path.join(HOME, 'runner-usage.json');
+const TICK_MAX = 5 * 60; // celah lebih lama dari ini = runner sempat mati (tidak dihitung)
+export const FREE_CORE_HOURS = 120; // GitHub Free; Pro: 180
+
+const month = (t) => new Date(t).toISOString().slice(0, 7);
+
+export function readUsage(file = USAGE_FILE) {
+  try {
+    const u = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return u && typeof u.months === 'object' ? u : { months: {} };
+  } catch {
+    return { months: {} };
+  }
+}
+
+/** Tambahkan waktu menyala sejak tick terakhir. @returns {any} isi file yang baru */
+export function tickUsage(now = Date.now(), { file = USAGE_FILE, cores = os.cpus().length } = {}) {
+  const u = readUsage(file);
+  const gap = u.last ? (now - u.last) / 1000 : 0;
+  if (gap > 0 && gap <= TICK_MAX) {
+    const m = month(now);
+    const cur = u.months[m] || { secs: 0, coreSecs: 0 };
+    u.months[m] = { secs: cur.secs + gap, coreSecs: cur.coreSecs + gap * cores };
+  }
+  u.last = now;
+  u.cores = cores;
+  // Simpan 12 bulan terakhir saja.
+  u.months = Object.fromEntries(Object.entries(u.months).sort(([a], [b]) => a.localeCompare(b)).slice(-12));
+  try {
+    fs.writeFileSync(file, JSON.stringify(u));
+  } catch {}
+  return u;
+}
+
+/** Ringkasan bulan berjalan untuk HP. */
+export function usageSummary(now = Date.now(), file = USAGE_FILE) {
+  const u = readUsage(file);
+  const cur = u.months[month(now)] || { secs: 0, coreSecs: 0 };
+  return { month: month(now), hours: +(cur.secs / 3600).toFixed(1), coreHours: +(cur.coreSecs / 3600).toFixed(1), cores: u.cores || os.cpus().length, free: FREE_CORE_HOURS };
 }
