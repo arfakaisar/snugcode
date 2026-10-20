@@ -145,6 +145,15 @@ test('terminal: batas per sesi & tombol Ctrl di HP', async (t) => {
   assert.equal(ctrlKey('c'), '\x03');
   assert.equal(ctrlKey('['), '\x1b');
   assert.equal(ctrlKey('ab'), 'ab');
+  // Keyboard HP: komposisi IME & koreksi otomatis dikirim sebagai selisih isi textarea
+  const { imeDelta } = await import('../web/termkeys.js');
+  assert.equal(imeDelta('', 'l'), 'l');
+  assert.equal(imeDelta('l', 'ls'), 's');
+  assert.equal(imeDelta('ls', 'l'), '\x7f');
+  assert.equal(imeDelta('teh', 'the '), '\x7f\x7fhe ');
+  assert.equal(imeDelta('ok', 'ok\n'), '\r');
+  assert.equal(imeDelta('a😀', 'a'), '\x7f');
+  assert.equal(imeDelta('abc', 'abc'), '');
   const { Terminals, loadPty } = await import('../daemon/pty.js');
   if (!loadPty() || process.platform === 'win32') return t.skip('paket PTY tidak terpasang');
   const terms = new Terminals();

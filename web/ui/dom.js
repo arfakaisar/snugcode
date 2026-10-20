@@ -206,6 +206,12 @@ document.addEventListener('focusin', () => setTimeout(syncViewport, 60));
 document.addEventListener('focusout', () => setTimeout(syncViewport, 120));
 syncViewport();
 
+// ---------- zoom dikunci seperti aplikasi native ----------
+// Chrome/Android menghormati meta viewport (user-scalable=no) & touch-action; Safari iOS mengabaikan
+// user-scalable, jadi gestur cubitnya (gesture*, khusus WebKit) dibatalkan di sini. Listener gesture
+// tidak ikut menahan scroll, beda dengan touchmove non-pasif.
+for (const t of ['gesturestart', 'gesturechange']) document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+
 // ---------- toast ----------
 export function toast(msg, bad = false, ms = 3200) {
   const el = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: 'status' }, h('span', { class: 'ic' }, ic(bad ? 'x' : 'check')), h('span', {}, msg));

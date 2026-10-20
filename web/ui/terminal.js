@@ -2,8 +2,9 @@
 // Ctrl, Alt, panah, …) untuk keyboard HP. Shell-nya hidup di PC: menutup layar ini tidak mematikannya,
 // dan membukanya lagi memutar ulang output terakhir.
 import { app } from './state.js';
+import { store } from '../conn.js';
 import { coarse, h, haptic, ic, isOldDaemon, toast, ui } from './dom.js';
-import { ctrlKey } from '../termkeys.js';
+import { ctrlKey, imeDelta } from '../termkeys.js';
 
 /** @type {Promise<typeof import('../xterm.js')> | null} */
 let lib = null;
@@ -27,6 +28,71 @@ function themeOf() {
   return { background: bg, foreground: css('--fg'), cursor: css('--accent'), cursorAccent: bg, selectionBackground: css('--accent-soft') || 'rgba(217,119,87,.3)', ...(light ? LIGHT_ANSI : {}) };
 }
 
+// Keyboard HP mengetik lewat komposisi IME: xterm.js baru meneruskan kata setelah di-commit (spasi/Enter)
+// dan ketikan dengan keydown 229 di luar komposisi bisa hilang, jadi di Android layar terminal tampak diam
+// saat mengetik. Di layar sentuh, perubahan isi textarea bantu xterm dikirim sendiri begitu terjadi
+// sebagai selisih (imeDelta) — termasuk koreksi otomatis, ketik geser, dan input suara. Event komposisi &
+// input dihentikan di elemen induk (fase capture) sebelum sampai ke listener xterm di textarea.
+function mobileInput(term) {
+  const ta = term.textarea;
+  const host = term.element;
+  if (!ta || !host) return;
+  ta.setAttribute('autocomplete', 'off');
+  ta.setAttribute('enterkeyhint', 'enter');
+  let prev = ta.value;
+  let composing = false;
+  // Karakter dari keypress sudah dikirim xterm, yang tidak membatalkan event-nya (mis. spasi keyboard
+  // fisik): teks yang lalu masuk ke textarea hanya dicatat, tidak dikirim lagi.
+  let keyPressed = false;
+  const own = (/** @type {Event} */ e) => e.target === ta;
+  host.addEventListener('compositionstart', (e) => own(e) && ((composing = true), e.stopPropagation()), true);
+  host.addEventListener('compositionupdate', (e) => own(e) && e.stopPropagation(), true);
+  host.addEventListener('compositionend', (e) => own(e) && ((composing = false), e.stopPropagation()), true);
+  host.addEventListener('input', (e) => {
+    if (!own(e)) return;
+    e.stopPropagation();
+    const d = imeDelta(prev, ta.value);
+    prev = ta.value;
+    if (d && !keyPressed) term.input(d, true);
+    keyPressed = false;
+    // Kata yang di-commit menumpuk di textarea: dikosongkan setelah Enter / bila panjang, di luar komposisi.
+    if (!composing && (prev.length > 256 || prev.includes('\n'))) ta.value = prev = '';
+  }, true);
+  // keydown 229 = "lewat IME": ditangani event input di atas. Tombol lain (Enter, Backspace saat textarea
+  // kosong, panah & keyboard fisik) tetap ditangani xterm, yang bisa mengosongkan textarea (Enter, ^C):
+  // selisih berikutnya dihitung dari isi setelah listener xterm selesai.
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.keyCode === 229) return false;
+    if (e.type === 'keydown') {
+      keyPressed = false;
+      queueMicrotask(() => (prev = ta.value));
+    } else if (e.type === 'keypress') keyPressed = !!e.charCode && !e.ctrlKey && !e.altKey && !e.metaKey;
+    return true;
+  });
+}
+
+// Cubit dua jari di layar terminal mengubah ukuran huruf (zoom halaman dikunci seperti aplikasi native).
+// Fase capture: viewport xterm menangani sentuhan sendiri dan tidak meneruskannya ke induk.
+const FONT_MIN = 8;
+const FONT_MAX = 24;
+function pinchFont(term, el, onChange) {
+  let start = 0;
+  let base = 0;
+  const dist = (/** @type {TouchList} */ t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    start = dist(e.touches);
+    base = term.options.fontSize;
+  }, { passive: true, capture: true });
+  el.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 2 || !start) return;
+    e.preventDefault();
+    const size = Math.round(Math.max(FONT_MIN, Math.min(FONT_MAX, base * (dist(e.touches) / start))));
+    if (size !== term.options.fontSize) (term.options.fontSize = size), onChange(size);
+  }, { passive: false, capture: true });
+  el.addEventListener('touchend', (e) => e.touches.length < 2 && (start = 0), { passive: true, capture: true });
+}
+
 export async function showTerminal() {
   const s = app.current.session;
   let L;
@@ -36,7 +102,9 @@ export async function showTerminal() {
     return toast('Gagal memuat terminal. Periksa koneksi lalu coba lagi.', true);
   }
   ui.closeSheet();
-  const term = new L.Terminal({ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: coarse ? 12 : 13, cursorBlink: true, scrollback: 5000, theme: themeOf() });
+  const saved = Number(store.get('termFont'));
+  const fontSize = saved >= FONT_MIN && saved <= FONT_MAX ? saved : coarse ? 12 : 13;
+  const term = new L.Terminal({ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize, cursorBlink: true, scrollback: 5000, theme: themeOf() });
   const fit = new L.FitAddon();
   term.loadAddon(fit);
 
@@ -67,6 +135,15 @@ export async function showTerminal() {
     } catch {}
   };
   syncSize();
+  if (coarse) {
+    mobileInput(term);
+    let fontT;
+    pinchFont(term, screen, (size) => {
+      syncSize();
+      clearTimeout(fontT);
+      fontT = setTimeout(() => store.set('termFont', size), 300);
+    });
+  }
 
   // --- input: dikumpulkan per ~8ms jadi satu RPC (ketikan cepat / tempel teks) ---
   let inq = '';
@@ -101,6 +178,17 @@ export async function showTerminal() {
 
   // --- tombol ekstra ---
   const arrow = (c) => (term.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[') + c;
+  // Menekan lama layar xterm di HP tidak memunculkan menu Tempel: isi clipboard dikirim lewat tombol,
+  // memakai term.paste (bracketed paste bila shell memintanya, baris baru jadi Enter).
+  const paste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) term.paste(text);
+      else toast('Clipboard kosong');
+    } catch {
+      toast('Izinkan akses clipboard untuk menempel.', true);
+    }
+  };
   const KEYS = [
     ['Esc', () => '\x1b'],
     ['Tab', () => '\t'],
@@ -110,7 +198,10 @@ export async function showTerminal() {
     ['↓', () => arrow('B')],
     ['↑', () => arrow('A')],
     ['→', () => arrow('C')],
+    ['Tempel', 'paste'],
     ['^C', () => '\x03'],
+    ['Home', () => arrow('H')],
+    ['End', () => arrow('F')],
     ['|', () => '|'],
     ['~', () => '~'],
     ['/', () => '/'],
@@ -121,11 +212,13 @@ export async function showTerminal() {
       ...KEYS.map(([label, act]) =>
         h('button', {
           class: 'tk' + (typeof act === 'string' && mods[act] ? ' on' : ''),
+          'aria-label': label === '^C' ? 'Ctrl+C' : null,
           // Jangan ambil fokus dari xterm: keyboard HP tetap terbuka.
           onpointerdown: (e) => e.preventDefault(),
           onclick: () => {
             haptic(5);
-            if (typeof act === 'string') (mods[act] = !mods[act]), renderKeys();
+            if (act === 'paste') paste();
+            else if (typeof act === 'string') (mods[act] = !mods[act]), renderKeys();
             else sendIn(applyMods(act()));
             term.focus();
           },
