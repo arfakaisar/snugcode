@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import * as C from '../shared/crypto.js';
-import { loadSecrets, saveSecrets, saveConfig, IPC_PATH, isCloud, scrubSecretEnv } from './config.js';
+import { loadSecrets, saveSecrets, saveConfig, IPC_PATH, isCloud, scrubSecretEnv, pinAttempt, resetPinLock } from './config.js';
 import { SessionManager } from './sessions.js';
 import { lightModel } from '../shared/models.js';
 import { splitRef, joinRef } from '../shared/providers.js';
@@ -14,14 +14,13 @@ import { devToolList, callDevTool } from './devtools.js';
 import { mergeText } from '../shared/events.js';
 import { listRepos, gitStatus, gitDiff, gitCommit, gitPush, createPR, gh, currentBranch, TOKEN_INVALID } from './github.js';
 import { GithubAuth } from './ghauth.js';
-import { getInstallInfo, checkUpdate, performUpdate, restartDaemon } from './updater.js';
+import { getInstallInfo, checkUpdate, performUpdate, performRollback, restartDaemon } from './updater.js';
 import { startKeepAwake } from './keepawake.js';
 import { detectProject, saveEnv } from './project.js';
 import { capture } from './browser.js';
 import { checkPush, sendPush } from './webpush.js';
 import { idleMinutes, stopRunner } from './runner.js';
 
-const MAX_PIN_FAILS = 5;
 // Versi protokol daemon <-> klien. 2 = kanal biner + daftar `caps` di info.
 const PROTO = 2;
 
@@ -154,6 +153,8 @@ export class Daemon {
     if (now - this.lastActive < mins * 60_000 || this.idleStopping) return null;
     this.idleStopping = true;
     try {
+      // Dikirim sebelum berhenti: setelah codespace/container mati tidak ada lagi yang bisa mengabari HP.
+      await this.pushAll({ title: `snugcode · ${this.config.machineName || 'Runner'}`, body: `Runner dihentikan setelah ${mins} menit menganggur (hemat kuota). Buka aplikasi untuk menyalakannya lagi.`, tag: 'runner-idle:' + this.config.machineId });
       const how = await stopRunner(this.config, this.secrets);
       if (how) this.log(`◆ Runner menganggur ${mins} menit: dihentikan (${how === 'exit' ? 'daemon keluar' : 'Codespaces'}). Buka aplikasi untuk menyalakannya lagi.`);
       if (how === 'exit') setTimeout(() => Promise.resolve(this.stop()).finally(() => process.exit(0)), 50);
@@ -279,6 +280,14 @@ export class Daemon {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'x', cid, reason }));
   }
 
+  // Web Push ke semua HP terpasang (bukan tentang satu sesi), ditunggu paling lama `ms`.
+  pushAll(payload, ms = 5000) {
+    const sends = Object.values(this.secrets.devices || {})
+      .filter((dev) => dev.push)
+      .map((dev) => sendPush(dev.push, { mid: this.config.machineId, ...payload }).catch((e) => this.log('! push gagal: ' + e.message)));
+    return Promise.race([Promise.allSettled(sends), new Promise((r) => setTimeout(r, ms).unref?.())]);
+  }
+
   notify(session, msg, { perm = false } = {}) {
     const title = session.meta.title || session.meta.repo;
     for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title });
@@ -328,6 +337,13 @@ const RPC = {
     const res = await performUpdate(c.d.config, c.d.secrets);
     restartDaemon(c.d, { delay: 1200 });
     return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };
+  },
+  // Versi baru bermasalah: pasang lagi versi sebelum pembaruan terakhir.
+  async rollback(c) {
+    await c.d.sessions.stopAll();
+    const res = await performRollback(c.d.config);
+    restartDaemon(c.d, { delay: 1200 });
+    return { ok: true, message: `Kembali ke ${res.commit}. PC sedang me-restart daemon...`, commit: res.commit };
   },
   restart(c) {
     restartDaemon(c.d, { delay: 1000 });
@@ -450,7 +466,7 @@ const RPC = {
     if (!C.PIN_RE.test(pin)) throw new Error('PIN harus 6–12 huruf/angka.');
     const s = c.d.secrets;
     s.prs = C.bytesToHex(await C.pinToPrs(pin, c.d.config.machineId));
-    s.pinFails = 0;
+    resetPinLock(s);
     c.d.saveSecrets();
     return true;
   },
@@ -859,14 +875,15 @@ class PhoneConn extends RpcConn {
   pair1(m) {
     const s = this.d.secrets;
     if (!s.prs) return this.send({ t: 'pair_err', reason: 'nopin' });
-    if (s.pinFails >= MAX_PIN_FAILS) return this.send({ t: 'pair_err', reason: 'locked' });
-    if (Date.now() - this.d.lastPairAttempt < 3000) return this.send({ t: 'pair_err', reason: 'slow' });
+    if (Date.now() - this.d.lastPairAttempt < 3000 && !(s.pinLockUntil > Date.now())) return this.send({ t: 'pair_err', reason: 'slow' });
+    // Dihitung sebelum hasilnya diketahui: penebak cukup melihat pair2 untuk menguji satu tebakan.
+    const att = pinAttempt(s);
+    if ('until' in att) return this.send({ t: 'pair_err', reason: 'locked', until: att.until });
     this.d.lastPairAttempt = Date.now();
-    s.pinFails++;
     this.d.saveSecrets();
     const r = C.pairRespondMachine(C.hexToBytes(s.prs), m);
     this.pairState = { ...r.state, name: String(m.name || 'HP').slice(0, 60) };
-    this.send({ t: 'pair2', ...r.msg, left: MAX_PIN_FAILS - s.pinFails });
+    this.send({ t: 'pair2', ...r.msg, left: att.left });
   }
 
   pair3(m) {
@@ -876,7 +893,7 @@ class PhoneConn extends RpcConn {
     this.pairState = null;
     if (!secret) return this.send({ t: 'pair_err', reason: 'pin' });
     const s = this.d.secrets;
-    s.pinFails = 0;
+    resetPinLock(s);
     const deviceId = randomBytes(8).toString('hex');
     s.devices[deviceId] = { name, secret: C.bytesToHex(secret), pairedAt: Date.now(), lastSeen: Date.now() };
     this.d.saveSecrets();

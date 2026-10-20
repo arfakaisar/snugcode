@@ -19,6 +19,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { pinToPrs, bytesToHex, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { DEFAULT_RELAY_URL, DEFAULT_ROUTER_URL } from './defaults.js';
+import { resetPinLock } from './config.js';
 
 export const IDLE_MINUTES_DEFAULT = 30;
 
@@ -67,7 +68,7 @@ export async function bootstrapCloud(env, cfg, sec) {
     if (p.mid !== cfg.machineId) {
       // Mesin baru: pairing HP & PIN milik mesin lama tidak berlaku lagi.
       sec.devices = {};
-      sec.pinFails = 0;
+      resetPinLock(sec);
       delete sec.prs;
       if (sec.envApplied) delete sec.envApplied.pin;
       relinked = true;
@@ -84,7 +85,7 @@ export async function bootstrapCloud(env, cfg, sec) {
   if (pin && !PIN_RE.test(pin)) warnings.push('SNUGCODE_PAIR_PIN diabaikan: harus 6–12 huruf/angka.');
   else if (pin && (fromEnv(sec, 'pin', cfg.machineId + ':' + normalizePin(pin)) || !sec.prs)) {
     sec.prs = bytesToHex(await pinToPrs(pin, cfg.machineId));
-    sec.pinFails = 0;
+    resetPinLock(sec);
   }
   if (!sec.prs) warnings.push('Belum ada PIN: HP belum bisa dipasangkan. Set SNUGCODE_PAIR_PIN.');
 

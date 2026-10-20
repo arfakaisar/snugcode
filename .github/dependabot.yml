@@ -1,0 +1,24 @@
+# Agent SDK, Codex, dan wrangler berubah cepat: PR pembaruan mingguan, dikelompokkan agar tidak banjir.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      agent:
+        patterns: ['@anthropic-ai/*']
+      lainnya:
+        patterns: ['*']
+        exclude-patterns: ['@anthropic-ai/*']
+  - package-ecosystem: npm
+    directory: /relay
+    schedule:
+      interval: weekly
+    groups:
+      relay:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

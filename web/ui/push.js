@@ -1,7 +1,7 @@
 // Notifikasi lokal & Web Push (kunci VAPID dibuat di HP, dikirim ke PC lewat E2EE).
 import { store } from '../conn.js';
 import { app } from './state.js';
-import { showLogin } from './auth.js';
+import { api, showLogin } from './auth.js';
 import { applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
 
 // ---------- Notifikasi & Web Push ----------
@@ -62,6 +62,19 @@ export function themePicker() {
   return seg;
 }
 
+async function logoutAll() {
+  if (!(await ui.confirm({ title: 'Keluar dari semua perangkat?', text: 'Semua HP & browser (termasuk yang ini) harus login GitHub lagi. PC dan pairing PIN tidak berubah.', ok: 'Keluar semua', danger: true, icon: 'logout', stay: true }))) return;
+  try {
+    await api('/api/logout-all', { method: 'POST' });
+  } catch (e) {
+    return toast(e.message);
+  }
+  store.set('token', null);
+  app.me = null;
+  ui.closeSheet();
+  showLogin();
+}
+
 export function accountMenu() {
   const login = app.me?.login;
   ui.sheet(
@@ -73,6 +86,8 @@ export function accountMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
       menuItem({ icon: 'logout', t1: 'Keluar', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),
+      // Login di HP/browser lain (mis. HP hilang) dicabut di relay. Pairing PC tidak berubah.
+      menuItem({ icon: 'logout', t1: 'Keluar dari semua perangkat', t2: 'Cabut login di semua HP & browser', danger: true, chev: false, onclick: logoutAll }),
     ),
   );
 }
