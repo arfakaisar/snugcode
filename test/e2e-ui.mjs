@@ -158,6 +158,40 @@ await page.keyboard.type('echo snug-$((6*7))');
 await page.keyboard.press('Enter');
 await page.waitForFunction(() => /snug-42/.test(document.querySelector('.termview .xterm-rows')?.textContent || ''), null, { timeout: 15000 });
 await shot('13-terminal');
+// Keyboard Android (Gboard): setiap huruf = keydown 229 + komposisi IME. Ketikan harus langsung sampai
+// ke shell (dulu baru terkirim setelah spasi/Enter, jadi layar tampak diam), termasuk Backspace lewat
+// IME, koreksi otomatis, dan Enter di tengah komposisi — tanpa huruf ganda.
+{
+  const cdp = await page.context().newCDPSession(page);
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('.termview .xterm-rows > div')].map((d) => d.textContent.trimEnd()).join('\n'));
+  const waitLine = (re) => page.waitForFunction((src) => [...document.querySelectorAll('.termview .xterm-rows > div')].some((d) => new RegExp(src).test(d.textContent.trimEnd())), re.source, { timeout: 10000 });
+  const ime = async (text) => {
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 229, key: 'Unidentified' });
+    await cdp.send('Input.imeSetComposition', { text, selectionStart: text.length, selectionEnd: text.length });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 229, key: 'Unidentified' });
+  };
+  // Keyboard fisik/emulasi di atas tidak ikut terkirim ganda oleh penangan IME (spasi lewat keypress)
+  assert.match(await rows(), /[$#] echo snug-\$\(\(6/);
+  for (const w of ['e', 'ec', 'ech', 'echo']) await ime(w);
+  await waitLine(/[$#] echo$/);
+  await cdp.send('Input.insertText', { text: 'echo ' });
+  // "andorid" dikoreksi jadi "android" oleh keyboard, lalu huruf terakhir dihapus & diganti
+  for (const w of ['a', 'an', 'and', 'ando', 'andor', 'andori', 'andorid', 'android', 'androi', 'android7']) await ime(w);
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 13, key: 'Enter', code: 'Enter' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'char', text: '\r', key: 'Enter' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 13, key: 'Enter', code: 'Enter' });
+  await waitLine(/^android7$/);
+  assert.doesNotMatch(await rows(), /echoecho|android7android7/);
+  await cdp.detach();
+  // Tombol Tempel: isi clipboard dikirim ke shell (menekan lama layar xterm di HP tidak memberi menu Tempel).
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(() => navigator.clipboard.writeText('echo tempel-$((2+3))\n'));
+  await page.locator('.termview .tk', { hasText: 'Tempel' }).click();
+  await waitLine(/tempel-\$\(\(2\+3/);
+  // Bash memakai bracketed paste: baris baru hasil tempel tidak langsung menjalankan perintah.
+  await page.keyboard.press('Enter');
+  await waitLine(/^tempel-5$/);
+}
 await page.click('.termview [aria-label="Tutup layar terminal"]');
 await page.waitForSelector('.termview', { state: 'detached' });
 await openTool('Terminal');

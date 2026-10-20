@@ -8,3 +8,15 @@ export function ctrlKey(d) {
   if (d === '?') return '\x7f';
   return d;
 }
+
+// Keyboard HP (Gboard, Samsung, SwiftKey, suara, ketik geser) mengubah isi textarea lewat komposisi
+// IME & koreksi otomatis, bukan per tombol. Selisih isi sebelum → sesudah diubah jadi input terminal:
+// DEL untuk setiap karakter yang hilang dari ujung, lalu karakter barunya (baris baru = Enter).
+// Dihitung per code point: emoji/karakter non-Latin dihapus shell dengan satu DEL.
+export function imeDelta(prev, next) {
+  const a = [...prev];
+  const b = [...next];
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return '\x7f'.repeat(a.length - i) + b.slice(i).join('').replace(/\r?\n/g, '\r');
+}
