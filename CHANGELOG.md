@@ -2,6 +2,17 @@
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 
+## Belum dirilis
+
+### Perbaikan
+- **PWA tidak lagi macet di "Menghubungi relay" setelah HP dibuka lagi.** Soket WebSocket yang tertahan di tahap
+  menyambung (HP baru bangun, jaringan seluler yang menelan paket) dulu tidak punya batas waktu, dan `wake()`
+  mengabaikannya, jadi layar bisa diam bermenit-menit padahal daftar PC (lewat HTTP biasa) menampilkan "online". Kini
+  tanpa jawaban relay dalam 10–30 dtk soket diganti baru, membuka aplikasi kembali langsung mengganti soket yang
+  tertahan, PC yang tidak menjawab auth dalam 20 dtk dicoba lewat kanal baru, dan layar menyambung menampilkan
+  percobaan ke berapa serta tombol **Coba sekarang**. Diuji `test/e2e-resume.mjs` (proxy yang menahan koneksi).
+- Folder data snugcode tetap tertutup di file explorer bila path-nya lewat symlink (macOS `/var` → `/private/var`).
+
 ## 2026-10-20 — v0.4.0: keamanan relay, koneksi tahan banting, izin bertingkat risiko, biaya sesi
 
 ### Keamanan

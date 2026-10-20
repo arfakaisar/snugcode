@@ -90,6 +90,8 @@ jobs:
       - run: npm run test:ui
         env:
           SHOTS: ${{ runner.temp }}/shots
+      # HP kembali dari latar belakang dengan jaringan yang menahan koneksi: tidak macet di "Menghubungi relay".
+      - run: npm run test:e2e:resume
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
