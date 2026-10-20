@@ -30,6 +30,13 @@ function deviceName() {
 // soket dianggap setengah mati walau belum `close`, lalu disambung ulang.
 const PING_MS = 20000;
 const DEAD_MS = 50000;
+// Batas waktu menyambung: soket bisa tertahan di CONNECTING tanpa batas (HP baru bangun, jaringan seluler
+// yang menelan paket) dan browser baru menyerah setelah beberapa menit. Tanpa `status` dari relay dalam
+// waktu ini, soket dilepas dan dicoba lagi (makin lama tiap percobaan, untuk jaringan yang memang lambat).
+const CONNECT_MS = 10000;
+const CONNECT_MAX_MS = 30000;
+// Relay sudah menjawab tapi PC tidak membalas auth (soket PC ke relay setengah mati): coba kanal baru.
+const AUTH_MS = 20000;
 // Batas waktu RPC: tanpa ini tombol & spinner bisa menunggu selamanya saat koneksi macet.
 const RPC_MS = 30000;
 const RPC_SLOW_MS = 180000;
@@ -46,6 +53,7 @@ export class Conn {
     this.backoff = 1000;
     this.handlers = {};
     this.online = false;
+    this.attempts = 0;
   }
   get dev() {
     return store.get('dev.' + this.m.id);
@@ -53,12 +61,18 @@ export class Conn {
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     clearTimeout(this.reconnectTimer);
+    clearTimeout(this.connectT);
     // Token login lewat subprotocol, bukan URL (tidak tercatat di log); relay menjawab subprotocol `snugcode`.
     const ws = new WebSocket(`${proto}//${location.host}/ws/phone?mid=${encodeURIComponent(this.m.id)}`, ['snugcode', 't.' + token()]);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     this.channel = null;
     this.bin = false;
+    this.greeted = false;
+    this.startedAt = Date.now();
+    this.emit('attempt', ++this.attempts);
+    const limit = Math.min(CONNECT_MS + (this.attempts - 1) * 5000, CONNECT_MAX_MS);
+    this.connectT = setTimeout(() => this.ws === ws && !this.greeted && this.drop(), limit);
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
       this.lastRx = Date.now();
@@ -96,6 +110,8 @@ export class Conn {
   lost() {
     clearInterval(this.ping);
     clearTimeout(this.probeT);
+    clearTimeout(this.connectT);
+    clearTimeout(this.authT);
     this.channel = null;
     for (const p of this.pending.values()) p.reject(new Error('Koneksi terputus'));
     this.pending.clear();
@@ -111,20 +127,32 @@ export class Conn {
     this.lost();
     if (!this.closedByUser) this.connect();
   }
-  // Aplikasi dibuka lagi / jaringan kembali: soket yang tertutup disambung ulang, yang tampak terbuka
-  // diuji dengan ping (relay menjawab dalam hitungan milidetik; tanpa jawaban 4 detik → sambung ulang).
+  // Aplikasi dibuka lagi / jaringan kembali: soket yang tertutup disambung ulang tanpa menunggu jeda
+  // backoff, soket yang masih CONNECTING dari sebelum jaringan pulih diganti baru, dan yang tampak
+  // terbuka diuji dengan ping (relay menjawab dalam hitungan milidetik; tanpa jawaban 4 detik → sambung ulang).
   wake() {
     if (this.closedByUser) return;
+    this.backoff = 1000;
     if (!this.ws || this.ws.readyState > 1) return this.connect();
-    if (this.ws.readyState !== 1) return;
+    if (this.ws.readyState === 0) return Date.now() - this.startedAt > 3000 && this.drop();
+    if (!this.greeted) return;
     const since = Date.now();
     clearTimeout(this.probeT);
     this.ws.send('ping');
     this.probeT = setTimeout(() => this.lastRx < since && this.drop(), 4000);
   }
+  // Tombol "Coba sekarang": lepaskan percobaan yang sedang berjalan dan sambung ulang segera.
+  retry() {
+    if (this.closedByUser) return;
+    this.backoff = 1000;
+    this.drop();
+  }
   close() {
     this.closedByUser = true;
     clearInterval(this.ping);
+    clearTimeout(this.connectT);
+    clearTimeout(this.authT);
+    clearTimeout(this.reconnectTimer);
     this.ws?.close();
   }
   on(ev, fn) {
@@ -160,12 +188,17 @@ export class Conn {
     }
     switch (f.t) {
       case 'status':
+        clearTimeout(this.connectT);
+        clearTimeout(this.authT);
+        this.greeted = true;
+        this.attempts = 0;
         if (f.bin) this.relayBin = true;
         this.online = f.online;
         this.emit('state', f.online ? 'online' : 'offline');
         if (f.online) this.startAuth();
         return;
       case 'auth2': {
+        clearTimeout(this.authT);
         const r = C.authFinishPhone(C.hexToBytes(this.dev.secret), this.authState, f);
         if (!r) return this.emit('state', 'authfail');
         this.channel = r.channel;
@@ -174,6 +207,7 @@ export class Conn {
         return;
       }
       case 'auth_err':
+        clearTimeout(this.authT);
         store.set('dev.' + this.m.id, null);
         return this.emit('state', 'needpin');
       case 'pair2': {
@@ -199,6 +233,9 @@ export class Conn {
     if (!dev) return this.emit('state', 'needpin');
     const a = C.authStartPhone();
     this.authState = a.state;
+    const ws = this.ws;
+    clearTimeout(this.authT);
+    this.authT = setTimeout(() => this.ws === ws && !this.channel && this.drop(), AUTH_MS);
     this.sendRaw({ t: 'auth1', deviceId: dev.deviceId, ...a.msg, ...(this.relayBin ? { bin: 1 } : {}) });
   }
   async pair(pin) {

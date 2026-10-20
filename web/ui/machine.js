@@ -30,10 +30,16 @@ export function openMachine(m, { sid } = {}) {
     { id: 'auth', label: 'Membuka kanal terenkripsi', est: 2 },
   ]);
   app.current.connecting = connecting;
+  // Menyambung lama (HP baru bangun, jaringan belum pulih): tampilkan percobaan ke berapa dan tombol
+  // coba sekarang, bukan spinner tanpa akhir. conn.js sendiri mengganti soket yang tertahan.
+  const retry = h('div', { class: 'pretry', hidden: true }, h('p', { class: 'dim small' }, 'Relay belum menjawab. Periksa internet HP — snugcode terus mencoba sendiri.'), h('button', { class: 'btn', onclick: () => (haptic(), app.conn.retry()) }, ic('refresh'), 'Coba sekarang'));
+  connecting.el.append(retry);
+  const slowT = setTimeout(() => (retry.hidden = false), 12000);
+  app.conn.on('attempt', (n) => !app.current?.ready && n > 1 && connecting.note(`Mencoba lagi… (percobaan ${n})`));
   showStatus('Menghubungkan', null, true, connecting.el);
   app.conn.on('state', (s) => {
     app.current?.watch?.(s);
-    if (s === 'online') (connecting.step('auth'), app.current.wakeProg?.step('auth'));
+    if (s === 'online') (clearTimeout(slowT), (retry.hidden = true), connecting.note(''), connecting.step('auth'), app.current.wakeProg?.step('auth'));
     if (s === 'offline') {
       connecting.stop();
       ui.dot('off');
