@@ -1,0 +1,13 @@
+{
+  "version": "2026.10.1",
+  "sha256": {
+    "cloudflared-darwin-amd64.tgz": "8ccc6383aef109c8d88965937649a796febbb166dab4b73345e820623aee1ede",
+    "cloudflared-darwin-arm64.tgz": "35b7e34c9a3f214d80d859c4223450c69e583c7668d228c45771026fe376cab9",
+    "cloudflared-linux-386": "9f5794f4e0bf2a4be8b3a3b8cc97720f60b3686089e07cebfd90aa9826b31749",
+    "cloudflared-linux-amd64": "3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586",
+    "cloudflared-linux-arm": "598445dbe19d789d2901c57bb9df5b070cc2c4f817c48b0ae2702a93d15a468e",
+    "cloudflared-linux-arm64": "2c65dfabf616c40efc7545d107d7a57ad5e21377e2964b7e88af19a238074a46",
+    "cloudflared-windows-386.exe": "a0c9a47af2cbd681005e4c1210edf95f986ecc66cee6d68b0e42c484af465d2e",
+    "cloudflared-windows-amd64.exe": "4d2490e74082c5d48dbfedaf92576fa5bd1702379ab88eb7faa0cfbe8dc891b6"
+  }
+}

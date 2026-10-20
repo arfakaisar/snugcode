@@ -26,6 +26,15 @@ function deviceName() {
   return os + ' · ' + new Date().toLocaleDateString('id-ID');
 }
 
+// Heartbeat: relay menjawab `ping`. Tanpa pesan apa pun selama DEAD_MS (Wi-Fi ↔ seluler, HP tidur),
+// soket dianggap setengah mati walau belum `close`, lalu disambung ulang.
+const PING_MS = 20000;
+const DEAD_MS = 50000;
+// Batas waktu RPC: tanpa ini tombol & spinner bisa menunggu selamanya saat koneksi macet.
+const RPC_MS = 30000;
+const RPC_SLOW_MS = 180000;
+const RPC_SLOW = new Set(['create', 'update', 'rollback', 'connAdd', 'configure', 'chatgptLogin', 'probeModel', 'modelsAll', 'modelsInfo', 'models', 'repos', 'branches', 'attach', 'preview', 'screenshot', 'runDev', 'cleanup', 'push', 'pr', 'commit', 'revert', 'diff', 'status', 'delete', 'send', 'termOpen', 'procStart']);
+
 // ---------- Koneksi terenkripsi ke PC ----------
 export class Conn {
   constructor(machine) {
@@ -44,24 +53,30 @@ export class Conn {
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     clearTimeout(this.reconnectTimer);
-    const ws = new WebSocket(`${proto}//${location.host}/ws/phone?token=${encodeURIComponent(token())}&mid=${encodeURIComponent(this.m.id)}`);
+    // Token login lewat subprotocol, bukan URL (tidak tercatat di log); relay menjawab subprotocol `snugcode`.
+    const ws = new WebSocket(`${proto}//${location.host}/ws/phone?mid=${encodeURIComponent(this.m.id)}`, ['snugcode', 't.' + token()]);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     this.channel = null;
     this.bin = false;
-    ws.onmessage = (ev) => this.ws === ws && (typeof ev.data === 'string' ? this.onFrame(ev.data) : this.onBinary(ev.data));
+    ws.onmessage = (ev) => {
+      if (this.ws !== ws) return;
+      this.lastRx = Date.now();
+      typeof ev.data === 'string' ? this.onFrame(ev.data) : this.onBinary(ev.data);
+    };
     ws.onopen = () => {
       this.backoff = 1000;
+      this.lastRx = Date.now();
       clearInterval(this.ping);
-      this.ping = setInterval(() => ws.readyState === 1 && ws.send('ping'), 25000);
+      this.ping = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        if (Date.now() - this.lastRx > DEAD_MS) return this.drop();
+        ws.send('ping');
+      }, PING_MS);
     };
     ws.onclose = (ev) => {
       if (this.ws !== ws) return;
-      clearInterval(this.ping);
-      this.channel = null;
-      for (const p of this.pending.values()) p.reject(new Error('Koneksi terputus'));
-      this.pending.clear();
-      this.emit('state', 'reconnecting');
+      this.lost();
       if (this.closedByUser) return;
       if (ev.code === 4001 && ev.reason === 'revoked') {
         store.set('dev.' + this.m.id, null);
@@ -76,6 +91,36 @@ export class Conn {
       this.reconnectTimer = setTimeout(() => !this.closedByUser && this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 15000);
     };
+  }
+  // Koneksi hilang: semua RPC yang menunggu gagal dengan pesan jelas, UI menampilkan "menyambung ulang".
+  lost() {
+    clearInterval(this.ping);
+    clearTimeout(this.probeT);
+    this.channel = null;
+    for (const p of this.pending.values()) p.reject(new Error('Koneksi terputus'));
+    this.pending.clear();
+    this.emit('state', 'reconnecting');
+  }
+  // Soket setengah mati: lepaskan tanpa menunggu `close` (bisa tertahan puluhan detik) dan sambung ulang.
+  drop() {
+    const ws = this.ws;
+    this.ws = null;
+    try {
+      ws?.close();
+    } catch {}
+    this.lost();
+    if (!this.closedByUser) this.connect();
+  }
+  // Aplikasi dibuka lagi / jaringan kembali: soket yang tertutup disambung ulang, yang tampak terbuka
+  // diuji dengan ping (relay menjawab dalam hitungan milidetik; tanpa jawaban 4 detik → sambung ulang).
+  wake() {
+    if (this.closedByUser) return;
+    if (!this.ws || this.ws.readyState > 1) return this.connect();
+    if (this.ws.readyState !== 1) return;
+    const since = Date.now();
+    clearTimeout(this.probeT);
+    this.ws.send('ping');
+    this.probeT = setTimeout(() => this.lastRx < since && this.drop(), 4000);
   }
   close() {
     this.closedByUser = true;
@@ -107,7 +152,12 @@ export class Conn {
   }
   onFrame(raw) {
     if (raw === 'pong') return;
-    const f = JSON.parse(raw);
+    let f;
+    try {
+      f = JSON.parse(raw);
+    } catch {
+      return;
+    }
     switch (f.t) {
       case 'status':
         if (f.bin) this.relayBin = true;
@@ -168,7 +218,18 @@ export class Conn {
     const id = ++this.rpcId;
     if (this.bin) for (const f of this.channel.sealBin({ id, m, p })) this.ws.send(f);
     else this.ws.send(JSON.stringify(this.channel.seal({ id, m, p })));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    const ms = RPC_SLOW.has(m) ? RPC_SLOW_MS : RPC_MS;
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error(`PC tidak menjawab dalam ${ms / 1000} detik. Periksa koneksi lalu coba lagi.`));
+        this.wake(); // mungkin koneksinya yang macet
+      }, ms);
+      this.pending.set(id, {
+        resolve: (v) => (clearTimeout(t), resolve(v)),
+        reject: (e) => (clearTimeout(t), reject(e)),
+      });
+    });
   }
 }
 

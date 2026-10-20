@@ -8,7 +8,8 @@
    Prinsip: tidak pernah zoom sendiri (kontrol form >= 16px, touch-action manipulation,
    text-size-adjust 100%), shell mengikuti visualViewport saat keyboard terbuka, target sentuh
    >= 36–44px, animasi hanya transform/opacity (murah di GPU), dan semua gerak dimatikan bila
-   prefers-reduced-motion. Tema gelap bawaan; terang otomatis/manual lewat [data-theme]. */
+   prefers-reduced-motion. Tema gelap bawaan; terang otomatis/manual lewat [data-theme].
+   Kontras token teks memenuhi WCAG AA (≥ 4,5:1 terhadap --bg/--surface) di kedua tema. */
 
 :root {
   --bg: #262624;
@@ -20,10 +21,12 @@
   --line-2: #4e4d48;
   --fg: #f5f4ef;
   --fg-2: #c3c1b8;
-  --dim: #8f8d85;
+  --dim: #9a988f;
   --accent: #d97757;
   --accent-2: #c6613f;
-  --accent-fg: #fff;
+  /* Teks di atas aksen: gelap di tema gelap (putih di atas #d97757 hanya 3,1:1; WCAG AA butuh 4,5:1). */
+  --accent-fg: #1f1e1d;
+  --on-bad: #1f1e1d;
   --accent-soft: rgba(217, 119, 87, .16);
   --bubble: #171615;
   --code-bg: #1c1b1a;
@@ -73,14 +76,16 @@
   --line-2: #d3cfc2;
   --fg: #1f1e1d;
   --fg-2: #4a4944;
-  --dim: #84827a;
-  --accent: #c96442;
-  --accent-2: #b5552f;
-  --accent-soft: rgba(201, 100, 66, .12);
+  --dim: #6b6963;
+  --accent: #ad4f2b;
+  --accent-2: #9a4424;
+  --accent-soft: rgba(173, 79, 43, .12);
+  --accent-fg: #fff;
+  --on-bad: #fff;
   --bubble: #efece3;
   --code-bg: #f6f4ee;
   --ok: #3f8f5a;
-  --warn: #a8741a;
+  --warn: #8a5a10;
   --bad: #c4432f;
   --info: #2f6fb8;
   --violet: #7a5bd1;
@@ -106,14 +111,16 @@
     --line-2: #d3cfc2;
     --fg: #1f1e1d;
     --fg-2: #4a4944;
-    --dim: #84827a;
-    --accent: #c96442;
-    --accent-2: #b5552f;
-    --accent-soft: rgba(201, 100, 66, .12);
+    --dim: #6b6963;
+    --accent: #ad4f2b;
+    --accent-2: #9a4424;
+    --accent-soft: rgba(173, 79, 43, .12);
+    --accent-fg: #fff;
+    --on-bad: #fff;
     --bubble: #efece3;
     --code-bg: #f6f4ee;
     --ok: #3f8f5a;
-    --warn: #a8741a;
+    --warn: #8a5a10;
     --bad: #c4432f;
     --info: #2f6fb8;
     --violet: #7a5bd1;
@@ -373,7 +380,7 @@ code.inline, .kbd { font-family: var(--mono); background: var(--surface-2); bord
 .btn.primary:active:not(:disabled) { background: var(--accent-2); }
 .btn.big { min-height: 54px; font-size: 16px; }
 .btn.danger { background: transparent; border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
-.btn.dangerfill { background: var(--bad); border-color: transparent; color: #fff; }
+.btn.dangerfill { background: var(--bad); border-color: transparent; color: var(--on-bad, #fff); }
 .btn.ghost { background: transparent; border-color: var(--line); }
 .btn.ghost.danger { color: var(--bad); }
 .btn.warn { background: color-mix(in srgb, var(--bad) 18%, var(--surface)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); color: var(--bad); }
@@ -1229,3 +1236,26 @@ html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); pad
 .termview .tk { flex: none; min-width: 40px; height: 36px; padding: 0 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); font: 13px var(--mono); color: var(--fg); }
 .termview .tk.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 .termview .tk:active { transform: scale(.94); }
+
+/* Tambah PC: pilihan OS untuk perintah pemasang + status menunggu PC baru tertaut. */
+.seg.small { margin-top: 10px; }
+.seg.small button { min-height: 34px; font-size: 12.5px; }
+.waitpc { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.waitpc .mascot { width: 28px; height: 28px; flex: none; }
+
+/* Kartu izin: tingkat risiko & jaring pengaman (rewind). */
+.perm .risk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 12.5px; color: var(--fg-2); }
+.perm .risk .rl { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; }
+.perm .risk .rl svg { width: 13px; height: 13px; }
+.perm.r-low .risk .rl { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.perm.r-medium .risk .rl { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.perm.r-high .risk .rl { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.perm .undo { display: flex; align-items: center; gap: 8px; margin: -2px 0 12px; font-size: 12.5px; color: var(--fg-2); }
+.perm .undo svg { width: 14px; height: 14px; flex: none; color: var(--ok); }
+.autonomy .menuitem.on { background: var(--accent-soft); }
+.autonomy .menuitem.on .chev { color: var(--accent); }
+.safety { display: flex; gap: 8px; align-items: flex-start; margin: -4px 4px 14px; }
+.safety svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--ok); }
+.nextsteps { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.nextsteps .chip { min-height: 36px; padding: 6px 14px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: var(--fg-2); font-size: 13px; transition: background .15s, transform .2s var(--spring); }
+.nextsteps .chip:active { transform: scale(.96); background: var(--surface-2); }

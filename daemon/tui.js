@@ -266,6 +266,7 @@ const COMMANDS = [
   ['/pr', 'buat Pull Request [judul]'],
   ['/auto', 'nyalakan/matikan auto-izin'],
   ['/edits', 'tinjau setiap edit file sebelum diterapkan (on/off)'],
+  ['/otonomi', 'tingkat otonomi agen: tanya | seimbang | rutin | penuh'],
   ['/login', 'login ulang GitHub (push, PR, repo)'],
   ['/update', 'periksa & pasang pembaruan jarak jauh'],
   ['/clean', 'pindai & bersihkan worktree / repo yatim'],
@@ -507,6 +508,8 @@ class App {
       const opts = p.push ? ['Ya, izinkan push', 'Tidak (esc)'] : ['Ya', `Ya, dan jangan tanya lagi untuk ${p.always || p.tool} di sesi ini`, 'Tidak (esc)'];
       const body = [];
       if (p.title) body.push(c.soft(p.title), '');
+      // Tingkat risiko (shared/risk.js): permintaan berbahaya terlihat berbeda dari yang rutin.
+      if (p.risk) body.push(({ high: c.red('▲ risiko tinggi'), medium: c.yellow('● risiko sedang'), low: c.green('○ risiko rendah') })[p.risk.level] + (p.risk.why ? dim(' — ' + p.risk.why) : ''), '');
       for (const l of String(p.summary || p.s || '').split('\n').slice(0, 12)) body.push(c.fg(l));
       if (p.x) {
         const diff = [];
@@ -517,6 +520,7 @@ class App {
         body.push('', ...diff.slice(0, 16));
         if (diff.length > 16) body.push(dim(`… ${diff.length - 16} baris lagi`));
       }
+      if (p.undo) body.push('', dim(p.undo === 'file' ? '↺ bisa dibatalkan dengan /rewind' : '↺ perubahan file bisa di-/rewind; efek di luar folder (jaringan, paket global) tidak'));
       body.push('');
       opts.forEach((t, i) => body.push(i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`)));
       if (this.perms.length > 1) body.push('', dim(`+${this.perms.length - 1} permintaan lagi`));
@@ -1241,6 +1245,16 @@ class App {
           if (on && !(await this.confirm('Auto-izin', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push). Lanjut?'))) return;
           this.session = await this.cl.call('auto', { id: s.id, on });
           return this.setFlash(on ? '⚡ auto-izin ON' : 'auto-izin off', on);
+        }
+        case '/otonomi':
+        case '/autonomy': {
+          need();
+          const names = { tanya: 'ask', ask: 'ask', seimbang: 'balanced', balanced: 'balanced', rutin: 'trusted', trusted: 'trusted', penuh: 'auto', auto: 'auto' };
+          const level = names[String(arg || '').trim().toLowerCase()];
+          if (!level) return this.setFlash('pakai: /otonomi tanya | seimbang | rutin | penuh  (sekarang: ' + (s.autonomy || '-') + ')');
+          if (level === 'auto' && !(await this.confirm('Otonomi penuh', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push & PR). Lanjut?'))) return;
+          this.session = await this.cl.call('autonomy', { id: s.id, level });
+          return this.setFlash({ ask: 'otonomi: tanya setiap edit & perintah', balanced: 'otonomi: seimbang (edit langsung, perintah ditanyakan)', trusted: 'otonomi: test/lint/build otomatis, perintah lain ditanyakan', auto: '⚡ otonomi penuh' }[level], level === 'auto');
         }
         case '/edits': {
           need();

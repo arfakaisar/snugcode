@@ -10,7 +10,7 @@ import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { HOME } from './config.js';
 
 const BIN_DIR = path.join(HOME, 'bin');
@@ -35,13 +35,22 @@ function onPath() {
   }
 }
 
+// Versi dipatok + SHA-256 dari catatan rilis resmi (daemon/cloudflared-version.json): binary yang diunduh
+// dijalankan di PC, jadi tidak pernah "latest" tanpa verifikasi. Perbarui: versi + hash dari rilis GitHub.
+const PIN = JSON.parse(fs.readFileSync(new URL('./cloudflared-version.json', import.meta.url), 'utf8'));
+
 async function download(dest) {
   const asset = releaseAsset();
-  const res = await fetch(`https://github.com/cloudflare/cloudflared/releases/latest/download/${asset}`);
+  const want = PIN.sha256[asset];
+  if (!want) throw new Error(`cloudflared untuk ${asset} belum didukung; pasang cloudflared sendiri (PATH) atau isi cloudflaredExecutable di config.json.`);
+  const res = await fetch(`https://github.com/cloudflare/cloudflared/releases/download/${PIN.version}/${asset}`);
   if (!res.ok) throw new Error(`Gagal mengunduh cloudflared (${res.status})`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const got = createHash('sha256').update(buf).digest('hex');
+  if (got !== want) throw new Error(`cloudflared yang diunduh tidak cocok dengan checksum resmi (${asset}); unduhan dibatalkan.`);
   fs.mkdirSync(BIN_DIR, { recursive: true });
   const tmp = path.join(BIN_DIR, asset + '.part');
-  fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
+  fs.writeFileSync(tmp, buf);
   if (asset.endsWith('.tgz')) {
     execFileSync('tar', ['-xzf', tmp, '-C', BIN_DIR]);
     fs.rmSync(tmp, { force: true });
