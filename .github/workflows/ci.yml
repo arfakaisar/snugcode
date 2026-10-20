@@ -27,7 +27,18 @@ jobs:
       - name: Type check (tsc --checkJs, termasuk relay)
         if: runner.os == 'Linux'
         run: npm ci --prefix relay && npm run typecheck
-      - run: npm test
+      # Test yang gagal juga ditulis sebagai anotasi: terbaca di halaman run (dan lewat API publik) tanpa
+      # membuka log job.
+      - name: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log && exit 0
+          sum=$(sed -n '/failing tests:/,$p' test.log)
+          [ -n "$sum" ] || sum=$(grep -A15 'not ok' test.log)
+          msg=$(printf '%s' "$sum" | head -c 6000 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}1')
+          echo "::error title=npm test gagal (${{ runner.os }})::${msg:-lihat log}"
+          exit 1
       - name: Bundle PWA
         run: npm run build:web
 

@@ -1,6 +1,7 @@
 // Kebijakan izin agen yang dipakai bersama engine Claude (canUseTool) dan Codex (decideCodex):
 // folder data snugcode, file konfigurasi repo yang bisa mengubah perilaku tool, push ke remote,
 // dan aturan "Selalu". Fungsi murni: tidak bergantung pada state sesi.
+import fs from 'node:fs';
 import path from 'node:path';
 import { HOME, WORKSPACES, CLAUDE_DIR } from './config.js';
 import { DEV_START } from './devtools.js';
@@ -19,7 +20,22 @@ export const isInside = (p, dir) => {
 // (output tool besar disimpan Claude Code di sana lalu dibaca kembali). Menulis ke folder config
 // Claude tetap ditolak: settings.json di sana bisa memasang hook yang lolos dari sistem izin.
 export const isSensitivePath = (p, { write = false } = {}) =>
-  isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
+  within(p, HOME) && !within(p, WORKSPACES) && !within(p, PLANS_DIR) && (write || !within(p, CLAUDE_DIR));
+// Path yang sudah di-realpath (file explorer) dibandingkan juga dengan realpath folder data: di macOS
+// folder sementara /var/… adalah symlink ke /private/var/…, begitu juga home yang dipindah lewat symlink.
+const realDirs = new Map();
+function realDir(dir) {
+  let r = realDirs.get(dir);
+  if (r) return r;
+  try {
+    r = fs.realpathSync(dir);
+  } catch {
+    return dir; // belum ada: jangan di-cache, bisa dibuat kemudian
+  }
+  realDirs.set(dir, r);
+  return r;
+}
+const within = (p, dir) => isInside(p, dir) || isInside(p, realDir(dir));
 // Hanya penangkap kasus jelas untuk Bash; perlindungan sebenarnya adalah sandbox OS (lihat sandbox.js).
 export const SECRET_CMD_RE = /secrets\.(?:json|key)|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|gemini|env|bin|tools)\b|\$\{?(?:SNUGCODE|POCKETCODE)_HOME\b/i;
 
