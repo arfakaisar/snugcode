@@ -8,7 +8,9 @@
   "hostRequirements": { "cpus": 2 },
   // /workspaces tetap ada saat codespace dihentikan & di-rebuild: worktree, riwayat sesi, transcript agen.
   "containerEnv": { "SNUGCODE_HOME": "/workspaces/.snugcode" },
-  "postCreateCommand": "bash .devcontainer/install.sh",
+  // onCreateCommand juga berjalan saat prebuild Codespaces (opsional, diatur di setelan repo fork): Chromium,
+  // bubblewrap & snugcode sudah terpasang di snapshot, jadi runner baru menyala dalam ±1 menit.
+  "onCreateCommand": "bash .devcontainer/install.sh",
   "postStartCommand": "bash .devcontainer/start.sh",
   "customizations": {
     "codespaces": { "openFiles": [".devcontainer/README.md"] }

@@ -112,6 +112,63 @@ await shot('9-alat');
 await closeSheet();
 ok('sheet git (file hasil.txt terlihat), model, run, menu sesi, lampiran & alat terbuka & tertutup');
 
+// File explorer: daftar folder (penanda git), lihat & edit file dari HP
+const openTool = async (label) => {
+  await page.click('[aria-label="Lampiran & alat"]');
+  await page.locator('#sheet:not([hidden]) .tile', { hasText: label }).click();
+};
+await openTool('File');
+await page.waitForSelector('#sheet:not([hidden]) .frow >> text=hasil.txt');
+assert.equal(await page.locator('.frow', { hasText: 'hasil.txt' }).locator('.fm').textContent(), 'A');
+await page.locator('.frow', { hasText: 'hasil.txt' }).click();
+await page.waitForSelector('.codeview .cl');
+await shot('11-file');
+await page.locator('#sheet:not([hidden]) .chip', { hasText: 'Edit' }).click();
+await page.fill('textarea.editor', 'baris satu\nbaris dua dari HP\n');
+await page.locator('#sheet:not([hidden]) button', { hasText: 'Simpan' }).click();
+await page.waitForFunction(() => [...document.querySelectorAll('.codeview .lt')].map((x) => x.textContent).join('|') === 'baris satu|baris dua dari HP');
+assert.equal(fs.readFileSync(path.join(repo, 'hasil.txt'), 'utf8'), 'baris satu\nbaris dua dari HP\n');
+ok('file explorer: penanda git, lihat file bernomor baris, edit & simpan dari HP');
+// Review diff: komentar per baris lalu batalkan file baru
+await page.locator('#sheet:not([hidden]) [aria-label="Kembali"]').click();
+await closeSheet();
+await page.click('[aria-label="Git"]');
+await page.locator('#sheet:not([hidden]) button', { hasText: 'Lihat diff' }).click();
+await page.waitForSelector('.difffile .dl');
+await page.locator('.dl', { hasText: 'baris dua dari HP' }).click();
+await page.fill('.cbox2 textarea', 'Ganti jadi bahasa Inggris');
+await page.locator('.cbox2 button', { hasText: 'Tambah' }).click();
+await page.waitForSelector('.cmt >> text=Ganti jadi bahasa Inggris');
+await page.waitForSelector('.sheetfoot >> text=1 komentar');
+await shot('12-review');
+await page.locator('.sheetfoot button', { hasText: 'Hapus' }).click();
+await page.waitForSelector('.difffile .dl');
+await page.locator('.difffile .chip', { hasText: 'Hapus file baru' }).click();
+await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Batalkan perubahan' }).click();
+await page.waitForSelector('#sheet:not([hidden]) >> text=Tidak ada perubahan.');
+assert.ok(!fs.existsSync(path.join(repo, 'hasil.txt')));
+await closeSheet();
+ok('review diff: komentar per baris (kirim ke agen), batalkan perubahan file dari HP');
+// Terminal interaktif: shell di worktree, output, ditutup layarnya lalu dibuka lagi (riwayat terputar ulang)
+await openTool('Terminal');
+await page.waitForSelector('.termview .xterm-rows');
+await page.waitForFunction(() => document.querySelector('.termview .xterm-rows')?.textContent.trim().length > 0, null, { timeout: 15000 });
+await page.click('.termview .tscreen');
+await page.keyboard.type('echo snug-$((6*7))');
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => /snug-42/.test(document.querySelector('.termview .xterm-rows')?.textContent || ''), null, { timeout: 15000 });
+await shot('13-terminal');
+await page.click('.termview [aria-label="Tutup layar terminal"]');
+await page.waitForSelector('.termview', { state: 'detached' });
+await openTool('Terminal');
+await page.waitForFunction(() => /snug-42/.test(document.querySelector('.termview .xterm-rows')?.textContent || ''), null, { timeout: 15000 });
+await page.click('.termview .ttab.on .tx');
+await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Tutup' }).click();
+await page.waitForSelector('.termview .tempty:not([hidden])');
+await page.click('.termview [aria-label="Tutup layar terminal"]');
+await page.waitForSelector('.termview', { state: 'detached' });
+ok('terminal: perintah dijalankan di PTY PC, tetap hidup saat layar ditutup, ditutup dari HP');
+
 // Drawer: daftar sesi terbaru, lalu Beranda -> buka lagi: riwayat diputar ulang tanpa duplikat
 await page.click('#menuBtn');
 await page.waitForSelector('#drawerPanel .dsess.on');

@@ -20,6 +20,17 @@ await build({
   outfile: path.join(out, 'app.js'),
   logLevel: 'info',
 });
+// xterm.js hanya dimuat saat terminal dibuka (import dinamis dengan URL, tidak ikut app.js).
+await build({
+  entryPoints: [path.join(root, 'web', 'xterm.js')],
+  bundle: true,
+  format: 'esm',
+  minify: true,
+  target: ['es2022', 'safari15'],
+  outfile: path.join(out, 'xterm.js'),
+  logLevel: 'warning',
+});
+fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(out, 'xterm.css'));
 const shell = ['index.html', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
 // Security header untuk aset yang disajikan langsung (worker alias); relay menambahkannya sendiri.
@@ -36,7 +47,7 @@ for (const [name, src] of Object.entries(FONTS)) fs.copyFileSync(path.join(root,
 // Nama cache service worker = hash isi aset: setiap deploy yang mengubah UI otomatis membuat
 // sw.js berbeda, sehingga HP memasang versi baru tanpa perlu menaikkan nomor versi manual.
 const hash = crypto.createHash('sha256');
-for (const f of ['app.js', ...shell]) hash.update(fs.readFileSync(path.join(out, f)));
+for (const f of ['app.js', 'xterm.js', 'xterm.css', ...shell]) hash.update(fs.readFileSync(path.join(out, f)));
 const sw = fs.readFileSync(path.join(root, 'web', 'sw.js'), 'utf8');
 const stamped = sw.replace(/const CACHE = '[^']*';/, `const CACHE = 'snugcode-${hash.digest('hex').slice(0, 10)}';`);
 if (stamped === sw) throw new Error('sw.js: baris `const CACHE = ...` tidak ditemukan');

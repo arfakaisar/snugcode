@@ -114,7 +114,9 @@ export function startMockRouter(cwdRef, reply, { key } = {}) {
 
 
 // Relay dev menyimpan state antar run: nama PC unik agar mudah dikenali (mis. di layar daftar PC).
-export async function setup({ name = 'e2e-' + Date.now().toString(36), reply } = {}) {
+export async function setup({ name = 'e2e-' + Date.now().toString(36), reply, secrets = {}, env = {} } = {}) {
+  // Akun unik per run: relay dev menyimpan mesin antar run, dan satu akun maksimal 20 mesin.
+  const login = 'tester' + Math.random().toString(36).slice(2, 8);
   const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-e2e-'));
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-e2e-repo-'));
   execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -127,12 +129,12 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply } =
 
   // --- registrasi PC di relay dev ---
   const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name }) })).json();
-  await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=tester`);
+  await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${login}`);
   const reg = await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json();
   assert.equal(reg.status, 'ok');
   fs.mkdirSync(HOME, { recursive: true });
   fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ relayUrl: RELAY, routerUrl: `http://127.0.0.1:${router.address().port}/v1`, machineName: name, machineId: reg.mid, model: 'claude-mock-1' }));
-  fs.writeFileSync(ref.secrets, JSON.stringify({ machineToken: reg.token, prs: C.bytesToHex(await C.pinToPrs(PIN, reg.mid)), routerKey: 'ROUTER-KEY-ASLI', devices: {}, pinFails: 0, githubToken: null }));
+  fs.writeFileSync(ref.secrets, JSON.stringify({ machineToken: reg.token, prs: C.bytesToHex(await C.pinToPrs(PIN, reg.mid)), routerKey: 'ROUTER-KEY-ASLI', devices: {}, pinFails: 0, githubToken: null, ...secrets }));
   // Env Claude Code/Anthropic milik shell pemanggil (mis. dijalankan dari dalam Claude Code) tidak ikut ke daemon uji.
   const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ANTHROPIC_)/.test(k)));
   const DAEMON = `
@@ -141,7 +143,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply } =
     const d = new Daemon(loadConfig(), { log: (m) => console.log('[daemon]', m) });
     d.start();
     process.on('SIGTERM', () => Promise.resolve(d.stop()).finally(() => process.exit(0)));`;
-  const daemon = spawn(process.execPath, ['--input-type=module', '-e', DAEMON], { env: { ...cleanEnv, SNUGCODE_HOME: HOME, SNUGCODE_DEBUG: process.env.DEBUG || '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e', DAEMON], { env: { ...cleanEnv, SNUGCODE_HOME: HOME, SNUGCODE_DEBUG: process.env.DEBUG || '', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let dlog = '';
   process.on('exit', () => daemon.exitCode === null && daemon.kill('SIGKILL'));
   daemon.stdout.on('data', (d) => (dlog += d));
@@ -155,7 +157,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply } =
   globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
   globalThis.location = { protocol: new URL(RELAY).protocol, host: new URL(RELAY).host };
   const { Conn, store } = await import('../web/conn.js');
-  const r = await fetch(`${RELAY}/auth/dev/login?kind=user&login=tester`, { redirect: 'manual' });
+  const r = await fetch(`${RELAY}/auth/dev/login?kind=user&login=${login}`, { redirect: 'manual' });
   store.set('token', decodeURIComponent(r.headers.get('location').split('#login=')[1]));
   const conn = new Conn({ id: reg.mid });
   const states = [];

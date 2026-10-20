@@ -68,6 +68,14 @@ jobs:
       - run: npm run test:e2e:connections
         env:
           SNUGCODE_E2E_CODEX: ${{ runner.temp }}/codex
+      # Engine Gemini CLI (ACP) asli terhadap Gemini API tiruan, versi yang sama dengan yang dipasang daemon.
+      - name: Siapkan Gemini CLI untuk uji engine
+        run: |
+          mkdir -p "$RUNNER_TEMP/gemini" && cd "$RUNNER_TEMP/gemini" && echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --omit=dev "$(node -p "require('$GITHUB_WORKSPACE/daemon/gemini-version.json').spec")"
+      - run: npm run test:e2e:gemini
+        env:
+          SNUGCODE_E2E_GEMINI: ${{ runner.temp }}/gemini/node_modules/@google/gemini-cli/bundle/gemini.js
       - run: npm run test:ui
         env:
           SHOTS: ${{ runner.temp }}/shots

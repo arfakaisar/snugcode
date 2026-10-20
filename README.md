@@ -182,7 +182,7 @@ Tangkapan layar mengikuti tema GitHub-mu: tema gelap atau terang.
 
 #### Agen & kolaborasi
 
-- **Harness terbaik per model** — model Claude & endpoint format Anthropic/OpenAI berjalan di **Claude Agent SDK**, model GPT (login ChatGPT / OpenAI) di **Codex** resmi. Lihat [Model & API key](#model--api-key).
+- **Harness terbaik per model** — model Claude & endpoint format Anthropic/OpenAI berjalan di **Claude Agent SDK**, model GPT (login ChatGPT / OpenAI) di **Codex** resmi, model Gemini (API key Google AI) di **Gemini CLI** resmi. Pilihan bawaan bisa diukur ulang dengan `npm run bench`. Lihat [Model & API key](#model--api-key).
 - **Tempel API key apa pun** — Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, atau router (9router, OmniRoute, LiteLLM, lokal); jenis & formatnya dideteksi otomatis. Konfigurasi agen dirampingkan: setiap request ±55% lebih kecil.
 - **Subagen hemat** — Explore, Plan, dan lainnya otomatis memakai model ringan dari koneksi yang sama (**Claude Haiku**, **Gemini Flash**, …) dengan effort rendah.
 - **Izin 1-tap** — *Izinkan / Selalu / Tolak*. *Selalu* berlaku per pola perintah (mis. `npm test *`), bukan untuk semua Bash.
@@ -192,6 +192,7 @@ Tangkapan layar mengikuti tema GitHub-mu: tema gelap atau terang.
 - **Agen bisa bertanya** — pertanyaan pilihan dijawab dengan sekali tap.
 - **Kirim gambar** dari kamera atau galeri (maks. 4 per pesan).
 - **Checkpoint & rewind** ke kondisi sebelum prompt mana pun.
+- **Review diff per hunk** — komentari baris atau hunk lalu kirim sebagai satu pesan ke agen, atau batalkan satu hunk/file.
 - **Shell langsung** — `!npm test`, `!git status`, output di-stream ke HP.
 - **Mode Komputer** — sesi tanpa repo/worktree yang bisa membaca, mengedit, dan menjalankan perintah di seluruh PC, seperti `claude` biasa. Lihat [Mode Komputer](#mode-komputer).
 
@@ -203,6 +204,8 @@ Tangkapan layar mengikuti tema GitHub-mu: tema gelap atau terang.
 - **Dev server di latar belakang** — perintah setup/dev terdeteksi otomatis (npm / pnpm / yarn / …), log live, deteksi port.
 - **Preview di HP** lewat tunnel pribadi bertoken; HMR Vite/Next tetap berjalan.
 - **Screenshot + error console** dari Chrome/Edge headless di PC, lalu *Suruh agen perbaiki*.
+- **Terminal interaktif** (PTY) di HP — `vim`, `htop`, REPL, prompt login; baris tombol Esc/Tab/Ctrl/panah, sampai 4 tab per sesi. Shell tetap hidup saat layar ditutup.
+- **File explorer** — telusuri worktree, baca & edit file (dengan deteksi konflik), buat file baru, *Tanya agen* tentang file.
 - Agen bisa **melihat hasil UI-nya sendiri** (`dev_start`, `preview_screenshot`) untuk verifikasi.
 
 #### Git & GitHub
@@ -339,7 +342,8 @@ dikirim ke HP, jadi kamu tidak perlu membuka terminal codespace.
 
 | | |
 |---|---|
-| **Biaya** | Kuota gratis GitHub: 120 core-hour/bulan untuk akun Free (±60 jam runner 2-core), 180 untuk Pro. |
+| **Biaya** | Kuota gratis GitHub: 120 core-hour/bulan untuk akun Free (±60 jam runner 2-core), 180 untuk Pro. Perkiraan pemakaian bulan ini tampil di menu runner (dicatat runner sendiri; billing GitHub tidak bisa dibaca dengan izin `codespace`). |
+| **Lebih cepat** | Opsional: atur **prebuild** di setelan Codespaces fork-mu — runner baru menyala ±1 menit, bukan 3–5 menit. Lihat [`.devcontainer/README.md`](.devcontainer/README.md#prebuild-opsional-runner-baru-lebih-cepat). |
 | **Berhenti sendiri** | Setelah 30 menit tidak dipakai (bisa 15 menit – 2 jam, atau mati) — tidak ada agen/perintah/dev server berjalan dan aplikasi tidak dibuka. |
 | **Menyala lagi** | Otomatis saat kamu membuka runner di aplikasi (±30–60 detik). Sesi, worktree, dan riwayat tetap ada di `/workspaces/.snugcode`. |
 | **Fitur** | Sama dengan PC: agen, izin, Run & Preview (Chromium terpasang), git/PR, Web Push, update jarak jauh. |
@@ -370,13 +374,15 @@ Buka **Pengaturan PC → Model & API key** di aplikasi (atau `snugcode connect` 
 |---|---|---|
 | Anthropic (Claude API) | `sk-ant-api03-…` | Claude Agent SDK, langsung ke `api.anthropic.com` (prompt cache native) |
 | OpenAI | `sk-proj-…` | Codex (Responses API) |
-| Google Gemini API | `AIza…` | Claude Agent SDK + penerjemah format di proxy (thought signature Gemini 3 dijaga) |
+| Google Gemini API | `AIza…` | **Gemini CLI** resmi (ACP, format API asli; dipasang otomatis sekali). Bila Gemini CLI tidak bisa dipasang: Claude Agent SDK + penerjemah format di proxy |
 | OpenRouter | `sk-or-v1-…` | Claude Agent SDK lewat endpoint format Anthropic-nya (atau penerjemah) |
 | DeepSeek · Kimi · GLM | `sk-…` · `….…` | Claude Agent SDK lewat endpoint format Anthropic resmi mereka |
 | xAI · Groq | `xai-…` · `gsk_…` | Claude Agent SDK + penerjemah format |
 | Router / endpoint sendiri (9router, OmniRoute, LiteLLM, Ollama, …) | key + URL | dideteksi: format Anthropic → Claude Agent SDK; model GPT + Responses API → Codex; hanya OpenAI Chat → penerjemah |
 
-Semua koneksi tampil bersama di pemilih model (dikelompokkan per koneksi, dengan slider effort bila modelnya mendukung). Model yang sama bisa dipakai lewat beberapa koneksi; harness dipilih per model, dan bisa dipaksa ke Claude Agent SDK dengan env `SNUGCODE_ENGINE=claude`.
+Semua koneksi tampil bersama di pemilih model (dikelompokkan per koneksi, dengan slider effort bila modelnya mendukung). Model yang sama bisa dipakai lewat beberapa koneksi; harness dipilih per model ([`shared/engine-table.js`](shared/engine-table.js), lalu format endpoint), dan bisa dipaksa dengan env `SNUGCODE_ENGINE=claude|codex|gemini` (bila endpoint-nya mendukung).
+
+**Mengukur harness terbaik:** `npm run bench -- --models gemini:gemini-3.8-flash,openai:gpt-5.5` menjalankan tugas coding kecil yang sama (perbaiki bug, fitur baru, rename lintas file) di tiap engine untuk tiap model, menilainya dengan test, lalu mencetak tabel tingkat lulus, waktu, dan token beserta saran baris `engine-table.js`. Memakai koneksi & key di PC ini (token ditagihkan ke key-mu), di folder data sementara.
 
 > [!IMPORTANT]
 > **Langganan Claude Pro/Max** dan **login Gemini CLI / Antigravity** tidak boleh dipakai aplikasi pihak ketiga (ketentuan Anthropic & Google, 2026 — akun bisa diblokir/disuspend). snugcode menolak token langganan Claude dan memakai API key. Router yang meneruskan langganan semacam itu (mis. provider `cc/` atau `ag/` di 9router) tetap bisa disambungkan, tapi risikonya ada di akunmu.
@@ -439,9 +445,9 @@ flowchart LR
 | Kontrol | Fungsi |
 |---|---|
 | Tombol menu (kiri atas) atau geser dari tepi kiri | Drawer: sesi baru, beranda, sesi terbaru, ganti PC, akun & tema |
-| **Judul sesi** | Menu sesi: rincian branch/model, git, run, ganti model, simpan `.env`, hapus sesi |
+| **Judul sesi** | Menu sesi: rincian branch/model, git, run, **File**, **Terminal**, ganti model, simpan `.env`, hapus sesi |
 | Ikon *play* (kanan atas) | Run & Preview: dev server, log, screenshot, link preview |
-| Ikon *branch* (kanan atas) | Git: status, diff, commit, push, Pull Request (badge = jumlah file berubah) |
+| Ikon *branch* (kanan atas) | Git: status, diff (komentar per baris/hunk → *Kirim ke agen*, batalkan hunk/file), commit, push, Pull Request (badge = jumlah file berubah) |
 | **+** di composer | Lampiran & alat: kamera, galeri, mode rencana, mode shell, auto-izin, tinjau edit, aksi cepat |
 | **Nama model** di composer | Ganti model & effort di tengah sesi (berlaku mulai pesan berikutnya) |
 | Pil mode di atas input | Mode yang aktif (Rencana / Shell / Auto-izin); ketuk untuk mematikan |
@@ -539,6 +545,7 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 | `snugcode devices` | Daftar HP yang sudah dipasangkan |
 | `snugcode revoke <id\|all>` | Cabut akses HP (lalu `snugcode restart`; dari HP langsung berlaku) |
 | `snugcode status` | Ringkasan konfigurasi |
+| `snugcode keychain on\|off\|status` | Enkripsi `secrets.json` dengan kunci di keychain OS (macOS Keychain, Secret Service, DPAPI) |
 | `snugcode cloud` | Runner cloud tanpa PC (Codespaces/Docker): konfigurasi dari env, setelan lain dari HP |
 | `snugcode help` | Daftar perintah |
 
@@ -552,7 +559,7 @@ Semua data disimpan di `~/.snugcode` (bisa diganti dengan env `SNUGCODE_HOME`). 
 ```
 ~/.snugcode/
 ├── config.json          # nama PC, relay, model default, …
-├── secrets.json         # koneksi model (API key), token GitHub, PIN (hash), device secret HP
+├── secrets.json         # koneksi model (API key), token GitHub, PIN (hash), device secret HP (terenkripsi bila `snugcode keychain on`)
 ├── daemon.log           # log daemon latar belakang (daemon.pid, daemon.sock: proses & kanal terminal)
 ├── workspaces/
 │   └── <owner>__<repo>/
@@ -561,13 +568,14 @@ Semua data disimpan di `~/.snugcode` (bisa diganti dengan env `SNUGCODE_HOME`). 
 ├── sessions/            # index.json + riwayat event per sesi (JSONL)
 ├── env/                 # template .env per repo
 ├── bin/                 # cloudflared (diunduh otomatis), shim pnpm/yarn di bin/pm
-├── tools/               # corepack (dipasang sekali bila pnpm/yarn tidak ada)
+├── tools/               # corepack, Codex, Gemini CLI (masing-masing dipasang sekali saat pertama dibutuhkan)
 ├── claude/              # CLAUDE_CONFIG_DIR engine Claude, terpisah dari Claude Code pribadimu (termasuk plans/)
-└── codex/               # CODEX_HOME engine Codex: login ChatGPT & riwayat thread (Codex dipasang di tools/codex)
+├── codex/               # CODEX_HOME engine Codex: login ChatGPT & riwayat thread (Codex dipasang di tools/codex)
+└── gemini/              # GEMINI_CLI_HOME engine Gemini CLI (repo/ & computer/): setelan, instruksi, riwayat sesi
 ```
 
 Di runner Codespaces folder ini adalah `/workspaces/.snugcode` (bertahan saat codespace berhenti), ditambah
-`cloud.log` dan `install.log`. Di container Docker: volume `/data`.
+`cloud.log`, `install.log`, dan `runner-usage.json` (perkiraan core-jam). Di container Docker: volume `/data`.
 </details>
 
 ---
@@ -607,7 +615,10 @@ sequenceDiagram
 - **Aksi ke remote** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) selalu meminta izin, juga saat auto-izin aktif.
 - **Mode Komputer** melonggarkan batas worktree: baca & edit di seluruh PC lolos tanpa bertanya (Bash yang tidak read-only tetap bertanya). Folder data snugcode dan aksi ke remote tetap dijaga seperti di atas.
 
-- **Konfigurasi tool dari repo tidak dipercaya** — `.claude/settings.json` milik repo (hook, aturan izin, env, `apiKeyHelper`) **tidak** dimuat; hanya `CLAUDE.md` (dan `.claude/CLAUDE.md`) yang dibaca sebagai instruksi proyek. Mengubah `.claude/`, `.codex/`, `.mcp.json`, atau isi `.git/` selalu meminta izin, juga saat auto-izin, agar prompt injection tidak bisa memasang hook diam-diam.
+- **Konfigurasi tool dari repo tidak dipercaya** — `.claude/settings.json` milik repo (hook, aturan izin, env, `apiKeyHelper`) **tidak** dimuat; hanya `CLAUDE.md` (dan `.claude/CLAUDE.md`) yang dibaca sebagai instruksi proyek. Mengubah `.claude/`, `.codex/`, `.gemini/`, `.mcp.json`, atau isi `.git/` selalu meminta izin, juga saat auto-izin, agar prompt injection tidak bisa memasang hook diam-diam.
+- **Engine Gemini CLI** — folder kerja tidak pernah ditandai tepercaya, jadi `.gemini/settings.json` milik repo (server MCP, hook, `discoveryCommand`) tidak dijalankan; `GEMINI.md`/`AGENTS.md`/`CLAUDE.md` disisipkan snugcode sebagai instruksi. Gemini CLI tidak punya sandbox OS di Linux/Windows, jadi **perintah shell tetap bertanya walau auto-izin aktif**; edit file lewat snugcode (folder data ditolak, menunggu checkpoint).
+- **`secrets.json` terenkripsi (opsional)** — `snugcode keychain on` mengenkripsi isinya (XChaCha20-Poly1305) dengan kunci yang hanya ada di keychain OS. Backup, sinkronisasi cloud, atau disk yang dipinjam tidak membuka API key & token. Ini perlindungan saat diam: proses milik user yang sama yang boleh membuka keychain tetap bisa, jadi batas agen tetap kebijakan izin & sandbox.
+- **File explorer & terminal dari HP** — hanya di dalam folder sesi (folder data snugcode ditolak, symlink keluar disembunyikan); menyimpan file yang sudah berubah di PC ditolak (konflik hash). Terminal PTY berjalan sebagai user PC tanpa sandbox — sama seperti membuka terminal di PC itu, hanya lewat kanal E2EE.
 
 > [!WARNING]
 > Deteksi perintah push berbasis pola teks: ini pengaman dari kekeliruan agen, bukan sandbox. Di luar auto-izin, Bash berjalan tanpa sandbox setelah kamu menyetujuinya — baca perintahnya sebelum mengizinkan.
@@ -650,6 +661,8 @@ npm run typecheck                          # tsc --checkJs: daemon, shared, PWA,
 node test/e2e-phone.mjs                    # simulasi HP: pairing → sesi → agen → git
 npm run test:e2e                           # HP → relay dev → daemon → Agent SDK → mock router (tanpa key asli)
 npm run test:e2e:connections               # koneksi baru dari HP: endpoint OpenAI-only (penerjemah) & Codex (SNUGCODE_E2E_CODEX=<folder codex>)
+npm run test:e2e:gemini                    # engine Gemini CLI asli vs Gemini API tiruan (SNUGCODE_E2E_GEMINI=<bundle/gemini.js> atau =install)
+npm run bench -- --models <koneksi:model>  # benchmark engine per model (pakai key asli, lihat Model & API key)
 npm run test:e2e:cloud                     # runner cloud: provision → `snugcode cloud` → pairing otomatis → setelan dari HP
 npm run test:ui                            # PWA hasil build di Chrome + TUI di pseudo-terminal (setelah build:web)
 node test/worktree.it.mjs                  # skenario branch/worktree (butuh internet)
@@ -758,14 +771,15 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 - [x] Runner cloud tanpa PC (GitHub Codespaces / Docker), semua setelan dari HP
 - [x] Mode Komputer: agen dengan akses seluruh PC, dari HP maupun terminal
 - [x] Login ChatGPT & API key apa pun (deteksi otomatis), harness terbaik per model (Claude Agent SDK / Codex)
-- [ ] Engine Gemini CLI (ACP) untuk model Gemini & benchmark harness per model
+- [x] Engine Gemini CLI (ACP) untuk model Gemini & benchmark harness per model
 - [x] Sandbox OS untuk auto-izin, CSP PWA, login relay yang bisa dicabut, rilis bertag + rollback
 - [x] Notifikasi push saat runner cloud berhenti karena menganggur
-- [ ] Tampilan kuota Codespaces & prebuild untuk start runner yang lebih cepat
-- [ ] Integrasi keychain OS untuk `secrets.json`
-- [ ] Terminal interaktif (PTY) penuh di HP
-- [ ] Tunnel preview E2EE lewat relay sendiri
-- [ ] File explorer ringan & review diff per hunk
+- [x] Perkiraan kuota Codespaces & prebuild untuk start runner yang lebih cepat
+- [x] Integrasi keychain OS untuk `secrets.json`
+- [x] Terminal interaktif (PTY) penuh di HP
+- [x] File explorer ringan & review diff per hunk
+- [ ] Tunnel preview E2EE lewat relay sendiri — butuh origin terpisah dari PWA (kode preview satu origin bisa membaca secret perangkat) dan dukungan WebSocket HMR
+- [ ] Amazon Bedrock & Google Vertex AI (butuh penandatanganan SigV4 / OAuth di proxy)
 
 ---
 

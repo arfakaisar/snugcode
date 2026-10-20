@@ -6,10 +6,14 @@ import { store } from '../conn.js';
 import { app } from './state.js';
 import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, pop, mascot, toast, toggleItem, ui } from './dom.js';
 import { showGit } from './git.js';
+import { showFiles } from './files.js';
+import { showTerminal } from './terminal.js';
 import { pickModel } from './model-picker.js';
 import { Renderer } from './renderer.js';
 import { onProc, showRun } from './run.js';
 import { deleteSession, repoName, sessionSub, showSessions, tildify } from './sessions.js';
+
+const has = (m) => !!app.current.info?.caps?.includes(m);
 
 // ---------- Layar: sesi ----------
 export const QUICK = [
@@ -184,6 +188,8 @@ export function showSession(s) {
           tile('image', 'Galeri', () => (ui.closeSheet(), fileIn.click())),
           tile('play', 'Run', () => showRun()),
           tile('branch', 'Git', () => showGit()),
+          has('files') ? tile('folder', 'File', () => ((app.current.filesDir = ''), showFiles())) : null,
+          has('termOpen') ? tile('term', 'Terminal', () => showTerminal()) : null,
         ),
         h('div', { class: 'label' }, 'Mode'),
         h('div', { class: 'group' },
@@ -360,6 +366,14 @@ export function showSession(s) {
     input.value = t;
     submit();
   };
+  // Isi composer dari layar lain (mis. "Tanya agen" di file explorer) tanpa langsung mengirim.
+  app.current.compose = (t) => {
+    input.value = t + input.value;
+    autosize();
+    syncSend();
+    input.focus();
+    input.setSelectionRange(t.length, t.length);
+  };
   r.suggest = QUICK;
   r.onQuick = quick;
   send.onclick = submit;
@@ -432,6 +446,8 @@ export function sessionMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
       menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
+      has('files') ? menuItem({ icon: 'folder', t1: 'File', t2: 'jelajah, lihat & edit file', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
+      has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'shell interaktif di ' + (isComp ? 'PC' : 'worktree'), onclick: () => showTerminal() }) : null,
       menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
       (s.local || isComp) ? null : menuItem({
         icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',

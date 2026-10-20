@@ -12,3 +12,18 @@ snugcode di HP. Kamu tidak perlu melakukan apa pun di sini.
 - Repo yang dikerjakan agen ada di `/workspaces/.snugcode/workspaces/`, satu worktree per sesi.
 - Jangan hapus codespace ini dari GitHub bila masih dipakai; untuk berhenti memakai runner, hapus dari
   aplikasi (daftar mesin → ⋯ → Hapus) agar codespace, secret, dan mesinnya ikut terhapus.
+
+## Prebuild (opsional): runner baru lebih cepat
+
+Tanpa prebuild, membuat runner butuh ±3–5 menit (memasang Chromium, bubblewrap, dan snugcode). Dengan prebuild,
+semua itu sudah ada di snapshot dan runner menyala dalam ±1 menit. Prebuild diatur di setelan repo **fork**-mu
+(GitHub tidak menyediakan API untuk ini):
+
+1. Buka fork snugcode-mu → **Settings → Codespaces → Set up prebuild**.
+2. Branch `main`, konfigurasi `.devcontainer/devcontainer.json`, region yang sama dengan codespace-mu.
+3. Trigger: **On configuration change** (prebuild hanya dibuat ulang saat `.devcontainer/` berubah; snugcode
+   memperbarui dirinya sendiri setelah menyala).
+
+Snapshot prebuild memakai kuota penyimpanan Codespaces (gratis 15 GB-bulan untuk akun Free), dan setiap build
+memakai core-jam Actions. Pemakaian core-jam runner bulan ini (perkiraan) tampil di aplikasi: menu runner →
+Runner cloud.

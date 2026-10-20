@@ -149,7 +149,7 @@ const inlineTable = (o) =>
 
 // Folder data snugcode yang tidak boleh dibaca perintah agen (sandbox Codex menolaknya di tingkat OS).
 export function deniedPaths() {
-  return ['secrets.json', 'config.json', 'codex', 'claude', 'env', 'sessions', 'daemon.log'].map((p) => path.join(HOME, p));
+  return ['secrets.json', 'secrets.key', 'config.json', 'codex', 'claude', 'env', 'sessions', 'daemon.log'].map((p) => path.join(HOME, p));
 }
 
 // Sandbox OS Codex (bubblewrap/Landlock di Linux, Seatbelt di macOS) bisa tidak tersedia, mis. di
