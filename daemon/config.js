@@ -85,6 +85,30 @@ export function saveConfig(cfg) {
 export function loadSecrets() {
   return { devices: {}, pinFails: 0, ...readJson(SECRETS_FILE, {}) };
 }
+
+// Kunci pairing PIN: setelah 5 percobaan gagal, pairing dikunci sementara (15 menit, berlipat dua tiap
+// kunci berikutnya, maks ±16 jam), bukan permanen. Pairing yang berhasil / PIN baru membuka kunci.
+export const MAX_PIN_FAILS = 5;
+const PIN_LOCK_MS = 15 * 60 * 1000;
+export function resetPinLock(sec) {
+  sec.pinFails = 0;
+  delete sec.pinLockUntil;
+  delete sec.pinLockouts;
+}
+export const pinLockedUntil = (sec, now = Date.now()) => (sec.pinLockUntil > now ? sec.pinLockUntil : 0);
+/** Catat satu percobaan pairing. @returns {{ ok: true, left: number } | { ok: false, until: number }} */
+export function pinAttempt(sec, now = Date.now()) {
+  const until = pinLockedUntil(sec, now);
+  if (until) return { ok: false, until };
+  // Kunci sudah lewat (atau kunci permanen dari versi lama): mulai putaran baru.
+  if (sec.pinFails >= MAX_PIN_FAILS) sec.pinFails = 0;
+  sec.pinFails = (sec.pinFails || 0) + 1;
+  if (sec.pinFails >= MAX_PIN_FAILS) {
+    sec.pinLockouts = (sec.pinLockouts || 0) + 1;
+    sec.pinLockUntil = now + PIN_LOCK_MS * 2 ** Math.min(sec.pinLockouts - 1, 6);
+  }
+  return { ok: true, left: MAX_PIN_FAILS - sec.pinFails };
+}
 export function saveSecrets(sec) {
   writeJson(SECRETS_FILE, sec, 0o600);
 }

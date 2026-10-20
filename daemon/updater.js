@@ -61,6 +61,32 @@ export function getInstallInfo(cfg = loadConfig()) {
   };
 }
 
+// Kanal pembaruan instalasi npm: 'stable' (bawaan) = rilis GitHub bertag terbaru, 'main' = commit
+// terbaru di main. Selama repo belum punya rilis, 'stable' memakai main agar instalasi tetap mendapat
+// pembaruan. PACKAGE_SPEC yang sudah dipatok (mengandung '#') dipasang apa adanya.
+export const updateChannel = (cfg = {}) => ((process.env.SNUGCODE_UPDATE_CHANNEL || cfg.updateChannel) === 'main' ? 'main' : 'stable');
+const pinnedSpec = () => PACKAGE_SPEC.includes('#');
+const specAt = (ref) => (pinnedSpec() ? PACKAGE_SPEC : `${PACKAGE_SPEC}#${ref}`);
+
+/** a > b untuk versi semver sederhana ("v1.2.3", pra-rilis diabaikan). */
+export function semverGt(a, b) {
+  const p = (v) => String(v).replace(/^v/, '').split(/[-+]/)[0].split('.').map((x) => parseInt(x, 10) || 0);
+  const [x, y] = [p(a), p(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+/** Rilis terbaru di GitHub, atau null bila repo belum punya rilis. */
+async function latestRelease(sec) {
+  try {
+    const r = await githubApi('/releases/latest', sec);
+    return r.tag_name ? { tag: r.tag_name, name: r.name || r.tag_name } : null;
+  } catch (e) {
+    if (/ 404$/.test(e.message)) return null;
+    throw e;
+  }
+}
+
 async function githubApi(p, sec = {}) {
   const headers = { 'user-agent': 'snugcode', accept: 'application/vnd.github+json' };
   if (sec.githubToken) headers.authorization = 'Bearer ' + sec.githubToken;
@@ -106,6 +132,21 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
 
   // Pemasangan npm global
   try {
+    if (updateChannel(cfg) === 'stable' && !pinnedSpec()) {
+      const rel = await latestRelease(sec);
+      if (rel) {
+        return {
+          updateAvailable: semverGt(rel.tag, info.version),
+          currentCommit: 'v' + info.version,
+          latestCommit: rel.tag,
+          commitsBehind: null,
+          latestMessage: rel.name,
+          installType: 'npm',
+          channel: 'stable',
+          canRollback: !!cfg.previousSpec,
+        };
+      }
+    }
     const data = await githubApi('/commits/main', sec);
     const remoteSha = data.sha ? data.sha.slice(0, 7) : 'main';
     const latestMessage = data.commit?.message?.split('\n')[0] || '';
@@ -140,6 +181,8 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
       commitsBehind,
       latestMessage,
       installType: 'npm',
+      channel: 'main',
+      canRollback: !!cfg.previousSpec,
     };
   } catch (e) {
     return {
@@ -195,20 +238,46 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
     return { ok: true, commit, installType: 'git' };
   }
 
-  // Pemasangan npm global. Commit dibaca sebelum install supaya push yang masuk
-  // selama npm berjalan tetap terdeteksi sebagai pembaruan berikutnya.
-  const commit = await githubApi('/commits/main', sec)
-    .then((d) => d.sha?.slice(0, 7))
-    .catch(() => null);
-  await npmInstall(['install', '-g', PACKAGE_SPEC, '--include=optional']);
+  // Pemasangan npm global: rilis bertag (kanal stable) atau commit main yang dipatok. Commit dibaca
+  // sebelum install supaya push yang masuk selama npm berjalan tetap terdeteksi sebagai pembaruan berikutnya.
+  const rel = updateChannel(cfg) === 'stable' && !pinnedSpec() ? await latestRelease(sec).catch(() => null) : null;
+  const commit = rel
+    ? null
+    : await githubApi('/commits/main', sec)
+        .then((d) => d.sha?.slice(0, 7))
+        .catch(() => null);
+  const spec = rel ? specAt(rel.tag) : commit ? specAt(commit) : PACKAGE_SPEC;
+  // Versi yang sedang terpasang, untuk `snugcode update --rollback` bila versi baru bermasalah.
+  const previous = cfg.installedSpec || (cfg.installedCommit && cfg.installedCommit !== 'main' ? specAt(cfg.installedCommit) : null);
+  await installGlobal(spec);
+  if (previous && previous !== spec) cfg.previousSpec = previous;
+  cfg.installedSpec = spec;
+  if (commit) cfg.installedCommit = commit;
+  else if (rel) cfg.installedCommit = rel.tag;
+  else delete cfg.installedCommit; // dideteksi ulang dari waktu pemasangan
+  saveConfig(cfg);
+  return { ok: true, commit: rel?.tag || commit || 'terbaru', installType: 'npm' };
+}
+
+async function installGlobal(spec) {
+  await npmInstall(['install', '-g', spec, '--include=optional']);
   const globalRoot = await globalPackageRoot();
   verifyNativeBinary(globalRoot);
   syncAutostart(path.join(globalRoot, 'daemon', 'cli.js'));
+}
 
-  if (commit) cfg.installedCommit = commit;
-  else delete cfg.installedCommit; // dideteksi ulang dari waktu pemasangan
+// Kembali ke versi yang terpasang sebelum pembaruan terakhir (instalasi npm saja).
+export async function performRollback(cfg = loadConfig()) {
+  if (getInstallInfo(cfg).installType === 'git') throw new Error('Instalasi git: kembalikan versi dengan `git checkout <commit>` di folder snugcode.');
+  const prev = cfg.previousSpec;
+  if (!prev) throw new Error('Belum ada versi sebelumnya yang tercatat (rollback tersedia setelah satu kali update).');
+  await installGlobal(prev);
+  cfg.previousSpec = cfg.installedSpec || null;
+  if (!cfg.previousSpec) delete cfg.previousSpec;
+  cfg.installedSpec = prev;
+  cfg.installedCommit = prev.includes('#') ? prev.split('#').pop() : 'main';
   saveConfig(cfg);
-  return { ok: true, commit: commit || 'terbaru', installType: 'npm' };
+  return { ok: true, commit: cfg.installedCommit, installType: 'npm' };
 }
 
 // Kode keluar yang berarti "nyalakan lagi" bagi supervisor `snugcode cloud` (lihat cli.js).

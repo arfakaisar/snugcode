@@ -68,6 +68,11 @@ export class Conn {
         return this.emit('state', 'revoked');
       }
       if (ev.code === 4003) return this.emit('state', 'removed');
+      // "Keluar dari semua perangkat": token login dicabut relay, jadi login ulang.
+      if (ev.code === 4005) {
+        store.set('token', null);
+        return location.reload();
+      }
       this.reconnectTimer = setTimeout(() => !this.closedByUser && this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 15000);
     };
@@ -134,7 +139,7 @@ export class Conn {
         this.startAuth();
         return;
       case 'pair_err':
-        return this.pairDone?.({ ok: false, reason: f.reason });
+        return this.pairDone?.({ ok: false, reason: f.reason, until: f.until });
       case 'e':
         return this.onMessage(this.channel.open(f));
     }

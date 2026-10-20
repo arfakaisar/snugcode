@@ -43,6 +43,12 @@ jobs:
           cache: npm
       - run: npm ci && npm ci --prefix relay
       - run: npm run build:web
+      # Sandbox OS (bubblewrap + socat) untuk Bash auto-izin engine Claude dan sandbox Codex: butuh user
+      # namespace tanpa batasan AppArmor.
+      - name: Siapkan sandbox OS
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Jalankan relay dev
         env:
           WRANGLER_SEND_METRICS: 'false'
@@ -50,13 +56,13 @@ jobs:
           (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && exit 0; sleep 1; done
           cat wrangler.log; exit 1
+      - run: npm run test:e2e:relay
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
       # Koneksi multi-provider: endpoint OpenAI-only lewat penerjemah (Claude Agent SDK) dan model GPT
       # lewat Codex app-server asli (sandbox bubblewrap butuh user namespace tanpa batasan AppArmor).
       - name: Siapkan Codex untuk uji koneksi
         run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           mkdir -p "$RUNNER_TEMP/codex" && cd "$RUNNER_TEMP/codex" && echo '{"private":true}' > package.json
           npm install --no-audit --no-fund --include=optional "$(node -p "require('$GITHUB_WORKSPACE/daemon/codex-version.json').spec")"
       - run: npm run test:e2e:connections

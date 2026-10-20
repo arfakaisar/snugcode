@@ -6,9 +6,11 @@
 # Model (API key / login ChatGPT) dan login GitHub diatur dari aplikasi HP (atau env SNUGCODE_API_KEY). Platform yang menyalakan container
 # saat dibutuhkan (mis. Fly.io): SNUGCODE_IDLE_EXIT=1 membuat container keluar setelah
 # SNUGCODE_IDLE_MINUTES (bawaan 30) tidak dipakai.
+# bubblewrap + socat: sandbox OS untuk perintah agen saat auto-izin. Butuh user namespace; container tanpa
+# izin itu tetap jalan (snugcode mendeteksinya dan memberi tahu di sesi).
 FROM node:22-bookworm-slim
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates chromium procps curl openssh-client python3 \
+  && apt-get install -y --no-install-recommends git ca-certificates chromium procps curl openssh-client python3 bubblewrap socat \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp/src
 COPY package.json package-lock.json ./

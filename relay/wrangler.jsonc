@@ -15,6 +15,10 @@
       { "name": "PENDING", "class_name": "Pending" }
     ]
   },
+  // Rate limit per IP untuk login & pendaftaran mesin (relay/src/index.js: limited).
+  "ratelimits": [
+    { "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }
+  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Hub", "Pending"] }
   ],

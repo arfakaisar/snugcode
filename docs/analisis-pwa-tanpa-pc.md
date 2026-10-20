@@ -27,7 +27,7 @@ Dokumentasi pengguna ada di README → *Tanpa PC: runner cloud*; detail teknis d
 **Yang masih terbuka:**
 1. Perilaku idle timeout Codespaces saat agen bekerja lama tanpa interaksi editor (risiko §8.1). Runner memakai
    `idle_timeout_minutes` 240 sebagai pengaman dan menghentikan dirinya sendiri saat benar-benar menganggur.
-2. Fase 4 yang belum dikerjakan: tampilan kuota (API billing), notifikasi "runner berhenti", dan prebuild codespace.
+2. Fase 4 yang belum dikerjakan: tampilan kuota (API billing; token scope `codespace` tidak cukup untuk billing) dan prebuild codespace (diatur di repo fork pengguna). Notifikasi "runner berhenti" sudah ada (2026-10-20: Web Push sebelum runner menghentikan dirinya).
 3. Fase 5 (opsional) belum dimulai: provider Fly/Cloudflare Containers, terminal PTY, file explorer, Mode Ringan.
 
 ### Implementasi vs rencana

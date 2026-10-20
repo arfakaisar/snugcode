@@ -2,38 +2,31 @@
 // (model Claude & endpoint format Anthropic/OpenAI) atau Codex (model GPT: login ChatGPT / Responses
 // API) — mengubah pesannya menjadi event ringkas untuk HP, dan menyimpan riwayatnya. Izin,
 // checkpoint, dan tool dev snugcode sama untuk kedua engine.
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { SESSIONS_DIR, CLAUDE_DIR, HOME, WORKSPACES, SESSION_INDEX, IPC_PATH, writeJson, readSessionIndex } from './config.js';
+import { SESSIONS_DIR, CLAUDE_DIR, WORKSPACES, SESSION_INDEX, writeJson, readSessionIndex } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startProxy } from './proxy.js';
-import { resolveModelEffort, lightModel, parseModelId, nativeEffortModel } from '../shared/models.js';
-import { splitRef, isClaudeId } from '../shared/providers.js';
 import { resolveRoute, authHeaders, knownRefs, allConnections, getConn } from './providers.js';
-import { CodexAgent, codexCommand, installCodex, codexArgs, codexEnv, readOnlyActions, sandboxWorks } from './codex.js';
-import { subagents } from './agents.js';
 import { todosFromInput, todoText } from '../shared/events.js';
-import { findNativeBinary, missingBinaryMessage } from './nativebin.js';
-import { SNUGCODE_SYSTEM_PROMPT, snugcodePrompt, codexPrompt } from './prompt.js';
+import { PLANS_DIR, isInside, isSensitivePath, isProtectedRepoPath, SECRET_CMD_RE, toolPaths, isLocalUrl, isRemoteWrite, escapesSandbox, neverAlways, suggestedRules, ruleText, ruleMatches } from './permissions.js';
+import { AGENT_TOOLS, widenToolInput, isClaudeModel, startClaudeAgent } from './engine-claude.js';
+import { startCodexAgent, decideCodex } from './engine-codex.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
 import { openTunnel } from './tunnel.js';
 import { snapshot, rewind } from './checkpoint.js';
 import { restoreEnv, detectProject } from './project.js';
-import { devToolsServer, SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtools.js';
+import { SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtools.js';
 import { closeBrowser } from './browser.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BRIDGE = path.join(ROOT, 'daemon', 'mcp-bridge.js');
-// Diteruskan ke SDK lewat settings.plansDirectory, jadi lokasinya pasti (bukan ~/.claude milik pengguna).
-const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const OUT_LIMIT = 4000;
+
+export { isSensitivePath, toolPaths, isRemoteWrite, suggestedRules, ruleMatches, AGENT_TOOLS, widenToolInput };
 
 // Proses claude dibiarkan hidup di antara prompt (streaming input): prompt berikutnya langsung
 // diproses tanpa spawn ulang + resume transcript. Dimatikan setelah menganggur selama ini, dan
@@ -53,95 +46,6 @@ const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const FILE_TOOLS = new Set([...READ_TOOLS, ...EDIT_TOOLS]);
 
-// Tool bawaan yang ditawarkan ke model (tool MCP snugcode ikut otomatis). Tanpa daftar ini
-// Claude Code mengirim ±27 tool (Cron*, ScheduleWakeup, SendMessage, Workflow, EnterWorktree, …)
-// yang tidak dipakai di snugcode: ±40 KB skema (≈10k token) di SETIAP request model.
-// Grep/Glob wajib disebut: build native menggantinya dengan Bash grep/find (output tak dibatasi).
-export const AGENT_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent', 'AskUserQuestion', 'ExitPlanMode', 'WebFetch', 'WebSearch'];
-// Tool yang bisa mengubah file: baru boleh jalan setelah checkpoint prompt tersimpan (hook PreToolUse),
-// termasuk yang lolos tanpa canUseTool lewat aturan "Selalu" (mis. Bash(npm test *)).
-const MUTATING_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|' + DEV_START;
-
-// Setiap langkah agen = satu request model (1–10 detik lewat router), jadi jumlah langkah yang
-// menentukan kecepatan. Model non-Claude (Gemini) membaca file 40–120 baris per langkah dan
-// mencari nama file dulu lalu mencari ulang isinya: 4–9× lebih banyak request untuk tugas yang
-// sama. Hook ini melebarkan Read potongan menjadi satu file utuh (bila muat sekali baca) dan
-// Grep tanpa output_mode menjadi baris yang cocok + nomor baris. Izin tetap lewat canUseTool.
-const WIDEN_MATCHER = 'Read|Grep';
-const WIDEN_MAX_BYTES = 64 * 1024; // ±16k token: jauh di bawah batas token Read Claude Code
-const WIDEN_MAX_LINES = 2000; // batas baris bawaan Read tanpa limit
-const GREP_HEAD_LIMIT = 100;
-const NO_WIDEN_EXT = /\.(pdf|ipynb|png|jpe?g|gif|webp|bmp|ico|svg)$/i;
-// Model Claude: cc/…, claude-… tanpa provider, atau claude-… lewat provider lain (ag/claude-sonnet-4-6).
-const isClaudeModel = (id) => {
-  const p = parseModelId(id || '');
-  return (p.conn === 'router' && nativeEffortModel(p.provider, p.base)) || isClaudeId(p.base);
-};
-
-/** Input tool yang dilebarkan, atau null bila dibiarkan apa adanya. */
-export function widenToolInput(tool, input, cwd) {
-  if (!input || typeof input !== 'object') return null;
-  if (tool === 'Read') {
-    if (input.offset == null && input.limit == null) return null;
-    if (typeof input.file_path !== 'string' || NO_WIDEN_EXT.test(input.file_path)) return null;
-    const file = path.resolve(cwd, input.file_path);
-    if (isSensitivePath(file)) return null;
-    let buf;
-    try {
-      if (fs.statSync(file).size > WIDEN_MAX_BYTES) return null;
-      buf = fs.readFileSync(file);
-    } catch {
-      return null;
-    }
-    if (buf.includes(0)) return null; // biner
-    let lines = 1;
-    for (const b of buf) if (b === 10 && ++lines > WIDEN_MAX_LINES) return null;
-    const { offset, limit, ...rest } = input;
-    return rest;
-  }
-  if (tool === 'Grep' && !input.output_mode) {
-    return { ...input, output_mode: 'content', '-n': true, head_limit: input.head_limit ?? GREP_HEAD_LIMIT };
-  }
-  return null;
-}
-
-// Folder data snugcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
-// dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
-// Pengecualian: worktree sesi, folder plans, dan BACA folder config Claude milik agen sendiri
-// (output tool besar disimpan Claude Code di sana lalu dibaca kembali). Menulis ke folder config
-// Claude tetap ditolak: settings.json di sana bisa memasang hook yang lolos dari sistem izin.
-const isInside = (p, dir) => {
-  const rel = path.relative(dir, p);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-};
-export const isSensitivePath = (p, { write = false } = {}) =>
-  isInside(p, HOME) && !isInside(p, WORKSPACES) && !isInside(p, PLANS_DIR) && (write || !isInside(p, CLAUDE_DIR));
-const SECRET_CMD_RE = /secrets\.json|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|env|bin|tools)\b/i;
-
-// Path yang disentuh tool file (Glob dengan pola absolut: bagian sebelum karakter glob pertama).
-export function toolPaths(tool, input = {}, cwd) {
-  const out = [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === 'string' && p);
-  if (tool === 'Glob' && typeof input.pattern === 'string' && path.isAbsolute(input.pattern)) out.push(input.pattern.split(/[*?[{]/)[0] || input.pattern);
-  return out.map((p) => path.resolve(cwd, p));
-}
-
-const isLocalUrl = (u) => {
-  try {
-    const url = new URL(u);
-    return /^https?:$/.test(url.protocol) && /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/i.test(url.hostname);
-  } catch {
-    return false;
-  }
-};
-
-// Perintah yang menulis ke remote selalu meminta izin, termasuk saat auto-izin aktif.
-// Opsi global git di depan subcommand ikut dikenali: `git -C dir push`, `git -c k=v push`.
-const GIT_PUSH_RE = /\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|--?[\w-]+(?:=(?:"[^"]*"|'[^']*'|\S+))?))*\s+push\b/i;
-const GH_WRITE_RE = /\bgh(?:\.exe)?\s+(?:pr\s+(?:create|merge)|release\s+create|repo\s+(?:create|delete|fork))\b/i;
-export const isRemoteWrite = (tool, input) => (tool === 'Bash' || tool === DEV_START) && (GIT_PUSH_RE.test(input?.command || '') || GH_WRITE_RE.test(input?.command || ''));
-// Push, perintah yang menyentuh kredensial, pertanyaan, dan rencana tidak pernah bisa "Selalu".
-const neverAlways = (tool, input) => isRemoteWrite(tool, input) || SECRET_CMD_RE.test(input?.command || '') || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
-
 // Gambar dari HP (kamera/galeri/tempel), sudah dikompres di sisi HP agar muat satu frame relay (~1MB).
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 function checkImages(images) {
@@ -154,17 +58,6 @@ function checkImages(images) {
 
 // Event riwayat yang disimpan di memori per sesi; yang lebih lama tetap ada di file .jsonl.
 const MEM_EVENTS = 3000;
-
-// Path binary Claude untuk query(): `claudeExecutable` di config.json (fallback manual)
-// atau binary dari paket platform SDK. Gagal lebih awal dengan pesan yang jelas.
-function claudeExecutable(cfg) {
-  if (cfg.claudeExecutable) {
-    if (!fs.existsSync(cfg.claudeExecutable)) throw new Error(`claudeExecutable di config.json tidak ditemukan: ${cfg.claudeExecutable}`);
-    return cfg.claudeExecutable;
-  }
-  if (!findNativeBinary(import.meta.url)) throw new Error(missingBinaryMessage(ROOT));
-  return undefined;
-}
 
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
@@ -236,57 +129,6 @@ function toolDetail(name, input = {}) {
   if (name === 'MultiEdit') return { edits: (input.edits || []).slice(0, 10).map((e) => ({ old: cut(e.old_string, 1500), new: cut(e.new_string, 1500) })) };
   if (name === 'Write') return { new: cut(input.content || '', 3000) };
   return undefined;
-}
-
-// Aturan "Selalu" dari saran Claude Code untuk permintaan izin ini, mis. Bash(npm test *):
-// cukup perintah sejenis yang lolos, bukan semua Bash. Tanpa saran aturan (Edit di luar
-// worktree, tool MCP, …) "Selalu" berlaku untuk seluruh tool tersebut.
-/** @returns {{ toolName: string, ruleContent: string }[]} */
-export function suggestedRules(tool, suggestions) {
-  return (Array.isArray(suggestions) ? suggestions : [])
-    .filter((s) => s?.type === 'addRules' && s.behavior === 'allow' && Array.isArray(s.rules))
-    .flatMap((s) => s.rules)
-    .filter((r) => r?.toolName === tool && typeof r.ruleContent === 'string' && r.ruleContent);
-}
-const ruleText = (r) => `${r.toolName}(${r.ruleContent})`;
-// Aturan "Bash(npm test *)" cocok dengan perintah berawalan "npm test" (dipakai engine Codex;
-// engine Claude mencocokkannya sendiri lewat settings.permissions.allow).
-export function ruleMatches(rule, command) {
-  const m = String(rule).match(/^Bash\((.*)\)$/);
-  if (!m) return false;
-  const pat = m[1].replace(/:\*$|\s*\*$/, '').trim();
-  const cmd = String(command || '').trim();
-  return !!pat && !/[;&|`$<>]/.test(cmd) && (cmd === pat || cmd.startsWith(pat + ' '));
-}
-
-
-// Antrean pesan user untuk query() dalam mode streaming input: satu proses claude per sesi
-// menerima prompt demi prompt lewat iterator ini.
-function inputQueue() {
-  const items = [];
-  let wake = null;
-  let done = false;
-  const poke = () => {
-    wake?.();
-    wake = null;
-  };
-  return {
-    push(m) {
-      items.push(m);
-      poke();
-    },
-    end() {
-      done = true;
-      poke();
-    },
-    async *[Symbol.asyncIterator]() {
-      for (;;) {
-        while (items.length) yield items.shift();
-        if (done) return;
-        await new Promise((r) => (wake = r));
-      }
-    },
-  };
 }
 
 export class Session extends EventEmitter {
@@ -604,218 +446,15 @@ export class Session extends EventEmitter {
     }
   }
 
+  // Engine per model (engine-claude.js / engine-codex.js); izin, checkpoint & event tetap milik sesi.
   async startAgent() {
     const route = resolveRoute(this.mgr.secrets, this.meta.model);
-    if (route.engine === 'codex') return this.startCodexAgent(route);
-    const cfg = this.mgr.config;
-    const sec = this.mgr.secrets;
-    const claudeExe = claudeExecutable(cfg);
-    const actualModel = route.model;
-    const effort = /** @type {import('@anthropic-ai/claude-agent-sdk').EffortLevel | null} */ (route.effort);
-    // Subagen & tugas utilitas: model ringan dari koneksi yang sama (Haiku / Flash, lihat lightModel).
-    const light = lightModel(this.meta.model, knownRefs(sec, route.conn.id));
-    const lightId = splitRef(resolveModelEffort(light.id).actualModel).id;
-    const proxy = this.mgr.proxy;
-    const baseUrl = proxy ? await proxy.ready().catch(() => null) : null;
-    if (!baseUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
-    // Proses claude hanya memegang token lokal untuk koneksi ini; key asli disuntikkan oleh proxy.
-    const authToken = this.mgr.tokenFor(route.conn, route.wire);
-    const key = ['claude', claudeExe, lightId, baseUrl, authToken].join('|');
-    const cur = this.agent;
-    if (cur && !cur.dead && cur.key === key) {
-      clearTimeout(cur.idle);
-      cur.idle = null;
-      try {
-        if (cur.model !== actualModel) await cur.q.setModel(actualModel);
-        cur.model = actualModel;
-        // null = effort bawaan model ("auto").
-        if (cur.effort !== effort) await cur.q.applyFlagSettings({ effortLevel: effort });
-        cur.effort = effort;
-        return cur;
-      } catch (e) {
-        this.mgr.log('! ganti model di proses berjalan gagal, proses dibuat ulang: ' + e.message);
-      }
-    }
-    this.closeAgent();
-
-    const env = { ...process.env };
-    for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_EFFORT_LEVEL|CLAUDE_CODE_SUBAGENT_MODEL|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)/.test(k)) delete env[k];
-    Object.assign(env, {
-      ANTHROPIC_BASE_URL: baseUrl,
-      ANTHROPIC_AUTH_TOKEN: authToken,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: lightId,
-      // _FORCE: tanpa ini subagen bawaan (Explore, …) tetap memakai model utama.
-      CLAUDE_CODE_SUBAGENT_MODEL: lightId,
-      CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
-      CLAUDE_CONFIG_DIR: CLAUDE_DIR,
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      // Proses panjang lewat dev_start; Bash/Agent latar belakang hanya menambah skema & giliran liar.
-      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
-      // Output Bash (npm install/test, build) yang masuk konteks dibatasi; bawaan Claude Code 30k karakter.
-      BASH_MAX_OUTPUT_LENGTH: process.env.BASH_MAX_OUTPUT_LENGTH || '15000',
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'snugcode/0.1',
-      GIT_TERMINAL_PROMPT: '0',
-      GCM_INTERACTIVE: 'never',
-    });
-    // pnpm/yarn tetap ada untuk Bash agen walau tidak terpasang global (bila shim sudah disiapkan).
-    Object.assign(env, await toolchainEnv('', env));
-
-    const input = inputQueue();
-    const q = query({
-      prompt: input,
-      options: {
-        cwd: this.meta.cwd,
-        env,
-        ...(claudeExe ? { pathToClaudeCodeExecutable: claudeExe } : {}),
-        model: actualModel,
-        ...(effort ? { effort } : {}),
-        resume: this.meta.claudeSessionId || undefined,
-        includePartialMessages: true,
-        // 'default': Write/Edit ikut lewat canUseTool (checkpoint, mode tinjau edit, folder data);
-        // auto-izin & "Selalu" tetap meloloskannya tanpa bertanya.
-        // Mode rencana diatur dari HP/terminal saja, jadi agen tidak boleh masuk sendiri.
-        permissionMode: this.meta.plan ? 'plan' : 'default',
-        settingSources: ['project'],
-        settings: { plansDirectory: PLANS_DIR, ...(this.allowRules.size ? { permissions: { allow: [...this.allowRules] } } : {}) },
-        tools: AGENT_TOOLS,
-        disallowedTools: ['EnterPlanMode'],
-        agents: subagents(),
-        mcpServers: { snugcode: devToolsServer(this) },
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: snugcodePrompt({ computer: !!this.meta.computer }) },
-        canUseTool: (tool, toolInput, opts) => this.askPermission(tool, toolInput, opts),
-        hooks: {
-          PreToolUse: [
-            { matcher: MUTATING_MATCHER, hooks: [(h) => this.beforeTool(h)] },
-            { matcher: WIDEN_MATCHER, hooks: [async (h) => this.widenTool(h)] },
-          ],
-        },
-        stderr: (d) => this.mgr.log('[claude] ' + d.trim()),
-      },
-    });
-    const agent = {
-      kind: 'claude',
-      key,
-      q,
-      input,
-      model: actualModel,
-      effort,
-      streamed: new Set(),
-      currentMsgId: null,
-      dead: false,
-      idle: null,
-      lastUsed: Date.now(),
-      loop: /** @type {Promise<void> | null} */ (null),
-      // Gambar dikirim sebagai blok konten pesan user.
-      push({ text, images = [] }) {
-        const content = images.length ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(text ? [{ type: 'text', text }] : [])] : text;
-        input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
-      },
-      interrupt: () => q.interrupt(),
-      setPlan: (on) => q.setPermissionMode(on ? 'plan' : 'default').catch(() => {}),
-      close() {
-        input.end();
-        try {
-          q.close();
-        } catch {}
-      },
-    };
-    this.agent = agent;
-    agent.loop = this.consume(agent);
-    return agent;
+    return route.engine === 'codex' ? startCodexAgent(this, route) : startClaudeAgent(this, route);
   }
 
-  // Engine Codex (model GPT): satu proses `codex app-server` per sesi, dipakai ulang antar prompt.
-  // Model & effort berlaku per prompt, jadi ganti model tidak membuat proses baru.
-  async startCodexAgent(route) {
-    const cfg = this.mgr.config;
-    let cmd = codexCommand(cfg);
-    if (!cmd) {
-      this.emitEvent({ k: 'note', d: '◆ Memasang Codex untuk model ini (sekali saja, ±1–2 menit)…' });
-      cmd = await installCodex(cfg);
-      this.emitEvent({ k: 'note', d: '✓ Codex terpasang' });
-    }
-    const proxy = this.mgr.proxy;
-    const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
-    // API key / router: Codex hanya melihat proxy lokal + token lokal. ChatGPT: login milik Codex sendiri.
-    const token = route.wire === 'responses' ? this.mgr.tokenFor(route.conn, 'responses') : null;
-    if (token && !proxyUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
-    const computer = !!this.meta.computer;
-    // Mode rencana = profil sandbox read-only milik proses (codexArgs); berganti mode = proses baru. Override
-    // sandbox per giliran tidak dipakai: tersimpan di thread dan menimpa profil snugcode di giliran berikutnya.
-    const plan = !!this.meta.plan;
-    const key = ['codex', cmd.join(' '), route.conn.id, route.wire, token, proxyUrl, computer, plan].join('|');
-    const cur = this.agent;
-    if (cur && !cur.dead && cur.key === key) {
-      clearTimeout(cur.idle);
-      cur.idle = null;
-      cur.setRoute(route);
-      return cur;
-    }
-    this.closeAgent();
-    const env = codexEnv(await toolchainEnv('', { ...process.env }), { ...(token ? { SNUGCODE_CODEX_TOKEN: token } : {}), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
-    const sandbox = await sandboxWorks(cmd);
-    if (!sandbox && !this.mgr.warnedSandbox) {
-      this.mgr.warnedSandbox = true;
-      this.emitEvent({ k: 'note', d: '◆ Sandbox OS tidak tersedia di mesin ini (mis. container tanpa user namespace): perintah Codex berjalan tanpa sandbox, izin tetap lewat snugcode.' });
-    }
-    const args = codexArgs({
-      provider: token ? { baseUrl: proxyUrl + '/v1', envKey: 'SNUGCODE_CODEX_TOKEN' } : null,
-      computer,
-      plan,
-      sandbox,
-      mcp: { command: process.execPath, args: [BRIDGE], env: { SNUGCODE_IPC: IPC_PATH, SNUGCODE_BRIDGE: this.mgr.bridgeToken(this) } },
-    });
-    const agent = new CodexAgent(this, { cmd, args, env, route, instructions: codexPrompt({ computer }), log: (m) => this.mgr.log(m) });
-    agent.key = key;
-    this.agent = agent;
-    try {
-      await agent.start();
-    } catch (e) {
-      agent.close();
-      if (this.agent === agent) this.agent = null;
-      throw new Error('Codex gagal dimulai: ' + e.message);
-    }
-    return agent;
-  }
-
-  // Keputusan izin untuk permintaan Codex, memakai kebijakan yang sama dengan engine Claude.
-  // kind: 'command' | 'file' | 'question' | 'permissions'.
-  async decideCodex(kind, p) {
-    if (kind === 'command') {
-      const input = { command: p.command };
-      // Membaca folder data snugcode tidak pernah lolos otomatis (penting bila sandbox OS tidak tersedia).
-      const sensitive = (p.actions || []).some((a) => a?.path && isSensitivePath(path.resolve(this.meta.cwd, String(a.path))));
-      const special = isRemoteWrite('Bash', input) || SECRET_CMD_RE.test(p.command) || sensitive;
-      // Perintah baca saja (cat/ls/rg …) lolos seperti di Claude Code; sandbox menolak folder data.
-      if (!special && readOnlyActions(p.actions)) return 'accept';
-      if (!special && [...this.allowRules].some((r) => ruleMatches(r, p.command))) return 'accept';
-      const suggestions = Array.isArray(p.amendment) && p.amendment.length ? [{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: p.amendment.join(' ') + ' *' }] }] : undefined;
-      const r = await this.askPermission('Bash', input, { suggestions, title: p.reason || undefined });
-      return r.behavior === 'allow' ? 'accept' : 'decline';
-    }
-    if (kind === 'file') {
-      const cwd = this.meta.cwd;
-      const paths = (p.changes || []).map((c) => path.resolve(cwd, String(c.path || '')));
-      if (paths.some((x) => isSensitivePath(x, { write: true }))) return 'decline';
-      if (this.cpReady) await this.cpReady;
-      const inside = paths.length > 0 && (this.meta.computer || paths.every((x) => isInside(x, cwd)));
-      if (!this.meta.plan && ((inside && !this.meta.askEdits) || this.meta.auto)) return 'accept';
-      const diff = (p.changes || []).map((c) => c.diff || '').join('\n');
-      const r = await this.requestUser('Edit', { file_path: paths.map((x) => path.relative(cwd, x) || x).join(', '), old_string: '', new_string: diff }, { title: p.reason || undefined });
-      return r.behavior === 'allow' ? 'accept' : 'decline';
-    }
-    if (kind === 'question') {
-      const qs = p.questions || [];
-      const questions = qs.map((q) => ({ question: q.question, header: q.header, multiSelect: false, options: (q.options || []).map((o) => ({ label: o.label, description: o.description || '' })) }));
-      const r = await this.requestUser('AskUserQuestion', { questions }, {});
-      const given = r.behavior === 'allow' ? r.updatedInput?.answers || {} : {};
-      return Object.fromEntries(qs.map((q) => [q.id, { answers: given[q.question] != null ? [String(given[q.question])] : [] }]));
-    }
-    // Izin tambahan (jaringan / tulis di luar worktree) yang diminta agen.
-    const r = await this.requestUser('Izin', { command: [p.reason, JSON.stringify(p.permissions || {})].filter(Boolean).join('\n') }, {});
-    return r.behavior === 'allow';
+  // Keputusan izin untuk permintaan Codex (dipanggil CodexAgent), lihat engine-codex.js.
+  decideCodex(kind, p) {
+    return decideCodex(this, kind, p);
   }
 
   // Hook PreToolUse untuk tool yang bisa mengubah file. Berjalan juga untuk tool yang lolos lewat
@@ -1003,7 +642,9 @@ export class Session extends EventEmitter {
     const secretCmd = (tool === 'Bash' || tool === DEV_START) && SECRET_CMD_RE.test(input?.command || '');
     const shotUrl = tool === SCREENSHOT ? input?.url : null;
     const shotFile = shotUrl && !/^https?:/i.test(shotUrl);
-    const needsUser = isPush || secretCmd || shotFile || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
+    // Konfigurasi tool di repo (.claude/, .codex/, .mcp.json, .git/) dan perintah di luar sandbox selalu bertanya.
+    const protectedEdit = write && paths.some((p) => isProtectedRepoPath(p, cwd));
+    const needsUser = isPush || secretCmd || shotFile || protectedEdit || escapesSandbox(tool, input) || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
     // Mode rencana: agen menulis draf rencananya ke folder plans milik Claude (bukan worktree).
     const planFile = this.meta.plan && ['Write', 'Edit'].includes(tool) && path.resolve(String(input?.file_path || '')).startsWith(PLANS_DIR + path.sep);
     const readInside = READ_TOOLS.has(tool) && (this.meta.computer || paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR)));
@@ -1012,7 +653,9 @@ export class Session extends EventEmitter {
     const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && (this.meta.computer || paths.every((p) => isInside(p, cwd))) && !this.meta.askEdits && !this.meta.plan;
     // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
     if (!safe && this.cpReady) await this.cpReady;
-    if (!needsUser && (planFile || safe || editInside || this.meta.auto || this.alwaysAllow.has(tool))) return allow;
+    // Auto-izin untuk Bash hanya bila proses agen ini memang berjalan dengan sandbox (atau sandbox tidak didukung).
+    const auto = this.meta.auto && !(tool === 'Bash' && this.agent?.unsandboxedAuto);
+    if (!needsUser && (planFile || safe || editInside || auto || this.alwaysAllow.has(tool))) return allow;
     return this.requestUser(tool, input, opts);
   }
 

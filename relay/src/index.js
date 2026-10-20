@@ -7,6 +7,7 @@
 //   Pending (1 DO per kode login) : menghubungkan login GitHub di browser
 //                                   dengan daemon yang sedang menunggu.
 import { DurableObject } from 'cloudflare:workers';
+import { SECURITY_HEADERS, PAGE_HEADERS } from './headers.js';
 
 const enc = new TextEncoder();
 
@@ -57,13 +58,21 @@ const json = (data, status = 200) =>
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
-function page(title, body) {
+function page(title, body, status = 200) {
   return new Response(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>` +
       `<body style="background:#0b0e14;color:#c9d1d9;font:15px/1.6 ui-monospace,monospace;padding:32px 16px;max-width:560px;margin:auto">` +
       `<h2 style="color:#7ee787">${esc(title)}</h2>${body}</body>`,
-    { headers: { 'content-type': 'text/html; charset=utf-8' } },
+    { status, headers: { 'content-type': 'text/html; charset=utf-8', ...PAGE_HEADERS } },
   );
+}
+
+// Aset PWA lewat env.ASSETS: security header ditambahkan (aset langsung dari worker alias memakai _headers).
+async function asset(env, request) {
+  const res = await env.ASSETS.fetch(request);
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!headers.has(k)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 // Frame biner PC <-> relay: [panjang cid 1B][cid ASCII][payload terenkripsi]. HP hanya
@@ -82,11 +91,14 @@ const dec = new TextDecoder();
 const hub = (env, sub) => env.HUB.get(env.HUB.idFromName('u:' + sub));
 const pending = (env, code) => env.PENDING.get(env.PENDING.idFromName('p:' + code));
 const USER_TTL = 30 * 24 * 3600 * 1000;
+// Batas mesin per akun (PC + runner cloud): mencegah Hub tumbuh tanpa batas.
+const MAX_MACHINES = 20;
 
 // extra: { kind: 'cloud', provider: 'codespace' | 'container' } untuk runner cloud (tanpa PC).
 async function registerMachine(env, user, name, extra = {}) {
   const mid = randomId(9);
-  await hub(env, user.id).fetch('https://hub/register', { method: 'POST', body: JSON.stringify({ mid, name, ...extra }) });
+  const r = await hub(env, user.id).fetch('https://hub/register', { method: 'POST', body: JSON.stringify({ mid, name, ...extra }) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Gagal mendaftarkan mesin');
   const token = await signToken(env, { kind: 'machine', sub: user.id, login: user.login, mid });
   return { token, mid, login: user.login };
 }
@@ -112,10 +124,22 @@ const MAX_CLOUD = 3;
 // Runner cloud: repo yang di-fork pengguna untuk Codespaces (berisi .devcontainer snugcode).
 const runnerRepo = (env) => env.RUNNER_REPO || 'arfakaisar/snugcode';
 
-async function authUser(env, request) {
-  const h = request.headers.get('authorization') || '';
-  const p = await verifyToken(env, h.replace(/^Bearer\s+/i, ''));
-  return p && p.kind === 'user' ? p : null;
+// Token user sah = tanda tangan benar, jenis 'user', punya akun (sub), dan tidak dicabut lewat
+// "Keluar dari semua perangkat" (iat sebelum revokedBefore akun itu). Token lama tanpa iat dianggap 0.
+async function userFromToken(env, token) {
+  const p = await verifyToken(env, token);
+  if (!p || p.kind !== 'user' || !p.sub) return null;
+  const r = await hub(env, p.sub).fetch('https://hub/valid?iat=' + (+p.iat || 0));
+  return r.ok ? p : null;
+}
+const authUser = (env, request) => userFromToken(env, (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''));
+
+// Rate limit per IP untuk endpoint yang membuat state (binding opsional `LIMITER`, lihat wrangler.jsonc).
+async function limited(env, request, scope) {
+  if (!env.LIMITER) return false;
+  const ip = request.headers.get('cf-connecting-ip') || 'local';
+  const { success } = await env.LIMITER.limit({ key: scope + ':' + ip });
+  return !success;
 }
 
 export default {
@@ -127,6 +151,10 @@ export default {
     // Login selalu di alamat utama: callback OAuth App GitHub hanya boleh satu host.
     if (legacy && path === '/auth/login') return Response.redirect(env.PUBLIC_URL + path + url.search, 302);
 
+    if (!devAuth && ['/auth/login', '/auth/machine/start', '/api/machines/provision'].includes(path) && (await limited(env, request, path))) {
+      return path.startsWith('/api/') || request.method === 'POST' ? json({ error: 'Terlalu banyak permintaan. Coba lagi sebentar lagi.' }, 429) : page('Terlalu banyak permintaan', '<p>Coba lagi dalam satu menit.</p>', 429);
+    }
+
     // ---------- Login GitHub (web flow) ----------
     if (path === '/auth/login') {
       // gh: token GitHub ber-scope `codespace` untuk PWA (membuat & menyalakan runner Codespaces).
@@ -134,10 +162,26 @@ export default {
       const kind = k === 'machine' || k === 'gh' ? k : 'user';
       if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Mode dev', '<p>Runner Codespaces butuh OAuth App GitHub (GITHUB_CLIENT_ID).</p>');
       const pc = url.searchParams.get('pc') || '';
+      // Menautkan PC ke akun butuh klik konfirmasi: link dari orang lain (kode milik PC mereka) tidak
+      // bisa diam-diam mendaftarkan PC itu ke akun yang sudah pernah mengizinkan OAuth App ini.
+      if (kind === 'machine' && url.searchParams.get('confirm') !== '1') {
+        const r = await pending(env, pc).fetch('https://p/peek');
+        if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
+        const { name } = await r.json();
+        const next = new URL(url);
+        next.searchParams.set('confirm', '1');
+        return page(
+          'Hubungkan PC?',
+          `<p>PC <b>${esc(name)}</b> (kode <code>${esc(pc)}</code>) minta ditautkan ke akun GitHub-mu.</p>` +
+            `<p>Lanjutkan hanya bila kode ini sama dengan yang tampil di terminal PC-mu sendiri. Bila kamu menerima link ini dari orang lain, tutup halaman ini.</p>` +
+            `<p><a href="${esc(next.pathname + next.search)}" style="display:inline-block;background:#7ee787;color:#0b0e14;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Ya, hubungkan PC ini</a></p>`,
+        );
+      }
       if (devAuth && !env.GITHUB_CLIENT_ID) {
         return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
       }
-      const state = await signToken(env, { kind, pc, n: randomId(), exp: Date.now() + 10 * 60 * 1000 });
+      // Jenis 'state' terpisah: token state terlihat di URL dan tidak boleh lolos sebagai token user.
+      const state = await signToken(env, { kind: 'state', for: kind, pc, n: randomId(), exp: Date.now() + 10 * 60 * 1000 });
       const gh = new URL('https://github.com/login/oauth/authorize');
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', url.origin + '/auth/callback');
@@ -152,8 +196,8 @@ export default {
       try {
         if (path === '/auth/callback') {
           const st = await verifyToken(env, url.searchParams.get('state'));
-          if (!st) return page('Login kedaluwarsa', '<p>Silakan ulangi dari awal.</p>');
-          ({ kind, pc } = st);
+          if (!st || st.kind !== 'state') return page('Login kedaluwarsa', '<p>Silakan ulangi dari awal.</p>');
+          ({ for: kind, pc } = st);
           user = await githubUser(env, url.searchParams.get('code'), url.origin + '/auth/callback');
         } else {
           kind = url.searchParams.get('kind');
@@ -175,11 +219,16 @@ export default {
         const r = await pending(env, pc).fetch('https://p/claim', { method: 'POST', body: JSON.stringify({ user }) });
         if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>');
         const { name } = await r.json();
-        const result = await registerMachine(env, user, name);
+        let result;
+        try {
+          result = await registerMachine(env, user, name);
+        } catch (e) {
+          return page('PC tidak bisa ditambahkan', `<p>${esc(e.message)}</p>`, 409);
+        }
         await pending(env, pc).fetch('https://p/result', { method: 'POST', body: JSON.stringify(result) });
         return page('PC terhubung ✓', `<p>PC <b>${esc(name)}</b> sekarang terhubung ke akun <b>@${esc(user.login)}</b>.</p><p>Kembali ke terminal untuk menyelesaikan setup. Tab ini boleh ditutup.</p>`);
       }
-      const token = await signToken(env, { kind: 'user', sub: user.id, login: user.login, exp: Date.now() + USER_TTL });
+      const token = await signToken(env, { kind: 'user', sub: user.id, login: user.login, iat: Date.now(), exp: Date.now() + USER_TTL });
       return Response.redirect(url.origin + '/#login=' + encodeURIComponent(token), 302);
     }
 
@@ -217,14 +266,25 @@ export default {
       const name = String(body.name || 'Cloud').trim().slice(0, 60) || 'Cloud';
       const { machines } = await (await hub(env, u.sub).fetch('https://hub/machines')).json();
       if (machines.filter((m) => m.kind === 'cloud').length >= MAX_CLOUD) return json({ error: `Maksimal ${MAX_CLOUD} runner cloud per akun. Hapus yang lama dulu.` }, 409);
-      return json(await registerMachine(env, { id: u.sub, login: u.login }, name, { kind: 'cloud', provider }));
+      try {
+        return json(await registerMachine(env, { id: u.sub, login: u.login }, name, { kind: 'cloud', provider }));
+      } catch (e) {
+        return json({ error: e.message }, 409);
+      }
+    }
+    // Cabut semua token login akun ini (semua HP/browser harus login ulang). Pairing PC tidak berubah.
+    if (path === '/api/logout-all' && request.method === 'POST') {
+      const u = await authUser(env, request);
+      if (!u) return json({ error: 'unauthorized' }, 401);
+      const r = await hub(env, u.sub).fetch('https://hub/revoke', { method: 'POST' });
+      return new Response(r.body, r);
     }
     // Runner cloud yang sedang menyiapkan diri (codespace: pasang paket, menyalakan daemon) melaporkan
     // tahapnya dengan token mesinnya sendiri; PWA menampilkannya selama runner belum tersambung.
     if (path === '/api/runner/status' && request.method === 'POST') {
       const h = request.headers.get('authorization') || '';
       const p = await verifyToken(env, h.replace(/^Bearer\s+/i, ''));
-      if (!p || p.kind !== 'machine') return json({ error: 'unauthorized' }, 401);
+      if (!p || p.kind !== 'machine' || !p.sub || !p.mid) return json({ error: 'unauthorized' }, 401);
       const body = await request.json().catch(() => ({}));
       const boot = { stage: String(body.stage || '').slice(0, 20), step: String(body.step || '').slice(0, 20), msg: String(body.msg || '').slice(0, 400), at: Date.now() };
       const r = await hub(env, p.sub).fetch('https://hub/boot', { method: 'POST', body: JSON.stringify({ mid: p.mid, boot }) });
@@ -241,18 +301,19 @@ export default {
     // ---------- WebSocket ----------
     if (path === '/ws/machine' || path === '/ws/phone') {
       if (request.headers.get('upgrade') !== 'websocket') return json({ error: 'expected websocket' }, 426);
-      const p = await verifyToken(env, url.searchParams.get('token'));
       if (path === '/ws/machine') {
-        if (!p || p.kind !== 'machine') return json({ error: 'unauthorized' }, 401);
+        const p = await verifyToken(env, url.searchParams.get('token'));
+        if (!p || p.kind !== 'machine' || !p.sub || !p.mid) return json({ error: 'unauthorized' }, 401);
         return hub(env, p.sub).fetch(new Request('https://hub/ws?role=m&mid=' + encodeURIComponent(p.mid), request));
       }
-      if (!p || p.kind !== 'user') return json({ error: 'unauthorized' }, 401);
+      const p = await userFromToken(env, url.searchParams.get('token'));
+      if (!p) return json({ error: 'unauthorized' }, 401);
       const mid = url.searchParams.get('mid') || '';
       return hub(env, p.sub).fetch(new Request('https://hub/ws?role=p&mid=' + encodeURIComponent(mid), request));
     }
 
     if (path === '/api/health') return json({ ok: true, devAuth, runnerRepo: runnerRepo(env), ...(legacy ? { legacy: true, publicUrl: env.PUBLIC_URL } : {}) });
-    return env.ASSETS.fetch(request);
+    return asset(env, request);
   },
 };
 
@@ -270,6 +331,7 @@ export class Pending extends DurableObject {
       return json({ ok: true });
     }
     if (expired) return json({ status: 'expired' }, 404);
+    if (path === '/peek') return rec.claimed ? json({ error: 'sudah dipakai' }, 409) : json({ name: rec.name });
     if (path === '/claim') {
       if (rec.claimed) return json({ error: 'sudah dipakai' }, 409);
       await st.put('rec', { ...rec, claimed: true });
@@ -312,8 +374,19 @@ export class Hub extends DurableObject {
 
     if (url.pathname === '/register') {
       const { mid, name, kind, provider } = await request.json();
+      if (Object.keys(machines).length >= MAX_MACHINES) return json({ error: `Maksimal ${MAX_MACHINES} mesin per akun. Hapus mesin lama dari aplikasi dulu.` }, 409);
       machines[mid] = { name, createdAt: Date.now(), lastSeen: null, ...(kind === 'cloud' ? { kind, provider } : {}) };
       await this.ctx.storage.put('machines', machines);
+      return json({ ok: true });
+    }
+    if (url.pathname === '/valid') {
+      const before = Number(await this.ctx.storage.get('revokedBefore')) || 0;
+      return (+url.searchParams.get('iat') || 0) >= before ? json({ ok: true }) : json({ error: 'revoked' }, 401);
+    }
+    if (url.pathname === '/revoke') {
+      await this.ctx.storage.put('revokedBefore', Date.now());
+      // HP yang sedang tersambung langsung diminta login ulang.
+      for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment()?.role === 'p') ws.close(4005, 'logged-out');
       return json({ ok: true });
     }
     if (url.pathname === '/machines') {

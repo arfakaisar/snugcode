@@ -77,6 +77,23 @@ assert.match(res3.d, /kredensial|tidak boleh/);
 await waitFor((e) => e.k === 'done');
 ok('Read ~/.snugcode/secrets.json ditolak walau auto-izin: ' + res3.d.slice(0, 80));
 
+// Auto-izin: Bash berjalan di sandbox OS yang menolak membaca folder data (bila sandbox tersedia).
+const { sandboxSupport } = await import('../daemon/sandbox.js');
+const support = await sandboxSupport();
+events.length = 0;
+await conn.call('send', { id: s.id, text: 'BASHSECRET sekarang' });
+const res5 = await waitFor((e) => e.k === 'result' || e.k === 'perm');
+if (support.ok) {
+  assert.equal(res5.k, 'result', 'Bash auto-izin lolos tanpa bertanya');
+  assert.doesNotMatch(JSON.stringify(res5), /ROUTER-KEY-ASLI|machineToken/);
+  assert.match(res5.d, /Permission denied|No such file/);
+  ok('Bash auto-izin di sandbox OS: `cat <data>/s*.json` ditolak (' + res5.d.split('\n')[0].slice(0, 60) + ')');
+} else {
+  if (res5.k === 'perm') await conn.call('perm', { id: s.id, pid: res5.pid, decision: 'deny' });
+  console.log('… sandbox OS tidak tersedia (' + support.reason + '): uji Bash auto-izin di sandbox dilewati');
+}
+await waitFor((e) => e.k === 'done');
+
 // Pesan > 1MB lewat kanal biner (dipecah per 256KB)
 fs.writeFileSync(path.join(repo, 'big.txt'), ('y'.repeat(99) + '\n').repeat(15000));
 const diff = await conn.call('diff', { id: s.id });
@@ -92,7 +109,9 @@ const done4 = await waitFor((e) => e.k === 'done');
 assert.ok(done4.ok);
 await sleep(300);
 const pids4 = claudePids();
-assert.deepEqual(pids4, pids2, 'proses claude tetap sama');
+// Auto-izin dengan sandbox OS memulai proses claude baru (opsi sandbox per proses); tanpa sandbox tetap sama.
+if (!support.ok) assert.deepEqual(pids4, pids2, 'proses claude tetap sama');
+assert.equal(pids4.length, 1, 'satu proses claude');
 assert.equal(routerLog.filter((l) => l.url.includes('/messages') && l.model).at(-1).model, 'claude-mock-2');
 ok('ganti model: proses claude yang sama langsung memakai model baru');
 

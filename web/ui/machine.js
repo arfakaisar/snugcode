@@ -178,7 +178,7 @@ export function showPin(m) {
     haptic(60);
     err.textContent =
       r.reason === 'pin' ? `PIN salah.${r.left != null ? ` Sisa ${r.left} percobaan.` : ''}`
-      : r.reason === 'locked' ? 'Pairing terkunci karena terlalu banyak PIN salah. Jalankan `snugcode pin` di PC.'
+      : r.reason === 'locked' ? `Terlalu banyak PIN salah. Coba lagi${r.until ? ' ' + new Date(r.until).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ' nanti'}, atau jalankan \`snugcode pin\` di PC untuk membukanya sekarang.`
       : r.reason === 'slow' ? 'Terlalu cepat, tunggu beberapa detik.'
       : r.reason === 'nopin' ? 'PC belum punya PIN. Jalankan `snugcode setup`.'
       : 'Gagal: ' + r.reason;
@@ -203,7 +203,8 @@ export function showPin(m) {
 
 // ---------- Pembaruan PC Otomatis (dari HP) ----------
 // Progress: pasang (balasan RPC update) → daemon restart → tersambung lagi (event ready).
-async function runUpdate(_btn, after) {
+// method: 'update' (versi terbaru) atau 'rollback' (versi sebelum pembaruan terakhir).
+async function runUpdate(_btn, after, method = 'update') {
   const where = here().split(' ')[0];
   const p = progress('pc-update', [
     { id: 'install', label: 'Mengunduh & memasang pembaruan', est: 90 },
@@ -211,17 +212,17 @@ async function runUpdate(_btn, after) {
     { id: 'reconnect', label: 'Menyambungkan lagi', est: 4 },
   ]);
   const closeBtn = h('button', { class: 'btn', style: 'margin-top:14px', onclick: () => ui.closeSheet() }, 'Tutup — tetap berjalan');
-  ui.sheet(ui.head('Memperbarui snugcode', { sub: app.current.m.name }), p.el, h('div', { class: 'fine' }, `Sesi yang sedang berjalan di ${where} dihentikan dulu agar file tidak terkunci.`), closeBtn);
+  ui.sheet(ui.head(method === 'rollback' ? 'Mengembalikan versi snugcode' : 'Memperbarui snugcode', { sub: app.current.m.name }), p.el, h('div', { class: 'fine' }, `Sesi yang sedang berjalan di ${where} dihentikan dulu agar file tidak terkunci.`), closeBtn);
   const cur = app.current;
   try {
     haptic(20);
-    const res = await app.conn.call('update');
+    const res = await app.conn.call(method);
     p.step('restart', res.commit ? 'versi ' + res.commit : '');
     cur.watch = (ev) => {
       if (ev === 'reconnecting' || ev === 'online' || ev === 'offline') p.step('reconnect');
       if (ev !== 'ready') return;
       cur.watch = null;
-      p.done('snugcode diperbarui');
+      p.done(method === 'rollback' ? 'snugcode kembali ke versi sebelumnya' : 'snugcode diperbarui');
       haptic(25);
       after?.();
       setTimeout(() => closeBtn.isConnected && ui.closeSheet(), 1500);
@@ -561,6 +562,10 @@ export async function updateMachineSheet() {
         ),
       ),
       btn,
+      // Versi baru bermasalah: kembali ke versi sebelum pembaruan terakhir (daemon yang mendukungnya saja).
+      st.canRollback && app.current.info?.caps?.includes('rollback')
+        ? h('button', { class: 'btn', style: 'margin-top:8px', onclick: async (e) => (await ui.confirm({ title: 'Kembali ke versi sebelumnya?', text: 'snugcode di PC dipasang ulang ke versi sebelum pembaruan terakhir, lalu daemon dimulai ulang.', ok: 'Kembalikan', icon: 'refresh' })) && runUpdate(e.currentTarget, () => ui.closeSheet(), 'rollback') }, 'Kembali ke versi sebelumnya')
+        : null,
     );
   } catch (e) {
     if (isOldDaemon(e)) return migrateSheet();

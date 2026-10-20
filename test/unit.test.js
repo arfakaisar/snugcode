@@ -70,7 +70,7 @@ test('groupModels: varian effort ag/ digabung jadi slider', async () => {
 test('updater: deteksi tipe instalasi dan versi paket', async () => {
   const { getInstallInfo, checkUpdate } = await import('../daemon/updater.js');
   const info = getInstallInfo();
-  assert.equal(info.version, '0.1.0');
+  assert.equal(info.version, JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
   assert.ok(['git', 'npm'].includes(info.installType));
   assert.ok(info.commit);
 
