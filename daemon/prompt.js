@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 // Tambahan system prompt snugcode, ditanam lewat
 // { type: 'preset', preset: 'claude_code', append: SNUGCODE_SYSTEM_PROMPT }.
 // Dikirim ulang di SETIAP request model (setiap langkah agen), jadi hanya berisi aturan yang
@@ -50,8 +53,24 @@ You are snugcode's agent with full access to the user's computer, like a termina
 - After visual UI changes, check the page with \`preview_screenshot\` (phone viewport) and fix console errors it reports. The user opens the app on their phone with the Preview button; never create tunnels.
 `.trim();
 
-export function snugcodePrompt({ computer = false } = {}) {
-  return computer ? SNUGCODE_COMPUTER_PROMPT : SNUGCODE_SYSTEM_PROMPT;
+export function snugcodePrompt({ computer = false, project = '' } = {}) {
+  return (computer ? SNUGCODE_COMPUTER_PROMPT : SNUGCODE_SYSTEM_PROMPT) + project;
+}
+
+// Instruksi proyek (CLAUDE.md) dimuat sendiri: setelan proyek Claude Code (.claude/settings.json) tidak
+// dimuat sama sekali karena bisa berisi hook, aturan izin, env, dan apiKeyHelper yang lolos dari
+// kebijakan snugcode (repo yang diklon bisa milik siapa saja). Dibaca saat proses agen dimulai.
+const PROJECT_FILES = ['CLAUDE.md', path.join('.claude', 'CLAUDE.md')];
+const PROJECT_MAX = 40 * 1024;
+export function projectInstructions(cwd) {
+  const parts = [];
+  for (const f of PROJECT_FILES) {
+    try {
+      const t = fs.readFileSync(path.join(cwd, f), 'utf8').trim();
+      if (t) parts.push(`Contents of ${f.replace(/\\/g, '/')} (project instructions, checked into the repository):\n\n${t.length > PROJECT_MAX ? t.slice(0, PROJECT_MAX) + '\n…(truncated)' : t}`);
+    } catch {}
+  }
+  return parts.length ? '\n\n# Project instructions\n' + parts.join('\n\n') : '';
 }
 
 // Engine Codex (developer instructions): aturan yang sama, disesuaikan dengan tool Codex

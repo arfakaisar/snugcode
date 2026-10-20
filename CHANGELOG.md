@@ -2,6 +2,45 @@
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 
+## 2026-10-20 — v0.2.0: pengamanan agen & relay, rilis bertag + rollback
+
+### Agen
+- **Sandbox OS saat auto-izin (engine Claude)** — `daemon/sandbox.js`. Sebelumnya Bash auto-izin hanya dijaga
+  regex, dan `cat ~/.snug*/s*.json` terbukti membaca API key (diuji dengan Agent SDK asli). Kini proses `claude`
+  sesi auto-izin memakai sandbox Claude Code (bubblewrap + socat / Seatbelt): folder data tidak terbaca, hook &
+  config git tidak bisa ditulis, worktree + cache paket + jaringan tetap jalan. Perintah yang minta keluar dari
+  sandbox selalu bertanya. Dukungan dideteksi sendiri (termasuk probe user namespace) karena Claude Code diam-diam
+  berjalan tanpa sandbox bila dependensi tidak ada; sesi memberi tahu bila tidak tersedia. Opsi `config.sandbox`
+  (`auto` | `always` | `off`) / `SNUGCODE_SANDBOX`. Runner Docker & Codespaces memasang bubblewrap + socat.
+- **Setelan proyek Claude Code tidak dimuat lagi** (`settingSources: []`): `.claude/settings.json` dari repo bisa
+  memasang hook, aturan izin, env, atau `apiKeyHelper` yang lolos dari kebijakan snugcode. `CLAUDE.md` dan
+  `.claude/CLAUDE.md` tetap dibaca sebagai instruksi proyek.
+- **Konfigurasi tool di repo dilindungi**: edit ke `.claude/`, `.codex/`, `.mcp.json`, dan `.git/` selalu bertanya
+  (kedua engine, juga saat auto-izin).
+- Refactor: `daemon/permissions.js` (kebijakan izin), `daemon/engine-claude.js`, `daemon/engine-codex.js`;
+  `sessions.js` turun dari 1.392 ke ±1.040 baris.
+
+### Relay & PWA
+- Token `state` OAuth punya jenis sendiri: sebelumnya token state di URL GitHub lolos sebagai token user
+  (akun bersama tanpa `sub`).
+- **Keluar dari semua perangkat** (Akun → menu; `POST /api/logout-all`): token login dicabut di relay.
+- Menautkan PC lewat link menampilkan halaman konfirmasi berisi nama & kode PC.
+- Maks 20 mesin per akun; rate limit per IP untuk login & pendaftaran mesin.
+- CSP ketat & security header untuk PWA (`relay/src/headers.js`); skrip tema dipindah dari inline ke `theme.js`;
+  font di-host sendiri (tanpa Google Fonts).
+
+### Daemon
+- Kunci PIN berbatas waktu (15 menit, berlipat dua, maks ±16 jam), bukan permanen sampai `snugcode pin`.
+- **Rilis bertag + rollback**: kanal `stable` (bawaan) memasang rilis GitHub terbaru, `main` commit terbaru (dipatok
+  ke SHA). `snugcode update --rollback` / tombol "Kembali ke versi sebelumnya" di HP. Workflow `Release` (tag
+  `vX.Y.Z`).
+- Runner cloud mengirim Web Push "runner dihentikan" sebelum berhenti karena menganggur.
+
+### Proyek
+- `LICENSE` (MIT), Dependabot, versi 0.2.0, Agent SDK 0.3.304.
+- Uji baru: `test/hardening.test.js`, `test/e2e-relay.mjs` (CI), skenario e2e Bash auto-izin di sandbox; CI
+  memasang bubblewrap + socat sehingga jalur sandbox benar-benar diuji.
+
 ## 2026-10-17 — Model apa pun, harness terbaik per model: login ChatGPT, API key otomatis, engine Codex
 
 Analisis & alasan desain: [`docs/analisis-harness-dan-provider.md`](docs/analisis-harness-dan-provider.md).

@@ -1,0 +1,34 @@
+# Rilis bertag untuk kanal pembaruan "stable" (daemon/updater.js): push tag vX.Y.Z yang sama dengan
+# "version" di package.json, misalnya:
+#   npm version minor   # menaikkan versi + commit + tag
+#   git push --follow-tags
+# Daemon kanal stable hanya memasang rilis (bukan setiap commit di main), dan bisa kembali ke versi
+# sebelumnya dengan `snugcode update --rollback` / tombol di aplikasi.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Tag sama dengan versi package.json
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          if [ "$v" != "$GITHUB_REF_NAME" ]; then echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $v"; exit 1; fi
+      - run: npm ci
+      - run: npm test
+      - name: Buat rilis GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag

@@ -531,10 +531,11 @@ Di `/model`, gunakan ↑↓ untuk memilih model dan ←→ untuk mengatur effort
 | `snugcode connect` / `disconnect <id>` | Daftar / hapus koneksi model |
 | `snugcode start` | Jalankan daemon di terminal ini |
 | `snugcode stop` / `restart` | Hentikan / restart daemon latar belakang |
-| `snugcode update` | Periksa dan pasang pembaruan |
+| `snugcode update` | Periksa dan pasang pembaruan (rilis bertag; `--channel main` untuk commit terbaru) |
+| `snugcode update --rollback` | Kembali ke versi sebelum pembaruan terakhir |
 | `snugcode autostart on\|off` | Jalankan di latar belakang + otomatis saat login |
 | `snugcode clean` | Pindai & bersihkan worktree / repo yatim |
-| `snugcode pin` | Ganti PIN dan buka kunci setelah PIN salah berkali-kali (lalu `snugcode restart`) |
+| `snugcode pin` | Ganti PIN dan buka kunci pairing sekarang juga (lalu `snugcode restart`) |
 | `snugcode devices` | Daftar HP yang sudah dipasangkan |
 | `snugcode revoke <id\|all>` | Cabut akses HP (lalu `snugcode restart`; dari HP langsung berlaku) |
 | `snugcode status` | Ringkasan konfigurasi |
@@ -593,18 +594,23 @@ sequenceDiagram
 ```
 
 - **Relay zero-knowledge** — tidak pernah melihat PIN, isi percakapan, kode, API key, login ChatGPT, atau token GitHub. Lalu lintas model langsung dari mesinmu ke provider, tidak lewat server snugcode.
-- **Brute-force dibatasi** — setelah 5 kali PIN salah, pairing terkunci sampai `snugcode pin` dijalankan di PC.
+- **Brute-force dibatasi** — setelah 5 kali PIN salah, pairing terkunci 15 menit (berlipat dua tiap kunci berikutnya, maks ±16 jam). `snugcode pin` di PC atau Ganti PIN dari HP lain membukanya langsung.
+- **Login relay bisa dicabut** — Akun → *Keluar dari semua perangkat* mencabut token login di semua HP & browser (mis. HP hilang). Menautkan PC lewat link selalu menampilkan halaman konfirmasi berisi nama & kode PC.
+- **PWA dengan CSP ketat** — tanpa skrip inline maupun skrip/font pihak ketiga (font di-host sendiri), sehingga token & secret perangkat di HP lebih sulit dicuri lewat XSS.
 - **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen. `GITHUB_TOKEN`/`GH_TOKEN` yang ada di environment (mis. dari Codespaces) dibuang saat daemon start, jadi tidak terwariskan ke agen, Bash, dev server, atau `!perintah`.
 - **Setelan dari HP** — model & API key, login ChatGPT, PIN, dan daftar HP bisa diatur dari aplikasi (Pengaturan PC). Key dikirim lewat kanal E2EE, divalidasi ke endpoint-nya dulu, dan tidak pernah dikembalikan ke klien.
 - **API key tidak pernah masuk ke proses agen.** Proses `claude` / Codex (dan perintah agen) hanya memegang token lokal acak per koneksi; loopback proxy (`127.0.0.1`) menukarnya dengan key asli. Request tanpa token itu ditolak, jadi program lain di PC tidak bisa memakai key-mu.
 - **`~/.snugcode` tertutup untuk agen** — Read/Write/Edit/Glob/Grep ke folder data (key, token, secret perangkat, template `.env`) selalu ditolak, juga saat auto-izin. Pengecualian hanya worktree sesi dan folder config Claude milik agen sendiri. Perintah Bash yang menyebut `secrets.json` selalu meminta izin.
+- **Sandbox OS untuk auto-izin (engine Claude)** — saat ⚡ auto-izin aktif, Bash agen berjalan di sandbox Claude Code (bubblewrap + socat di Linux, Seatbelt di macOS) yang menolak membaca folder data snugcode dan menulis hook/config git; worktree, cache paket, dan jaringan tetap bisa dipakai. Perintah yang minta keluar dari sandbox selalu bertanya. `localhost` milik PC tidak terjangkau dari dalam sandbox (pakai `dev_*`/Preview untuk dev server). Atur lewat `"sandbox": "auto" | "always" | "off"` di `config.json` (atau `SNUGCODE_SANDBOX`). Bila bubblewrap/socat belum terpasang (`sudo apt install bubblewrap socat`) atau Windows, sesi memberi tahu bahwa auto-izin berjalan tanpa sandbox.
 - **Tanpa izin hanya yang aman** — tool baca lolos otomatis hanya di dalam worktree sesi. Membaca di luar worktree dan `WebFetch` meminta izin (atau auto-izin), agar prompt injection dari README/issue tidak bisa diam-diam mengirim file ke luar.
 - **Sandbox OS untuk engine Codex** — perintah agen Codex berjalan di sandbox (bubblewrap/Seatbelt) yang menolak membaca folder data snugcode (`secrets.json`, login ChatGPT, template `.env`, riwayat); jaringan tetap boleh. Setiap perintah tetap lewat kebijakan izin snugcode yang sama. Bila sandbox OS tidak tersedia (container tanpa user namespace), aplikasi memberi tahu dan izin tetap berlaku.
 - **Aksi ke remote** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) selalu meminta izin, juga saat auto-izin aktif.
 - **Mode Komputer** melonggarkan batas worktree: baca & edit di seluruh PC lolos tanpa bertanya (Bash yang tidak read-only tetap bertanya). Folder data snugcode dan aksi ke remote tetap dijaga seperti di atas.
 
+- **Konfigurasi tool dari repo tidak dipercaya** — `.claude/settings.json` milik repo (hook, aturan izin, env, `apiKeyHelper`) **tidak** dimuat; hanya `CLAUDE.md` (dan `.claude/CLAUDE.md`) yang dibaca sebagai instruksi proyek. Mengubah `.claude/`, `.codex/`, `.mcp.json`, atau isi `.git/` selalu meminta izin, juga saat auto-izin, agar prompt injection tidak bisa memasang hook diam-diam.
+
 > [!WARNING]
-> `CLAUDE.md` dan `.claude/settings.json` dari repo ikut dimuat, termasuk hook di dalamnya. Pakai hanya untuk repo yang kamu percaya. Deteksi perintah push berbasis pola teks: ini pengaman dari kekeliruan agen, bukan sandbox.
+> Deteksi perintah push berbasis pola teks: ini pengaman dari kekeliruan agen, bukan sandbox. Di luar auto-izin, Bash berjalan tanpa sandbox setelah kamu menyetujuinya — baca perintahnya sebelum mengizinkan.
 
 ---
 
@@ -617,9 +623,9 @@ snugcode/
 ├── web/         # PWA (vanilla JS, tanpa framework)
 ├── shared/      # kriptografi (CPace, X25519, XChaCha20), model event & normalisasi model
 ├── scripts/     # build PWA ke relay, ikon, gambar dokumentasi
-├── test/        # unit, integrasi worktree, simulasi HP end-to-end, uji UI, runner cloud
+├── test/        # unit, pengaman (hardening), integrasi worktree, e2e HP/relay/UI, runner cloud
 ├── .devcontainer/  # runner Codespaces (`snugcode cloud` saat codespace menyala)
-├── .github/workflows/  # CI (3 OS + e2e) dan Deploy relay/PWA
+├── .github/workflows/  # CI (3 OS + e2e), Deploy relay/PWA, Release (tag vX.Y.Z)
 ├── Dockerfile   # runner di container (VPS, Fly.io, …)
 └── docs/        # gambar, GIF & mockup dokumentasi, analisis runner cloud
 ```
@@ -753,6 +759,8 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 - [x] Mode Komputer: agen dengan akses seluruh PC, dari HP maupun terminal
 - [x] Login ChatGPT & API key apa pun (deteksi otomatis), harness terbaik per model (Claude Agent SDK / Codex)
 - [ ] Engine Gemini CLI (ACP) untuk model Gemini & benchmark harness per model
+- [x] Sandbox OS untuk auto-izin, CSP PWA, login relay yang bisa dicabut, rilis bertag + rollback
+- [x] Notifikasi push saat runner cloud berhenti karena menganggur
 - [ ] Tampilan kuota Codespaces & prebuild untuk start runner yang lebih cepat
 - [ ] Integrasi keychain OS untuk `secrets.json`
 - [ ] Terminal interaktif (PTY) penuh di HP
@@ -763,7 +771,7 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 
 ## Lisensi
 
-[MIT](package.json)
+[MIT](LICENSE)
 
 <br>
 

@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { SECURITY_HEADERS } from '../relay/src/headers.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const out = path.join(root, 'relay', 'public');
@@ -19,8 +20,19 @@ await build({
   outfile: path.join(out, 'app.js'),
   logLevel: 'info',
 });
-const shell = ['index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
+const shell = ['index.html', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
+// Security header untuk aset yang disajikan langsung (worker alias); relay menambahkannya sendiri.
+fs.writeFileSync(path.join(out, '_headers'), '/*\n' + Object.entries(SECURITY_HEADERS).map(([k, v]) => `  ${k}: ${v}`).join('\n') + '\n');
+// Font di-host sendiri (lihat @font-face di style.css).
+const FONTS = {
+  'jetbrains-mono-400.woff2': '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2',
+  'jetbrains-mono-500.woff2': '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2',
+  'source-serif-4.woff2': '@fontsource-variable/source-serif-4/files/source-serif-4-latin-opsz-normal.woff2',
+  'source-serif-4-italic.woff2': '@fontsource-variable/source-serif-4/files/source-serif-4-latin-opsz-italic.woff2',
+};
+fs.mkdirSync(path.join(out, 'fonts'));
+for (const [name, src] of Object.entries(FONTS)) fs.copyFileSync(path.join(root, 'node_modules', src), path.join(out, 'fonts', name));
 // Nama cache service worker = hash isi aset: setiap deploy yang mengubah UI otomatis membuat
 // sw.js berbeda, sehingga HP memasang versi baru tanpa perlu menaikkan nomor versi manual.
 const hash = crypto.createHash('sha256');

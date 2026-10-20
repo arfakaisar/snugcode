@@ -16,7 +16,8 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- mock 9router (Anthropic Messages API, streaming) ----------
 // Prompt berisi WRITE -> tool_use Write; SLOW -> jawaban lambat; READSECRET -> Read secrets.json;
-// MARKDOWN -> jawaban markdown panjang; TODOS -> TodoWrite; WRITE2 -> tool_use Write ke hasil2.txt.
+// MARKDOWN -> jawaban markdown panjang; TODOS -> TodoWrite; WRITE2 -> tool_use Write ke hasil2.txt;
+// BASHSECRET -> Bash `cat <folder data>/s*.json`.
 export const routerLog = [];
 // Markdown panjang (judul, kode berbaris kosong, list) untuk menguji render bertahap.
 const MD = Array.from({ length: 12 }, (_, i) => `## Bagian ${i + 1}\n\nParagraf **tebal** dan \`kode\` nomor ${i + 1}.\n\n\`\`\`js\nconst x${i} = 1;\n\nconsole.log(x${i});\n\`\`\`\n\n- item a${i}\n- item b${i}`).join('\n\n');
@@ -101,6 +102,8 @@ export function startMockRouter(cwdRef, reply, { key } = {}) {
       if (/MARKDOWN/.test(lastText)) return sse(res, textMsg(model, MD));
       if (/TODOS/.test(lastText)) return sse(res, toolMsg(model, 'TodoWrite', { todos: [{ content: 'Baca kode', status: 'completed', activeForm: 'Membaca kode' }, { content: 'Ubah tombol', status: 'in_progress', activeForm: 'Mengubah tombol' }, { content: 'Uji', status: 'pending', activeForm: 'Menguji' }] }));
       if (/READSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Read', { file_path: cwdRef.secrets }));
+      // Glob shell: lolos dari daftar hitam regex, hanya sandbox OS yang bisa menolaknya.
+      if (/BASHSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Bash', { command: `cat ${path.dirname(cwdRef.secrets)}/s*.json`, description: 'baca' }));
       if (/WRITE2/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil2.txt', content: 'langsung\n' }));
       if (/WRITE/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil.txt', content: 'dibuat agen\n' }));
       return sse(res, textMsg(model, 'Halo dari mock router.'));

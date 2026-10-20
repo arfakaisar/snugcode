@@ -8,6 +8,11 @@ if ! command -v chromium >/dev/null 2>&1; then
   { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends chromium; } >> "$SNUGCODE_HOME/install.log" 2>&1 \
     || log "! Chromium gagal dipasang: screenshot preview tidak tersedia (lihat install.log)"
 fi
+# Sandbox OS untuk perintah agen saat auto-izin (lihat daemon/sandbox.js).
+if ! command -v bwrap >/dev/null 2>&1 || ! command -v socat >/dev/null 2>&1; then
+  { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends bubblewrap socat; } >> "$SNUGCODE_HOME/install.log" 2>&1 \
+    || log "! bubblewrap/socat gagal dipasang: perintah auto-izin berjalan tanpa sandbox OS"
+fi
 report installing "Memasang snugcode (sekali, ±1–3 menit)…" install
 if ! npm i -g "${SNUGCODE_PACKAGE:-github:arfakaisar/snugcode}" --include=optional --no-audit --no-fund --loglevel=error >> "$SNUGCODE_HOME/install.log" 2>&1; then
   report error "npm gagal memasang snugcode: $(tail -n 4 "$SNUGCODE_HOME/install.log" | tr '\n' ' ')"

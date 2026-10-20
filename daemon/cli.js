@@ -15,14 +15,14 @@ import util from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR, isCloud, scrubSecretEnv } from './config.js';
+import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR, isCloud, scrubSecretEnv, resetPinLock, pinLockedUntil } from './config.js';
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
 import { lightModel } from '../shared/models.js';
 import { keyCandidates, splitRef, ENGINE_LABEL, engineFor } from '../shared/providers.js';
 import { detectConnection, putConnection, mirrorLegacy, migrateLegacy, hasConnections, allConnections, connSummary } from './providers.js';
-import { checkUpdate, performUpdate } from './updater.js';
+import { checkUpdate, performUpdate, performRollback, updateChannel } from './updater.js';
 import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
@@ -176,7 +176,7 @@ async function setup() {
     const r = await fetch(cfg.relayUrl + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: cfg.machineName }) });
     if (!r.ok) throw new Error('Relay tidak bisa dihubungi: ' + r.status);
     const { code, url } = await r.json();
-    steps.push(`Tautkan PC ke akun GitHub-mu — buka:\n     ${c.b(url)}`);
+    steps.push(`Tautkan PC ke akun GitHub-mu — buka:\n     ${c.b(url)}\n     pastikan halaman itu menampilkan kode ${c.b(code)}`);
     tasks.push(
       (async () => {
         for (;;) {
@@ -229,7 +229,7 @@ async function setup() {
 
   if (pin) {
     sec.prs = Buffer.from(await pinToPrs(pin, cfg.machineId)).toString('hex');
-    sec.pinFails = 0;
+    resetPinLock(sec);
   }
 
   saveConfig(cfg);
@@ -244,7 +244,7 @@ async function resetPin() {
   if (!cfg.machineId) throw new Error('Belum setup.');
   const pin = await askPin();
   sec.prs = Buffer.from(await pinToPrs(pin, cfg.machineId)).toString('hex');
-  sec.pinFails = 0;
+  resetPinLock(sec);
   saveSecrets(sec);
   rl?.close();
   console.log(c.g('✓ PIN diganti dan kunci dibuka. (Daemon yang sedang berjalan perlu di-restart.)'));
@@ -346,7 +346,7 @@ async function start() {
   }
   const { Daemon } = await import('./server.js');
   console.log(c.b('snugcode') + c.d(` — ${cfg.machineName} · model ${cfg.model} · relay ${cfg.relayUrl}`));
-  if (sec.pinFails >= 5) console.log(c.r('! Pairing terkunci karena PIN salah berkali-kali. Jalankan `snugcode pin`.'));
+  if (pinLockedUntil(sec)) console.log(c.r(`! Pairing terkunci sampai ${new Date(pinLockedUntil(sec)).toLocaleTimeString()} karena PIN salah berkali-kali. \`snugcode pin\` membukanya sekarang.`));
   const d = new Daemon(cfg);
   d.start();
   const bye = () => Promise.resolve(d.stop()).finally(() => process.exit(0));
@@ -368,7 +368,7 @@ function status() {
     lightModel: cfg.model ? lightModel(cfg.model).id : null,
     github: cfg.githubLogin || null,
     devices: Object.keys(sec.devices).length,
-    pinLocked: sec.pinFails >= 5,
+    pinLocked: !!pinLockedUntil(sec),
   });
 }
 
@@ -500,7 +500,24 @@ async function cliRestart() {
 async function cliUpdate() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  console.log(c.b('Memeriksa pembaruan snugcode…'));
+  if (flags.channel) {
+    if (!['stable', 'main'].includes(flags.channel)) throw new Error('Kanal: stable (rilis bertag) atau main (commit terbaru).');
+    cfg.updateChannel = flags.channel;
+    saveConfig(cfg);
+    console.log(c.g(`✓ Kanal pembaruan: ${flags.channel}`));
+  }
+  if (flags.rollback) {
+    const wasRunning = await stopAndWait();
+    console.log(c.d(`Mengembalikan ke ${cfg.previousSpec || '(tidak ada)'}…`));
+    try {
+      const r = await performRollback(cfg);
+      console.log(c.g(`✓ Kembali ke versi sebelumnya (${r.commit}).`));
+    } finally {
+      if (wasRunning) console.log(c.g(`✓ Daemon dijalankan lagi (pid ${spawnDetached()}).`));
+    }
+    return;
+  }
+  console.log(c.b('Memeriksa pembaruan snugcode…') + c.d(` (kanal ${updateChannel(cfg)})`));
   const st = await checkUpdate(cfg, sec);
   if (!st.updateAvailable && !flags.force) {
     console.log(c.g('✓ snugcode sudah versi terbaru') + c.d(` (${st.currentCommit})`));
@@ -570,7 +587,8 @@ function help() {
   snugcode autostart on     jalankan daemon di latar belakang + saat login
   snugcode start | stop     jalankan / hentikan daemon
   snugcode restart          restart daemon di latar belakang
-  snugcode update           periksa & pasang pembaruan jarak jauh
+  snugcode update           periksa & pasang pembaruan (rilis bertag; --channel main|stable)
+  snugcode update --rollback  kembali ke versi sebelum pembaruan terakhir
   snugcode clean            pindai & bersihkan worktree / repo yatim
   snugcode pin              ganti PIN / buka kunci
   snugcode devices          HP yang terpasang;  snugcode revoke <id|all>
