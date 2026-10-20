@@ -27,7 +27,8 @@
  * @property {{ in: number, out: number, cr?: number, cw?: number }} [usage] token (k='done'); `in` termasuk cache,
  *                         cr = dibaca dari prompt cache, cw = ditulis ke cache (daemon lama tidak mengirimnya)
  * @property {number} [ctx]  isi konteks dalam persen (k='done')
- * @property {number} [cost] biaya USD (k='done')
+ * @property {number} [cost] biaya USD giliran ini (k='done')
+ * @property {number} [spent] total biaya USD sesi sejauh ini (k='done')
  * @property {string} [err]  alasan berhenti (k='done')
  * @property {*} [x]     detail tambahan (mis. cuplikan diff Edit/Write)
  */
@@ -108,6 +109,7 @@ export function doneParts(e) {
   if (pct != null) out.push(`cache ${pct}%`);
   if (e.ctx != null) out.push(`konteks ${e.ctx}%`);
   if (e.cost) out.push(`$${e.cost.toFixed(e.cost < 1 ? 3 : 2)}`);
+  if (e.spent && e.spent !== e.cost) out.push(`sesi $${e.spent.toFixed(e.spent < 1 ? 3 : 2)}`);
   return out;
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "snugcode",
-  "version": "0.3.0",
-  "description": "Remote coding agent (Claude Code harness + 9router) di PC-mu, dikendalikan dari HP.",
+  "version": "0.4.0",
+  "description": "Remote coding agent multi-model (Claude Agent SDK, Codex, Gemini CLI) di PC-mu atau di cloud, dikendalikan dari HP.",
   "type": "module",
   "bin": {
     "snugcode": "daemon/cli.js",

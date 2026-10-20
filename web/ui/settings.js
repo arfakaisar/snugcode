@@ -98,7 +98,7 @@ export async function connectionsSheet({ first = false, back, after } = {}) {
   const chatgpt = has('chatgptLogin') && !(info.connections || []).some((c) => c.kind === 'chatgpt');
   ui.sheet(
     ui.head(first ? 'Sambungkan model' : 'Model & API key', { sub: app.current.m.name, back }),
-    first ? h('div', { class: 'muted', style: 'margin-bottom:12px' }, 'Agen butuh model AI. Login ChatGPT, atau tempel API key milikmu — jenisnya dideteksi otomatis dan harness terbaik dipilih untuk tiap model.') : null,
+    first ? h('div', { class: 'muted', style: 'margin-bottom:12px' }, 'Agen butuh model AI. Login ChatGPT, atau tempel API key milikmu — jenisnya dideteksi otomatis dan snugcode memilih cara terbaik menjalankan tiap model. Tidak ada yang perlu diatur lagi.') : null,
     list,
     chatgpt
       ? h('button', { class: 'btn big', style: 'margin:4px 0 10px', onclick: () => chatgptSheet(() => connectionsSheet({ first, back, after }), after) }, ic('spark'), 'Login dengan ChatGPT')

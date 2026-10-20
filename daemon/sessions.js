@@ -12,6 +12,7 @@ import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoD
 import { startProxy } from './proxy.js';
 import { resolveRoute, authHeaders, geminiRoot, knownRefs, allConnections, getConn } from './providers.js';
 import { todosFromInput, todoText } from '../shared/events.js';
+import { permRisk, autonomyOf, autonomyFlags, AUTONOMY } from '../shared/risk.js';
 import { PLANS_DIR, isInside, isSensitivePath, isProtectedRepoPath, SECRET_CMD_RE, toolPaths, isLocalUrl, isRemoteWrite, escapesSandbox, neverAlways, suggestedRules, ruleText, ruleMatches } from './permissions.js';
 import { AGENT_TOOLS, widenToolInput, isClaudeModel, startClaudeAgent } from './engine-claude.js';
 import { startCodexAgent, decideCodex } from './engine-codex.js';
@@ -167,7 +168,7 @@ export class Session extends EventEmitter {
     this.live({ k: 'proc', ...p });
     if (p.status !== 'exited') return;
     if (this.tunnel?.name === p.name) this.closeTunnel();
-    if (!p.killed && p.code !== 0) this.mgr.notify(this, `✗ ${p.name} berhenti (exit ${p.code})`);
+    if (!p.killed && p.code !== 0) this.mgr.notify(this, `✗ ${p.name} berhenti (exit ${p.code})`, { minor: true });
   }
 
   // Siapkan dependency bila perlu (proses "setup"), lalu jalankan dev server.
@@ -306,11 +307,12 @@ export class Session extends EventEmitter {
     try {
       engine = resolveRoute(this.mgr.secrets, m.model).engine;
     } catch {}
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, autoLow: !!m.autoLow, autonomy: autonomyOf(m), spent: m.spentUsd || 0, budget: m.budgetUsd || 0, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
     if (e.k !== 'text') this.flushText();
+    if (e.k === 'done') this.account(e);
     const events = this.events;
     e.seq = ++this._lastSeq;
     e.ts = Date.now();
@@ -319,6 +321,39 @@ export class Session extends EventEmitter {
     if (persist) this.appendLog(e);
     this.emit('event', e);
     return e;
+  }
+
+  // Biaya: Agent SDK melaporkan total berjalan per proses (bukan per giliran), dan proses yang melanjutkan
+  // transcript mulai dari total tersimpan. Diubah menjadi biaya giliran ini (`cost`) + total sesi (`spent`),
+  // lalu dibandingkan dengan batas biaya sesi (meta.budgetUsd). Engine tanpa biaya (Codex/Gemini) dilewati.
+  account(e) {
+    if (typeof e.cost !== 'number' || !(e.cost >= 0)) return;
+    const m = this.meta;
+    const agent = this.agent;
+    const prev = agent && agent.lastCost != null ? agent.lastCost : m.costSeen ?? null;
+    const delta = prev != null && e.cost >= prev ? e.cost - prev : e.cost;
+    if (agent) agent.lastCost = e.cost;
+    m.costSeen = e.cost;
+    m.spentUsd = Math.round(((m.spentUsd || 0) + delta) * 1e6) / 1e6;
+    e.cost = delta || undefined;
+    e.spent = m.spentUsd;
+    if (m.budgetUsd > 0) {
+      const ratio = m.spentUsd / m.budgetUsd;
+      if (ratio >= 1) this.mgr.notify(this, `Batas biaya sesi $${m.budgetUsd} tercapai ($${m.spentUsd.toFixed(2)}). Prompt berikutnya ditahan sampai batas dinaikkan.`);
+      else if (ratio >= 0.8 && !m.budgetWarned) {
+        m.budgetWarned = true;
+        this.mgr.notify(this, `Biaya sesi sudah ${Math.round(ratio * 100)}% dari batas $${m.budgetUsd}.`);
+      }
+    }
+    this.mgr.saveIndex();
+  }
+
+  // Batas biaya sesi dalam USD (0 = tanpa batas). Dicek sebelum setiap prompt.
+  setBudget(usd) {
+    const v = Math.max(0, Math.min(10_000, Number(usd) || 0));
+    this.meta.budgetUsd = v || undefined;
+    this.meta.budgetWarned = v > 0 && (this.meta.spentUsd || 0) >= v * 0.8;
+    this.mgr.saveIndex();
   }
 
   // Delta teks dikumpulkan ~80ms agar tidak mengirim satu pesan per token.
@@ -373,12 +408,31 @@ export class Session extends EventEmitter {
     return this.trimmed && (this.events[0]?.seq ?? 0) > seq + 1;
   }
 
+  // Konteks risiko satu permintaan izin (lihat shared/risk.js).
+  permCtx(tool, input) {
+    const cwd = this.meta.cwd;
+    const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
+    const write = FILE_TOOLS.has(tool) && !READ_TOOLS.has(tool);
+    return {
+      push: isRemoteWrite(tool, input),
+      secret: (tool === 'Bash' || tool === DEV_START) && SECRET_CMD_RE.test(input?.command || ''),
+      escapes: escapesSandbox(tool, input),
+      protectedEdit: write && paths.some((p) => isProtectedRepoPath(p, cwd)),
+      outside: paths.length > 0 && !paths.every((p) => isInside(p, cwd)),
+      computer: !!this.meta.computer,
+    };
+  }
+
   permEvent(pid, p) {
     const { tool, input } = p;
     const rules = suggestedRules(tool, p.suggestions);
+    const ctx = this.permCtx(tool, input);
+    const risk = permRisk(tool, input, ctx);
     // Cakupan tombol "Selalu" untuk ditampilkan; tidak ada untuk aksi yang tidak pernah bisa "Selalu".
     const always = neverAlways(tool, input) ? undefined : rules.length ? rules.map((r) => r.ruleContent).join(', ') : shortName(tool);
-    return { pid, tool: shortName(tool), s: toolSummary(tool, input, this.meta.cwd), title: p.title, push: isRemoteWrite(tool, input), plan: tool === 'ExitPlanMode' || undefined, ask: tool === 'AskUserQuestion' ? input.questions : undefined, x: toolDetail(tool, input), always };
+    // Jaring pengaman yang terlihat: perubahan file di worktree sesi repo bisa dikembalikan (checkpoint per prompt).
+    const undo = !this.meta.computer && !ctx.push && !ctx.outside && (EDIT_TOOLS.has(tool) || tool === 'Bash' || tool === DEV_START) ? (EDIT_TOOLS.has(tool) ? 'file' : 'cmd') : undefined;
+    return { pid, tool: shortName(tool), s: toolSummary(tool, input, this.meta.cwd), title: p.title, push: ctx.push, plan: tool === 'ExitPlanMode' || undefined, ask: tool === 'AskUserQuestion' ? input.questions : undefined, x: toolDetail(tool, input), always, risk: risk || undefined, undo };
   }
 
   pendingPerms() {
@@ -393,6 +447,8 @@ export class Session extends EventEmitter {
     images = checkImages(images);
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
+    if (this.meta.budgetUsd > 0 && (this.meta.spentUsd || 0) >= this.meta.budgetUsd)
+      throw new Error(`Batas biaya sesi ini ($${this.meta.budgetUsd}) sudah tercapai ($${this.meta.spentUsd.toFixed(2)}). Naikkan batasnya di menu sesi untuk melanjutkan.`);
     // Model tanpa koneksi (runner baru, koneksi dihapus): pesan yang jelas sebelum prompt dicatat.
     resolveRoute(this.mgr.secrets, this.meta.model);
     if (!this.meta.title) this.meta.title = (text || 'gambar').slice(0, 80);
@@ -432,6 +488,13 @@ export class Session extends EventEmitter {
   // langsung diterapkan, karena setiap prompt punya checkpoint dan bisa di-rewind.
   setAskEdits(on) {
     this.meta.askEdits = !!on;
+    this.mgr.saveIndex();
+  }
+
+  // Preset otonomi (shared/risk.js): satu pilihan menggantikan kombinasi auto-izin + tinjau edit.
+  setAutonomy(level) {
+    if (!AUTONOMY.includes(level)) throw new Error('Tingkat otonomi tidak dikenal');
+    Object.assign(this.meta, autonomyFlags(level));
     this.mgr.saveIndex();
   }
 
@@ -682,6 +745,8 @@ export class Session extends EventEmitter {
     // Auto-izin untuk Bash hanya bila proses agen ini memang berjalan dengan sandbox (atau sandbox tidak didukung).
     const auto = this.meta.auto && !(tool === 'Bash' && this.agent?.unsandboxedAuto);
     if (!needsUser && (planFile || safe || editInside || auto || this.alwaysAllow.has(tool))) return allow;
+    // Preset "Perintah rutin otomatis": test/lint/build tanpa rangkaian perintah lolos tanpa bertanya.
+    if (!needsUser && this.meta.autoLow && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
     return this.requestUser(tool, input, opts);
   }
 
@@ -693,7 +758,11 @@ export class Session extends EventEmitter {
       const p = { resolve, tool, input, title: opts?.title, suggestions: opts?.suggestions };
       this.perms.set(pid, p);
       this.live({ k: 'perm', ...this.permEvent(pid, p) });
-      this.mgr.notify(this, tool === 'AskUserQuestion' ? 'Agen bertanya' : tool === 'ExitPlanMode' ? 'Rencana siap ditinjau' : `Butuh izin: ${tool}`, { perm: true });
+      // Isi notifikasi cukup untuk memutuskan dari layar kunci; risiko rendah/sedang bisa dijawab langsung
+      // dari tombol notifikasi (sw.js), risiko tinggi selalu membuka aplikasi.
+      const e = this.permEvent(pid, p);
+      const what = tool === 'AskUserQuestion' ? 'Agen bertanya' : tool === 'ExitPlanMode' ? 'Rencana siap ditinjau' : `Butuh izin ${e.tool}: ${String(e.s || '').split('\n')[0].slice(0, 120)}`;
+      this.mgr.notify(this, what, { perm: true, pid: e.risk && e.risk.level !== 'high' && !e.push ? pid : undefined, risk: e.risk?.level });
       opts?.signal?.addEventListener('abort', () => {
         if (this.perms.delete(pid)) resolve({ behavior: 'deny', message: 'dibatalkan' });
       });
