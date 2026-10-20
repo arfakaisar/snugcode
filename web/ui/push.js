@@ -34,7 +34,7 @@ export async function pushSubscription(create) {
 
 export async function syncPush(create) {
   const p = await pushSubscription(create).catch(() => null);
-  if (p && app.conn?.channel) await app.conn.call('pushSub', p).catch(() => {});
+  if (p && app.conn?.channel) await app.conn.call('pushSub', { ...p, level: store.get('pushLevel') || 'all' }).catch(() => {});
   return p;
 }
 
@@ -75,6 +75,23 @@ async function logoutAll() {
   showLogin();
 }
 
+// Seberapa sering HP ini diganggu: semua kabar, atau hanya izin, pertanyaan & selesai (mengurangi kelelahan
+// notifikasi). Disimpan per HP dan dikirim ke PC yang sedang tersambung (PC lain saat berikutnya tersambung).
+function pushLevelPicker() {
+  const cur = store.get('pushLevel') || 'all';
+  const set = (level) => {
+    store.set('pushLevel', level);
+    syncPush(false);
+    toast(level === 'important' ? 'Notifikasi: hanya izin, pertanyaan & selesai' : 'Notifikasi: semua kabar');
+    ui.closeSheet();
+  };
+  return h('div', { class: 'menuitem', style: 'cursor:default' },
+    h('span', { class: 'mi' }, ic('bell')),
+    h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Kabar yang dikirim'),
+      h('div', { class: 'seg small' }, ...[['all', 'Semua'], ['important', 'Penting saja']].map(([k, label]) => h('button', { class: k === cur ? 'on' : '', onclick: () => set(k) }, label)))),
+  );
+}
+
 export function accountMenu() {
   const login = app.me?.login;
   ui.sheet(
@@ -85,6 +102,7 @@ export function accountMenu() {
     h('div', { class: 'label' }, 'Perangkat ini'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
+      pushLevelPicker(),
       menuItem({ icon: 'logout', t1: 'Keluar', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),
       // Login di HP/browser lain (mis. HP hilang) dicabut di relay. Pairing PC tidak berubah.
       menuItem({ icon: 'logout', t1: 'Keluar dari semua perangkat', t2: 'Cabut login di semua HP & browser', danger: true, chev: false, onclick: logoutAll }),

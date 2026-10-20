@@ -2,6 +2,57 @@
 
 Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
 
+## 2026-10-20 — v0.4.0: keamanan relay, koneksi tahan banting, izin bertingkat risiko, biaya sesi
+
+### Keamanan
+- **Penautan PC tidak bisa lagi dilewati lewat link.** Dulu halaman "Hubungkan PC?" muncul sebelum login GitHub dan
+  bisa dilewati dengan menambahkan `confirm=1` ke URL (PC orang lain tertaut ke akunmu tanpa klik). Kini konfirmasi
+  tampil *setelah* login (nama PC, kode, akun) dan dikirim lewat POST dengan token `link` bertanda tangan
+  (`/auth/machine/confirm`).
+- **CSP `connect-src`** hanya ke relay sendiri (`'self'` + `wss://` alamat dari `wrangler.jsonc`), bukan `wss:` ke host
+  mana pun.
+- **Token WebSocket lewat subprotocol** (`snugcode, t.<token>`), tidak lagi di query string yang tercatat di log. Relay
+  tetap menerima `?token=` untuk klien lama; daemon memakai subprotocol bila `/api/health` menyatakan `wsProto`.
+- **Perpanjangan login** (`POST /api/renew`, maks. sekali sehari dari PWA): HP yang dipakai rutin tidak lagi dipaksa
+  login ulang setiap 30 hari. Token yang dicabut (logout-all) tidak bisa diperpanjang.
+- **cloudflared dipatok versi + SHA-256** (`daemon/cloudflared-version.json`), bukan `releases/latest` tanpa verifikasi.
+- **Model ancaman yang jujur** — [`docs/keamanan.md`](docs/keamanan.md): apa yang dilindungi & tidak (relay juga
+  menyajikan kode PWA), cara memverifikasi build, cara self-host relay. Klaim "relay tidak bisa membaca apa pun"
+  di README & layar login diperjelas.
+
+### Infrastruktur
+- **Deploy hanya setelah CI lulus** (`workflow_run`), memakai commit yang lulus CI, lalu smoke test: `build.json`
+  yang disajikan relay harus sama dengan hasil build commit itu.
+- **Build PWA yang bisa diverifikasi**: `npm run build:web` menulis `build.json` (SHA-256 tiap file + digest); rilis
+  GitHub melampirkannya.
+- **Observability Workers** aktif untuk relay & worker alias.
+- **Pemasang satu baris** — `curl -fsSL https://snugcode.arfak.workers.dev/install.sh | sh` /
+  `irm …/install.ps1 | iex`: cek Node.js 22+ & git, pasang snugcode, lalu `snugcode setup`.
+- Tabel RPC dipindah dari `daemon/server.js` ke `daemon/rpc.js`.
+
+### Koneksi
+- **Heartbeat dengan batas waktu** di daemon & HP: soket setengah mati (ganti Wi-Fi ↔ seluler, PC bangun dari tidur)
+  dideteksi dari `pong` yang tidak datang dan langsung disambung ulang. HP juga menguji koneksi saat aplikasi dibuka
+  lagi atau jaringan kembali (`online`).
+- **Timeout RPC** (30 dtk; 3 mnt untuk operasi lama seperti clone, update, push): tombol & spinner tidak lagi menunggu
+  selamanya, dengan pesan yang jelas.
+
+### Pengalaman pengguna
+- **Kartu izin bertingkat risiko** (`shared/risk.js`): label rendah/sedang/tinggi + alasan, di HP dan TUI. Risiko
+  tinggi tampil merah tanpa tombol *Selalu*. Jaring pengaman terlihat: "Bisa dibatalkan: rewind".
+- **Preset otonomi agen** (RPC `autonomy`, TUI `/otonomi`): *Tanya semua*, *Seimbang*, *Rutin otomatis* (test, lint,
+  typecheck, build tanpa rangkaian perintah lolos sendiri), *Penuh*.
+- **Biaya sesi & batas biaya** (RPC `budget`): biaya Agent SDK (total berjalan per proses) diubah menjadi biaya per
+  giliran + total sesi; peringatan di 80%, prompt ditahan saat batas tercapai. Ringkasan selesai menampilkan
+  `$giliran · sesi $total` (dulu angka biayanya total berjalan yang terlihat seperti biaya per giliran).
+- **Izin dari notifikasi**: tombol *Izinkan / Tolak* untuk risiko rendah/sedang; isi notifikasi memuat perintahnya.
+  Preferensi *Kabar yang dikirim: Semua / Penting saja*.
+- **Tambah PC**: perintah pemasang per OS, lalu HP memantau dan membuka PC baru begitu tertaut.
+- **Chip langkah berikutnya** setelah agen selesai/gagal, dan **prompt tersimpan per repo**.
+- **Kontras WCAG AA** untuk teks redup, aksen, peringatan, dan tombol (gelap & terang).
+- Copy usang ("Agen Claude Code", "Claude Code harness + 9router") diganti sesuai produk multi-model; istilah
+  "harness" di layar koneksi disederhanakan.
+
 ## 2026-10-20 — v0.3.0: file & terminal dari HP, engine Gemini CLI, keychain OS
 
 ### Dari HP

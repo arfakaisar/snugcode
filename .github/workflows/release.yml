@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  # npm publish --provenance (asal paket bisa diverifikasi di npmjs.com)
+  id-token: write
 
 jobs:
   release:
@@ -28,7 +30,17 @@ jobs:
           if [ "$v" != "$GITHUB_REF_NAME" ]; then echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $v"; exit 1; fi
       - run: npm ci
       - run: npm test
+      # Hash PWA hasil build dari kode bertag: bandingkan dengan https://<relay>/build.json (docs/keamanan.md).
+      - run: npm run build:web
       - name: Buat rilis GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" relay/public/build.json --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag
+      # Terbitkan ke npm (`npm i -g snugcode`, dipakai pemasang install.sh/ps1) bila secret NPM_TOKEN di-set.
+      - name: Terbitkan ke npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN belum di-set: lewati npm publish (pemasang memakai rilis GitHub)."; exit 0; fi
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          npm publish --provenance --access public

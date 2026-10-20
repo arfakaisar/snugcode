@@ -14,6 +14,14 @@ export const PIN = 'moon42';
 export const ok = (m) => console.log('✔ ' + m);
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Tautkan PC (kode dari /auth/machine/start) ke akun dev: login → halaman konfirmasi → POST token `link`.
+export async function linkMachine(code, login) {
+  const page = await (await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${login}`)).text();
+  const t = page.match(/name="t" value="([^"]+)"/)?.[1];
+  if (!t) return new Response(page, { status: 400 });
+  return fetch(RELAY + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t }) });
+}
+
 // ---------- mock 9router (Anthropic Messages API, streaming) ----------
 // Prompt berisi WRITE -> tool_use Write; SLOW -> jawaban lambat; READSECRET -> Read secrets.json;
 // MARKDOWN -> jawaban markdown panjang; TODOS -> TodoWrite; WRITE2 -> tool_use Write ke hasil2.txt;
@@ -129,7 +137,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply, se
 
   // --- registrasi PC di relay dev ---
   const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name }) })).json();
-  await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${login}`);
+  await linkMachine(code, login);
   const reg = await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json();
   assert.equal(reg.status, 'ok');
   fs.mkdirSync(HOME, { recursive: true });

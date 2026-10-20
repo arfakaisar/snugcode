@@ -1,7 +1,7 @@
 // Uji relay (tanpa daemon): jenis token terpisah, pencabutan login, konfirmasi penautan PC, batas mesin,
 // dan security header PWA. Butuh relay dev: `npm run dev:relay` (CI: wrangler dev --var DEV_AUTH:1).
 import assert from 'node:assert/strict';
-import { RELAY, ok } from './e2e-harness.mjs';
+import { RELAY, ok, linkMachine } from './e2e-harness.mjs';
 
 const user = 'relay-' + Date.now().toString(36);
 const login = async (u = user) => {
@@ -43,20 +43,45 @@ const wsStatus = (token) =>
   ok('logout-all mencabut token lama (API & WebSocket), login baru tetap berlaku');
 }
 
-// 3. Penautan PC lewat link butuh konfirmasi yang menampilkan nama & kode PC.
+// 3. Penautan PC butuh konfirmasi SETELAH login (POST + token bertanda tangan); parameter URL tidak bisa melewatinya.
 {
+  const owner = user + '-link';
   const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'PC <uji>' }) })).json();
-  const r = await fetch(`${RELAY}/auth/login?kind=machine&pc=${code}`, { redirect: 'manual' });
+  assert.equal((await fetch(`${RELAY}/auth/login?kind=machine&pc=TIDAKADA`, { redirect: 'manual' })).status, 404);
+  // Link "confirm=1" lama tidak lagi langsung menautkan: tetap berhenti di halaman konfirmasi.
+  const r = await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${owner}&confirm=1`);
   assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-security-policy') || '', /default-src 'none'/);
   const html = await r.text();
   assert.match(html, /Hubungkan PC\?/);
-  assert.ok(html.includes(code) && html.includes('PC &lt;uji&gt;'), 'nama di-escape & kode tampil');
-  assert.match(html, /confirm=1/);
-  assert.match(r.headers.get('content-security-policy') || '', /default-src 'none'/);
-  assert.equal((await fetch(`${RELAY}/auth/login?kind=machine&pc=TIDAKADA`, { redirect: 'manual' })).status, 404);
-  const go = await fetch(`${RELAY}/auth/login?kind=machine&pc=${code}&confirm=1`, { redirect: 'manual' });
-  assert.ok([200, 302].includes(go.status));
-  ok('penautan PC menampilkan halaman konfirmasi (nama ter-escape, kode, tanpa skrip)');
+  assert.ok(html.includes(code) && html.includes('PC &lt;uji&gt;') && html.includes('@' + owner), 'nama di-escape, kode & akun tampil');
+  assert.match(html, /method="post"/);
+  assert.equal((await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json()).status, 'pending');
+  // Token palsu / jenis lain ditolak.
+  assert.equal((await fetch(RELAY + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t: await login(owner) }) })).status, 400);
+  const t = html.match(/name="t" value="([^"]+)"/)[1];
+  assert.equal((await fetch(RELAY + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t }) })).status, 200);
+  assert.equal((await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json()).status, 'ok');
+  ok('penautan PC: konfirmasi setelah login dengan POST bertoken (nama ter-escape, tanpa skrip, tidak bisa dilewati)');
+}
+
+// 3b. Token login bisa diperpanjang, dan WebSocket menerima token lewat subprotocol (bukan URL).
+{
+  const owner = user + '-ws';
+  const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'ws' }) })).json();
+  await linkMachine(code, owner);
+  const { mid } = await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json();
+  const r = await (await fetch(RELAY + '/api/renew', { method: 'POST', headers: { authorization: 'Bearer ' + (await login(owner)) } })).json();
+  assert.equal((await me(r.token)).status, 200);
+  const open = (protos) =>
+    new Promise((resolve) => {
+      const ws = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/ws/phone?mid=${mid}`, protos);
+      ws.onopen = () => (ws.close(), resolve(ws.protocol));
+      ws.onerror = () => resolve('ditolak');
+    });
+  assert.equal(await open(['snugcode', 't.' + r.token]), 'snugcode');
+  assert.equal(await open(['snugcode', 't.salah']), 'ditolak');
+  ok('token login diperpanjang; token WebSocket lewat subprotocol');
 }
 
 // 4. Batas mesin per akun.
@@ -65,7 +90,7 @@ const wsStatus = (token) =>
   let last;
   for (let i = 0; i < 21; i++) {
     const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'pc' + i }) })).json();
-    last = await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${owner}`);
+    last = await linkMachine(code, owner);
   }
   assert.equal(last.status, 409);
   assert.match(await last.text(), /Maksimal 20 mesin/);
@@ -80,6 +105,7 @@ const wsStatus = (token) =>
   const csp = r.headers.get('content-security-policy') || '';
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.match(csp, /frame-ancestors 'none'/);
+  assert.ok(!/wss:(\s|;|$)/.test(csp), 'connect-src tidak mengizinkan wss: ke host mana pun');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   const html = await r.text();
   assert.ok(!/<script>/.test(html), 'tanpa skrip inline');

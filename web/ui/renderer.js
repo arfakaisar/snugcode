@@ -21,6 +21,8 @@ export class Renderer {
     this.tools = new Map();
     this.users = new Map(); // seq prompt -> tombol rewind
     this.permQueue = [];
+    this.nextSteps = NEXT_OK;
+    this.nextEl = null;
     this.textEl = null;
     /** @type {{ el: HTMLElement, src: string, done: number, pending: boolean } | null} */
     this.textBlock = null; // blok teks agen yang sedang di-stream
@@ -115,6 +117,8 @@ export class Renderer {
   add(e, replay = false) {
     switch (e.k) {
       case 'user': {
+        this.nextEl?.remove();
+        this.nextEl = null;
         this.textEl = null;
         this.outEl = null;
         this.activity = 'berpikir…';
@@ -178,12 +182,17 @@ export class Renderer {
         this.textEl = null;
         const ans = e.ok && this.textBlock?.src.trim();
         this.textBlock = null;
-        return this.append(
+        const line = this.append(
           h('div', { class: 'donel' + (e.ok ? '' : ' bad') },
             h('span', { class: 'dt' }, (e.ok ? '✓ ' : '✗ ') + txt),
             ans ? h('button', { class: 'rw', 'aria-label': 'Salin jawaban', onclick: (ev) => copyBtn(ev.currentTarget, ans) }, ic('copy')) : null,
           ),
         );
+        // Langkah berikutnya yang umum, satu ketukan (mengetik di HP itu mahal). Hanya di bawah giliran terakhir.
+        this.nextEl?.remove();
+        const next = this.onQuick && (e.ok ? this.nextSteps : NEXT_FAIL);
+        this.nextEl = next?.length ? this.append(h('div', { class: 'nextsteps' }, ...next.map(([label, text]) => h('button', { class: 'chip', onclick: () => (haptic(6), this.onQuick(text)) }, label)))) : null;
+        return line;
       }
       case 'sh':
         this.activity = '$ ' + e.d;
@@ -285,9 +294,24 @@ export class Renderer {
     if (this.permQueue.some((p) => p.pid === e.pid)) return;
     this.permQueue.push(e);
     this.renderDock();
+    if (app.permFromPush?.pid === e.pid) return this.answerFromPush();
     if (!this.quiet) {
       haptic([40, 60, 40]);
       localNotify('snugcode — butuh izin', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
+    }
+  }
+  // Jawaban dari tombol notifikasi (sw.js → app.js). Hanya untuk izin yang memang masih menunggu, dan
+  // hanya risiko rendah/sedang (daemon tidak menyertakan pid untuk risiko tinggi).
+  async answerFromPush() {
+    const want = app.permFromPush;
+    app.permFromPush = null;
+    const e = want && this.permQueue.find((p) => p.pid === want.pid);
+    if (!e || e.push || e.risk?.level === 'high') return;
+    try {
+      await app.conn.call('perm', { id: app.current.session.id, pid: e.pid, decision: want.decision });
+      toast(want.decision === 'allow' ? `✓ ${e.tool} diizinkan dari notifikasi` : `✗ ${e.tool} ditolak dari notifikasi`);
+    } catch (x) {
+      toast(x.message, true);
     }
   }
   permAnswer(e) {
@@ -312,25 +336,41 @@ export class Renderer {
     const more = this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} permintaan lagi`) : null;
     if (e.ask) return this.dock.replaceChildren(askPanel(e, answer, more));
     if (e.plan) return this.dock.replaceChildren(planPanel(e, answer, more));
+    // Risiko tinggi tampil berbeda (merah, tanpa "Selalu"): melawan kebiasaan asal ketuk Izinkan.
+    const high = e.push || e.risk?.level === 'high';
     buttons.append(
       h('button', { class: 'btn ghost', onclick: () => answer('deny') }, 'Tolak'),
-      e.push ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Selalu'),
-      h('button', { class: 'btn ' + (e.push ? 'dangerfill' : 'primary'), onclick: () => answer('allow') }, 'Izinkan'),
+      high || !e.always ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Selalu'),
+      h('button', { class: 'btn ' + (high ? 'dangerfill' : 'primary'), onclick: () => answer('allow') }, 'Izinkan'),
     );
     const [kind, glyph] = TOOL_KIND[e.tool] || ['other', '•'];
+    const RISK = { high: 'Risiko tinggi', medium: 'Risiko sedang', low: 'Risiko rendah' };
     this.dock.replaceChildren(
-      h('div', { class: 'perm' + (e.push ? ' push' : '') },
+      h('div', { class: 'perm' + (high ? ' push' : '') + (e.risk ? ' r-' + e.risk.level : '') },
         h('div', { class: 'q' }, h('span', { class: `pi t-${kind}` }, e.push ? ic('push') : glyph), h('span', { class: 'grow' }, e.push ? 'Agen ingin push ke GitHub' : `Izinkan ${e.tool}?`, e.title ? h('span', { class: 'pt' }, e.title) : null)),
+        e.risk ? h('div', { class: 'risk' }, h('span', { class: 'rl' }, ic(e.risk.level === 'low' ? 'shield' : 'alert'), RISK[e.risk.level]), e.risk.why ? h('span', {}, e.risk.why) : null) : null,
         h('pre', {}, e.summary || e.s || ''),
         e.x ? miniDiff(e.x).el : null,
+        e.undo ? h('div', { class: 'undo' }, ic('undo'), e.undo === 'file' ? 'Bisa dibatalkan: rewind ke sebelum prompt ini.' : 'Perubahan file bisa di-rewind; efek di luar folder sesi (jaringan, paket global) tidak.') : null,
         buttons,
-        !e.push && e.always ? h('div', { class: 'more' }, 'Selalu = izinkan otomatis di sesi ini: ' + e.always) : null,
+        !high && e.always ? h('div', { class: 'more' }, 'Selalu = izinkan otomatis di sesi ini: ' + e.always) : null,
         more,
       ),
     );
     requestAnimationFrame(() => this.keepBottom());
   }
 }
+
+// Chip lanjutan setelah giliran selesai / gagal (label, prompt). Sesi bisa menggantinya lewat renderer.nextSteps.
+export const NEXT_OK = [
+  ['Jalankan test', 'Jalankan test yang relevan dengan perubahan tadi dan perbaiki bila ada yang gagal.'],
+  ['Review perubahan', 'Review perubahan yang belum di-commit (git diff): cari bug atau risiko, lalu ringkas.'],
+  ['Commit', 'Lihat perubahan yang ada, tulis pesan commit yang jelas, lalu commit. Jangan push.'],
+];
+const NEXT_FAIL = [
+  ['Coba lagi', 'Lanjutkan tugas tadi dari titik terakhir.'],
+  ['Jelaskan error-nya', 'Jelaskan singkat kenapa tadi gagal dan apa pilihan perbaikannya.'],
+];
 
 // Pertanyaan pilihan dari agen (AskUserQuestion): 1–4 pertanyaan, opsi tap + jawaban bebas.
 export function askPanel(e, answer, more) {

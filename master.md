@@ -75,7 +75,8 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/config.js` | Lokasi data (`~/.snugcode`, bisa diganti lewat `SNUGCODE_HOME`), baca/tulis `config.json` & `secrets.json` secara atomik, path IPC. |
 | `daemon/defaults.js` | Nilai bawaan: URL relay, URL router bawaan untuk key router tanpa URL, GitHub OAuth client ID, spesifikasi paket (bisa ditimpa env `SNUGCODE_*`). |
 | `daemon/nativebin.js` | Deteksi binary native Claude (`claude.exe`) per platform dari paket opsional Agent SDK. |
-| `daemon/server.js` | Core Daemon: mengelola koneksi WebSocket relay, IPC pipe lokal, pairing HP, tabel RPC (dengan validasi input; `info.caps` untuk deteksi fitur), Web Push, dan pengawas runner cloud yang menganggur. |
+| `daemon/server.js` | Core Daemon: koneksi WebSocket relay (token lewat subprotocol bila relay mendukung `wsProto`; heartbeat dengan batas `pong` `DEAD_MS`, soket setengah mati disambung ulang), IPC pipe lokal, pairing HP, Web Push (level per HP: `all`/`important`, tombol izin di notifikasi), dan pengawas runner cloud yang menganggur. |
+| `daemon/rpc.js` | Tabel metode RPC (validasi input; `info.caps` untuk deteksi fitur), termasuk `autonomy` (preset otonomi) dan `budget` (batas biaya sesi). |
 | `daemon/sessions.js` | Pengelola sesi (`SessionManager` & `Session`): tiga jenis sesi (repo/worktree, folder lokal dari terminal, Komputer), pemilihan engine per model dengan izin & checkpoint yang sama, parsing event streaming, permission gating (`askPermission`), hook PreToolUse, dan eksekusi direct shell (`!`). |
 | `daemon/engine-claude.js` | Engine Claude Agent SDK: opsi `query()` (daftar tool ramping, subagen, MCP snugcode, sandbox saat auto-izin, `settingSources: []` + `CLAUDE.md` proyek), hook pelebar Read/Grep untuk model non-Claude. |
 | `daemon/engine-codex.js` | Engine Codex: proses `codex app-server` per sesi (sandbox OS, jembatan MCP) dan `decideCodex` (izin Codex lewat kebijakan snugcode). |
@@ -102,7 +103,7 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/term.js` | Teks terminal untuk TUI: warna, lebar tampilan sadar ANSI, pembungkus baris, markdown → ANSI. |
 | `daemon/toolchain.js` | Shell perintah (PowerShell/bash) + pnpm/yarn otomatis lewat corepack bila tidak terpasang di PC. |
 | `daemon/procs.js` | Proses latar belakang per sesi (dev server/watcher): log ring buffer, deteksi port, kill satu pohon proses. |
-| `daemon/tunnel.js` | Preview untuk HP: Cloudflare quick tunnel + gerbang token lokal (rewrite Host/Origin, WebSocket HMR). |
+| `daemon/tunnel.js` | Preview untuk HP: Cloudflare quick tunnel + gerbang token lokal (rewrite Host/Origin, WebSocket HMR). `cloudflared` diunduh sesuai versi + SHA-256 di `cloudflared-version.json`. |
 | `daemon/project.js` | Deteksi perintah setup/dev, template `.env` per repo (`~/.snugcode/env`). |
 | `daemon/browser.js` | Screenshot + log konsol via Chrome/Edge headless (CDP), tanpa Playwright. |
 | `daemon/devtools.js` | Tool MCP in-process untuk agen: `dev_start`, `dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot` (agen: DPR 1, opsi `image:false`, log konsol diringkas). |
@@ -119,7 +120,8 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `web/sw.js` | Service worker stale-while-revalidate; nama cache = hash isi aset (diisi `build:web`). |
 | `web/ui/*.js` | Layar PWA per modul: `dom` (elemen, ikon, toast, header/sheet), `auth` (login & daftar mesin, hapus mesin dari daftar), `machine` (koneksi PC, pairing, update, login GitHub PC, menu Pengaturan PC), `sessions` (beranda, drawer, sesi baru: tab Repository/Komputer), `session`, `renderer` (event agen), `run`, `git` (diff + review per hunk), `files` (explorer & editor), `terminal` (xterm.js, dimuat terpisah dari `xterm.js`), `model-picker`, `push`, `progress` (bar tahap + perkiraan sisa); state bersama di `state.js` (`app.conn`, `app.current`, `app.me`). |
 | `web/eta.js` | Perhitungan progress tanpa DOM: bar per tahap yang melambat mendekati akhir, sisa waktu, durasi tahap yang dipelajari per HP. |
-| `web/conn.js` | Koneksi terenkripsi HP ↔ PC: pairing PIN, auth perangkat, kanal E2EE teks/biner, RPC. |
+| `web/conn.js` | Koneksi terenkripsi HP ↔ PC: pairing PIN, auth perangkat, kanal E2EE teks/biner, RPC dengan timeout (30 dtk / 3 mnt untuk operasi lama), heartbeat & `wake()` (uji soket saat aplikasi dibuka lagi / jaringan kembali). |
+| `web/install.sh`, `web/install.ps1` | Pemasang satu baris yang disajikan relay: cek Node.js 22+ & git, pasang snugcode, `snugcode setup` (`SNUGCODE_RELAY` untuk relay sendiri). |
 | `web/codespaces.js` | Klien GitHub Codespaces tanpa DOM: cari fork runner, secret terenkripsi (sealed box) khusus repo fork, buat/cari/nyalakan/hentikan/hapus codespace. |
 | `web/ui/cloud.js`, `web/ui/settings.js` | Wizard & siklus hidup runner cloud; setelan mesin dari HP: Model & API key (koneksi, login ChatGPT dengan device code, deteksi jenis key saat diketik), perangkat, PIN. |
 | `shared/sealedbox.js` | `crypto_box_seal` libsodium (X25519 + XSalsa20-Poly1305) untuk Codespaces secrets. |
@@ -127,11 +129,12 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `web/index.html` & `style.css` | Struktur dan styling antarmuka mobile bergaya aplikasi chat: tema terang/gelap (token CSS), teks agen serif, drawer, composer kartu, animasi transform/opacity. |
 | `shared/crypto.js` | Implementasi kriptografi bersama (CPace, Ristretto255, X25519, XChaCha20-Poly1305, Scrypt, HKDF). |
 | `shared/events.js` | Model event sesi agen bersama daemon/PWA/TUI: tipe event (JSDoc), rencana TodoWrite terstruktur, label aktivitas, ringkasan selesai, `EventCursor` (penyaring event duplikat). |
+| `shared/risk.js` | Tingkat risiko permintaan izin (`commandRisk`, `permRisk`: rendah/sedang/tinggi + alasan) dan preset otonomi (`ask`/`balanced`/`trusted`/`auto` ⇄ flag sesi `askEdits`/`autoLow`/`auto`). Heuristik UX, bukan batas keamanan. |
 | `shared/models.js` | Normalisasi ID model AI, pengelompokan varian reasoning effort ke virtual slider. |
-| `scripts/build-web.mjs` | Build script untuk membundel dan menempatkan aset web PWA ke `relay/public` (dipakai kedua worker). |
+| `scripts/build-web.mjs` | Build script untuk membundel dan menempatkan aset web PWA ke `relay/public` (dipakai kedua worker); `_headers` dengan CSP yang `connect-src`-nya hanya host relay (`PUBLIC_URL`/`LEGACY_HOSTS` atau `SNUGCODE_WS_HOSTS`); `build.json` berisi SHA-256 tiap file untuk verifikasi build. |
 | `scripts/docs-images.mjs`, `scripts/icons.mjs` | `npm run docs:images` (gambar & GIF README dari UI asli, butuh relay dev) dan `npm run icons` (PNG/maskable/apple-touch dari SVG). |
 | `tsconfig.json` | `tsc --checkJs` untuk seluruh JS (daemon, shared, web); relay punya tsconfig sendiri dengan tipe `wrangler types`. `npm run typecheck`, juga di CI. |
-| `.github/workflows/` | `ci.yml`: cek sintaks, typecheck, unit test (Linux/Windows/macOS), bundle PWA, lalu e2e (agen, runner cloud, UI) di Linux. `deploy.yml`: `npm run deploy` saat `main` berubah di `relay/`, `web/`, `shared/` (atau manual), butuh secret `CLOUDFLARE_API_TOKEN`. |
+| `.github/workflows/` | `ci.yml`: cek sintaks, typecheck, unit test (Linux/Windows/macOS), bundle PWA, lalu e2e (agen, runner cloud, UI) di Linux. `deploy.yml`: setelah workflow CI lulus di `main` (`workflow_run`, memakai commit yang lulus) dan bila `relay/`, `web/`, `shared/` berubah (atau manual) → `npm run deploy`, lalu smoke test `build.json` yang disajikan = hasil build; butuh secret `CLOUDFLARE_API_TOKEN`. `release.yml`: tag `vX.Y.Z` → test, `build.json` dilampirkan ke rilis GitHub, dan `npm publish --provenance` bila secret `NPM_TOKEN` ada. |
 | `test/` | `features.test.js` (`npm test`: explorer, konflik edit, batalkan hunk, PTY, keychain, engine Gemini, perkiraan kuota runner), `e2e-gemini.mjs` (`npm run test:e2e:gemini`: Gemini CLI asli vs Gemini API tiruan — izin shell, tulis file lewat ACP, `session/load`, mode rencana, key tidak sampai ke Gemini CLI), `e2e-harness.mjs` (setup bersama), `e2e-ui.mjs` (`npm run test:ui`: PWA di Chrome + TUI di pty), `unit.test.js` & `providers.test.js` (`npm test`, juga dijalankan CI di Linux/Windows/macOS), `e2e-connections.mjs` (`npm run test:e2e:connections`: koneksi dari HP, endpoint OpenAI-only lewat penerjemah, Codex asli dengan izin/sandbox/jembatan MCP), `e2e-agent.mjs` (`npm run test:e2e`: HP → relay lokal → daemon → Agent SDK → mock 9router; butuh `npm run dev:relay`), `e2e-cloud.mjs` (`npm run test:e2e:cloud`: provision → `snugcode cloud` → pairing otomatis → setelan dari HP), `worktree.it.mjs` (integrasi git, butuh internet), `e2e-phone.mjs` (simulasi HP manual). |
 
 ### Runner cloud (tanpa PC)
@@ -162,17 +165,20 @@ mesin tanpa harus tersambung.
 ### Endpoint relay
 | Endpoint | Fungsi |
 |---|---|
-| `GET /auth/login?kind=user\|machine\|gh` | Login GitHub (web flow). Token `state` berjenis tersendiri (tidak berlaku sebagai token user). `user` → token PWA di `#login=`; `machine` → halaman konfirmasi (nama & kode PC) lalu menautkan PC yang menunggu (`pc=<kode>`); `gh` → token ber-scope `codespace` untuk PWA di `#gh=…&ghlogin=…` (tidak disimpan relay). Di host lama dialihkan ke `PUBLIC_URL`. |
+| `GET /auth/login?kind=user\|machine\|gh` | Login GitHub (web flow). Token `state` berjenis tersendiri (tidak berlaku sebagai token user). `user` → token PWA di `#login=`; `machine` → kode PC diperiksa, lalu **setelah** login tampil halaman konfirmasi (nama PC, kode, akun) dengan form POST ke `/auth/machine/confirm`; `gh` → token ber-scope `codespace` untuk PWA di `#gh=…&ghlogin=…` (tidak disimpan relay). Di host lama dialihkan ke `PUBLIC_URL`. |
 | `POST /auth/machine/start`, `GET /auth/machine/poll` | Penautan PC dari `snugcode setup` lewat `Pending` DO (kode berlaku 15 menit). |
+| `POST /auth/machine/confirm` | Konfirmasi penautan PC: token `link` bertanda tangan (kode PC + akun, berlaku 10 menit) yang hanya ada di halaman konfirmasi milik pengguna yang login; parameter URL tidak bisa melewatinya. |
+| `POST /api/renew` | Token login baru (30 hari) untuk token yang masih sah dan tidak dicabut; PWA memanggilnya maks. sekali sehari. |
 | `GET /api/me`, `GET /api/machines` | Akun & daftar mesin (`kind`, `provider`, `online`, `lastSeen`, `boot`). Maks 20 mesin per akun. |
 | `POST /api/logout-all` | Cabut semua token login akun (Hub menyimpan `revokedBefore`; token dengan `iat` lebih lama ditolak, HP yang tersambung ditutup dengan 4005). |
 | `POST /api/machines/provision` | Daftarkan runner cloud tanpa login dari mesinnya; mengembalikan token mesin ke PWA. |
 | `POST /api/runner/status` | Laporan tahap runner (token mesin). |
 | `DELETE /api/machines/<mid>` | Hapus mesin; soket PC & HP-nya ditutup (4003). |
-| `GET /ws/machine`, `GET /ws/phone?mid=` | WebSocket daemon & HP; frame teks atau biner `[cid][payload]`. |
-| `GET /api/health` | `devAuth`, `runnerRepo`, dan penanda host lama (`legacy`, `publicUrl`). |
+| `GET /ws/machine`, `GET /ws/phone?mid=` | WebSocket daemon & HP; frame teks atau biner `[cid][payload]`. Token lewat subprotocol `snugcode, t.<token>` (relay menjawab `snugcode`), atau `?token=` untuk klien lama. |
+| `GET /api/health` | `devAuth`, `wsProto` (token WebSocket lewat subprotocol), `runnerRepo`, dan penanda host lama (`legacy`, `publicUrl`). |
+| `GET /build.json`, `/install.sh`, `/install.ps1` | Aset statis: hash build PWA, pemasang satu baris. |
 
-Rate limit per IP (binding `LIMITER`, 30/menit) untuk `/auth/login`, `/auth/machine/start`, `/api/machines/provision`. Aset PWA disajikan dengan CSP ketat (`relay/src/headers.js`).
+Rate limit per IP (binding `LIMITER`, 30/menit) untuk `/auth/login`, `/auth/machine/start`, `/auth/machine/confirm`, `/api/machines/provision`. Model ancaman lengkap (termasuk batasan: relay juga menyajikan kode PWA) di [`docs/keamanan.md`](docs/keamanan.md). Aset PWA disajikan dengan CSP ketat (`relay/src/headers.js`).
 
 ---
 
@@ -240,6 +246,8 @@ Aspek keamanan `snugcode` dirancang dengan prinsip **Zero Trust** terhadap serve
   - *Tolak*
 - Hook `PreToolUse` berjalan untuk tool yang bisa mengubah file (`Bash`, `Write`, `Edit`, `dev_start`, …), termasuk yang lolos lewat aturan tanpa melewati `canUseTool`: menahannya sampai checkpoint prompt tersimpan, dan memaksa prompt izin (`permissionDecision: 'ask'`) untuk push/`gh pr create` dan perintah yang menyebut `secrets.json`, walau cocok dengan aturan "Selalu" seperti `Bash(git *)`.
 - **Aksi Kritis**: Perintah yang menulis ke remote — `git push` (termasuk `git -C dir push`, `git -c k=v push`), `gh pr create|merge`, `gh release create`, `gh repo create|delete|fork` — **selalu meminta izin eksplisit** terlepas dari auto-izin, dan tidak bisa "Selalu diizinkan". Deteksi berbasis pola teks perintah: ini pengaman dari kekeliruan agen, bukan sandbox (skrip yang memanggil `git push` dari dalam file tidak terdeteksi).
+- **Tingkat risiko & preset otonomi** (`shared/risk.js`): setiap kartu izin membawa `risk` (rendah/sedang/tinggi + alasan) dan `undo` (perubahan bisa di-rewind). Risiko tinggi di PWA tampil merah tanpa *Selalu* dan tidak membawa `pid` di Web Push (tidak bisa dijawab dari notifikasi). Preset: *Tanya semua* (`askEdits`), *Seimbang* (bawaan), *Rutin otomatis* (`autoLow`: Bash/`dev_start` berisiko rendah — test/lint/typecheck/build tanpa `; & | > $()` — lolos tanpa bertanya), *Penuh* (`auto`).
+- **Biaya sesi**: `total_cost_usd` Agent SDK adalah total berjalan per proses (proses yang melanjutkan transcript mulai dari total tersimpan); `Session.account` mengubahnya menjadi `cost` per giliran + `spent` sesi (`meta.spentUsd`). `meta.budgetUsd`: peringatan di 80%, `send` ditolak saat tercapai.
 - **Mode ⚡ Auto-Izin**: Pengguna dapat menyalakan toggle auto-izin dari HP/terminal untuk membiarkan agen bekerja mandiri tanpa interupsi, kecuali untuk aksi kritis di atas.
 - **Sandbox OS saat auto-izin** (`daemon/sandbox.js`): daftar hitam regex tidak cukup (`cat ~/.snug*/s*.json` lolos), jadi proses `claude` sesi auto-izin dijalankan dengan opsi `sandbox` Agent SDK: `denyRead` folder data (sama dengan profil Codex), `allowWrite` hanya `workspaces/` (atau home di Mode Komputer) + cache paket, `denyWrite` hook & config git, jaringan keluar `*`. `autoAllowBashIfSandboxed: false`, jadi keputusan tetap lewat `askPermission`; Bash lolos otomatis hanya bila proses itu memang ber-sandbox (auto-izin yang dinyalakan di tengah proses tanpa sandbox tetap bertanya sampai prompt berikutnya). `dangerouslyDisableSandbox` selalu bertanya dan tidak bisa "Selalu". Diukur dengan SDK asli: worktree, `git commit`, `npm` registry tetap jalan; `localhost` host tidak terjangkau, karena itu bawaannya hanya untuk auto-izin (`config.sandbox`: `auto` | `always` | `off`).
 - **Konfigurasi repo**: `settingSources: []` — `.claude/settings.json` repo tidak dimuat (hook/izin/env/`apiKeyHelper` dari repo bisa ditulis siapa saja); `CLAUDE.md` & `.claude/CLAUDE.md` dibaca sendiri (`projectInstructions`, maks 40 KB). Edit ke `.claude/`, `.codex/`, `.mcp.json`, `.git/` selalu bertanya di kedua engine.
@@ -487,5 +495,7 @@ Flag non-interaktif `setup`: `--router`, `--key`, `--model`, `--github device|cr
 - [x] Integrasi keychain OS (macOS Keychain / Secret Service / DPAPI) untuk `secrets.json`.
 - [x] Terminal interaktif PTY penuh di HP.
 - [x] File explorer/editor ringan dan review diff per hunk dengan komentar ke agen.
+- [x] Penautan PC yang tidak bisa dilewati, CSP `connect-src` sempit, token WebSocket lewat subprotocol, perpanjangan login, cloudflared terverifikasi, deploy setelah CI + build terverifikasi, docs/keamanan.md.
+- [x] Heartbeat & timeout RPC, kartu izin bertingkat risiko, preset otonomi, biaya & batas biaya sesi, izin dari notifikasi, pemasang satu baris, kontras WCAG AA.
 - [ ] Tunnel preview E2EE lewat relay sendiri. Ditunda: preview harus di origin terpisah dari PWA (kode preview satu origin bisa membaca token & secret perangkat di storage PWA), dan Service Worker tidak bisa meneruskan WebSocket HMR.
 - [ ] Amazon Bedrock & Google Vertex AI (proxy perlu penandatanganan SigV4 / token OAuth layanan).

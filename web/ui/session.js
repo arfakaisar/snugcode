@@ -4,7 +4,7 @@ import * as M from '../../shared/models.js';
 import { EventCursor } from '../../shared/events.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
-import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, pop, mascot, toast, toggleItem, ui } from './dom.js';
+import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, onLongPress, pop, mascot, toast, toggleItem, ui } from './dom.js';
 import { showGit } from './git.js';
 import { showFiles } from './files.js';
 import { showTerminal } from './terminal.js';
@@ -14,6 +14,14 @@ import { onProc, showRun } from './run.js';
 import { deleteSession, repoName, sessionSub, showSessions, tildify } from './sessions.js';
 
 const has = (m) => !!app.current.info?.caps?.includes(m);
+
+// Preset otonomi (shared/risk.js AUTONOMY): label, penjelasan, ikon.
+const AUTONOMY_UI = {
+  ask: ['Tanya semua', 'setiap edit & perintah menunggu persetujuanmu', 'eye'],
+  balanced: ['Seimbang', 'edit langsung (bisa di-rewind), perintah ditanyakan', 'shield'],
+  trusted: ['Rutin otomatis', 'test, lint & build langsung jalan; perintah lain ditanyakan', 'flask'],
+  auto: ['Penuh', 'semua langsung jalan, kecuali push & PR', 'bolt'],
+};
 
 // ---------- Layar: sesi ----------
 export const QUICK = [
@@ -105,6 +113,7 @@ export function showSession(s) {
       ss.plan ? pill('plan', 'list', 'Rencana', () => setPlanRemote(false)) : null,
       shellMode ? pill('shell', 'term', 'Shell', () => setMode(false)) : null,
       ss.auto ? pill('auto', 'bolt', 'Auto-izin', () => setAutoRemote(false)) : null,
+      !ss.auto && ss.autoLow ? pill('auto low', 'flask', 'Rutin otomatis', () => app.conn.call('autonomy', { id: s.id, level: 'balanced' }).then((r) => (Object.assign(app.current.session, r), renderModes()))) : null,
     ].filter(Boolean);
     const was = !modes.hidden;
     modes.hidden = !list.length;
@@ -129,6 +138,35 @@ export function showSession(s) {
   const setAuto = (on) => {
     app.current.session.auto = on;
     renderModes();
+  };
+  // Preset otonomi (daemon baru): satu pilihan bertingkat, bukan sakelar auto-izin + tinjau edit terpisah.
+  const autonomySheet = () => {
+    const cur = app.current.session.autonomy || 'balanced';
+    const pick = async (level) => {
+      if (level === cur) return ui.closeSheet();
+      if (level === 'auto' && !(await ui.confirm({ title: 'Otonomi penuh?', text: 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (di sandbox OS bila tersedia). git push dan pembuatan PR tetap selalu meminta izin. Semua perubahan file tetap bisa di-rewind.', ok: 'Nyalakan', danger: true, icon: 'bolt' }))) return;
+      try {
+        Object.assign(app.current.session, await app.conn.call('autonomy', { id: s.id, level }));
+        renderModes();
+        ui.closeSheet();
+        toast('Otonomi: ' + AUTONOMY_UI[level][0]);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+    ui.sheet(
+      ui.head('Otonomi agen', { sub: 'Seberapa banyak agen boleh bekerja tanpa bertanya' }),
+      h('div', { class: 'group autonomy' },
+        ...Object.entries(AUTONOMY_UI).map(([level, [t1, t2, icon]]) =>
+          h('button', { class: 'menuitem' + (level === cur ? ' on' : ''), 'aria-pressed': String(level === cur), onclick: () => (haptic(8), pick(level)) },
+            h('span', { class: 'mi' }, ic(icon)),
+            h('span', { class: 'grow' }, h('div', { class: 't1' }, t1), h('div', { class: 't2' }, t2)),
+            level === cur ? ic('check', 'chev') : null,
+          ),
+        ),
+      ),
+      h('p', { class: 'muted small', style: 'margin:12px 4px 0' }, 'Push ke GitHub, pembuatan PR, dan file kredensial selalu ditanyakan di semua tingkat.'),
+    );
   };
   const setAutoRemote = async (on) => {
     if (on && !(await ui.confirm({ title: 'Nyalakan auto-izin?', text: 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya. git push dan pembuatan PR tetap selalu meminta izin.', ok: 'Nyalakan', danger: true, icon: 'bolt' }))) return false;
@@ -195,9 +233,11 @@ export function showSession(s) {
         h('div', { class: 'group' },
           toggleItem({ icon: 'list', t1: 'Mode rencana', t2: 'agen membaca & menyusun rencana dulu', on: !!ss.plan, onchange: setPlanRemote }),
           toggleItem({ icon: 'term', t1: 'Mode shell', t2: 'pesan dikirim sebagai perintah ($)', on: shellMode, onchange: (v) => (setMode(v), v) }),
-          toggleItem({ icon: 'bolt', t1: 'Auto-izin', t2: 'tanpa bertanya, kecuali push & PR', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
+          has('autonomy')
+            ? menuItem({ icon: 'bolt', t1: 'Otonomi agen', t2: AUTONOMY_UI[ss.autonomy || 'balanced'][0] + ' · ' + AUTONOMY_UI[ss.autonomy || 'balanced'][1], onclick: autonomySheet })
+            : toggleItem({ icon: 'bolt', t1: 'Auto-izin', t2: 'tanpa bertanya, kecuali push & PR', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
           // Bawaan: edit di worktree langsung diterapkan (bisa di-rewind); nyalakan untuk menyetujui tiap diff.
-          'askEdits' in ss
+          'askEdits' in ss && !has('autonomy')
             ? toggleItem({
                 icon: 'diff', t1: 'Tinjau setiap edit', t2: 'Write/Edit menunggu persetujuanmu', on: !!ss.askEdits,
                 onchange: async (on) => {
@@ -212,6 +252,7 @@ export function showSession(s) {
             : null,
         ),
         h('div', { class: 'label' }, 'Aksi cepat'),
+        savedPrompts(ss, input.value.trim(), (t) => (ui.closeSheet(), quick(t))),
         h('div', { class: 'group' }, ...qkList.map((qk) => menuItem({ icon: qk.icon, t1: qk.t1, t2: qk.t2, onclick: () => (ui.closeSheet(), quick(qk.text)) }))),
         h('div', { class: 'label' }, 'Shell'),
         h('div', { class: 'qsh' }, ...qkShList.map((c) => h('button', { class: 'chip mono', onclick: () => (ui.closeSheet(), quick('!' + c)) }, '$ ' + c))),
@@ -376,6 +417,7 @@ export function showSession(s) {
   };
   r.suggest = QUICK;
   r.onQuick = quick;
+  if (s.computer) r.nextSteps = [['Lanjutkan', 'Lanjutkan.'], ['Ringkas hasilnya', 'Ringkas apa yang barusan dilakukan dan hasilnya.']];
   send.onclick = submit;
   input.onkeydown = (e) => {
     // HP: Enter = baris baru (kirim pakai tombol). Keyboard fisik: Enter kirim, Shift+Enter baris baru.
@@ -443,12 +485,15 @@ export function sessionMenu() {
       h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)),
       s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null,
     ),
+    // Jaring pengaman yang terlihat: pengguna tahu kerja agen terisolasi dan bisa dikembalikan.
+    !isComp && !s.local ? h('p', { class: 'muted small safety' }, ic('shield'), `Agen bekerja di branch ${s.branch} terpisah; branch ${s.base} tidak berubah sampai kamu merge. Setiap prompt bisa di-rewind.`) : null,
     h('div', { class: 'group' },
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
       menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
       has('files') ? menuItem({ icon: 'folder', t1: 'File', t2: 'jelajah, lihat & edit file', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
       has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'shell interaktif di ' + (isComp ? 'PC' : 'worktree'), onclick: () => showTerminal() }) : null,
       menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
+      has('budget') ? menuItem({ icon: 'clock', t1: 'Biaya & batas', t2: `${usd(s.spent)} sesi ini · ${s.budget ? 'batas ' + usd(s.budget) : 'tanpa batas'}`, onclick: () => budgetSheet(s) }) : null,
       (s.local || isComp) ? null : menuItem({
         icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',
         onclick: async () => {
@@ -466,4 +511,53 @@ export function sessionMenu() {
       menuItem({ icon: 'trash', t1: 'Hapus sesi', t2: isComp ? 'riwayat sesi di PC dihapus' : 'worktree di PC ikut dihapus', danger: true, chev: false, onclick: () => deleteSession(s) }),
     ),
   );
+}
+
+const usd = (v) => '$' + (+v || 0).toFixed(+v && v < 1 ? 3 : 2);
+
+// Batas biaya sesi: rem yang membuat pengguna berani memberi tugas besar. Dicek setiap giliran selesai
+// (biaya dari Agent SDK; engine Codex/Gemini tidak melaporkan biaya).
+function budgetSheet(s) {
+  const field = h('input', { class: 'field', type: 'number', inputmode: 'decimal', min: '0', step: '0.5', placeholder: 'mis. 5', value: s.budget ? String(s.budget) : '' });
+  const save = async (v) => {
+    try {
+      Object.assign(app.current.session, await app.conn.call('budget', { id: s.id, usd: +v || 0 }));
+      ui.closeSheet();
+      toast(+v ? `Batas biaya sesi: ${usd(+v)}` : 'Batas biaya dimatikan');
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  ui.sheet(
+    ui.head('Biaya & batas', { sub: `${usd(s.spent)} terpakai di sesi ini (perkiraan)` }),
+    h('p', { class: 'muted small', style: 'margin:0 4px 12px' }, 'Saat total biaya mencapai batas, prompt berikutnya ditahan dan kamu diberi tahu (juga peringatan di 80%). Biaya hanya tersedia untuk model yang berjalan di Claude Agent SDK.'),
+    h('div', { class: 'chips', style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px' }, ...[1, 5, 20].map((v) => h('button', { class: 'btn', onclick: () => save(v) }, usd(v)))),
+    field,
+    h('div', { class: 'btnrow', style: 'margin-top:12px' },
+      h('button', { class: 'btn ghost', onclick: () => save(0) }, 'Tanpa batas'),
+      h('button', { class: 'btn primary', onclick: () => save(field.value) }, 'Simpan'),
+    ),
+  );
+}
+
+// Prompt tersimpan per repo (HP ini): permintaan yang sering diulang cukup satu ketukan. Teks di kotak pesan
+// bisa disimpan dari sini; tekan lama untuk menghapus.
+function savedPrompts(ss, draft, run) {
+  const key = 'prompts.' + (ss.computer ? 'computer' : ss.repo);
+  const list = /** @type {string[]} */ (store.get(key) || []);
+  const save = () => {
+    store.set(key, [draft, ...list.filter((x) => x !== draft)].slice(0, 12));
+    toast('Disimpan sebagai prompt cepat');
+    ui.closeSheet();
+  };
+  const items = list.map((t) => {
+    const el = menuItem({ icon: 'spark', t1: t.length > 60 ? t.slice(0, 60) + '…' : t, t2: 'tersimpan · tekan lama untuk hapus', onclick: () => run(t) });
+    onLongPress(el, async () => {
+      if (!(await ui.confirm({ title: 'Hapus prompt tersimpan?', text: t.slice(0, 200), ok: 'Hapus', danger: true, icon: 'trash' }))) return;
+      store.set(key, (store.get(key) || []).filter((x) => x !== t));
+    });
+    return el;
+  });
+  if (draft && !list.includes(draft)) items.push(menuItem({ icon: 'save', t1: 'Simpan teks ini sebagai prompt cepat', t2: draft.slice(0, 60), chev: false, onclick: save }));
+  return items.length ? h('div', { class: 'group' }, ...items) : null;
 }

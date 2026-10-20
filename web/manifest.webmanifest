@@ -1,7 +1,7 @@
 {
   "name": "snugcode",
   "short_name": "snugcode",
-  "description": "Coding agent Claude Code di PC-mu, dikendalikan dari HP.",
+  "description": "Coding agent (Claude, GPT, Gemini, dan lainnya) di PC-mu atau di cloud, dikendalikan dari HP.",
   "id": "/",
   "start_url": "./",
   "scope": "./",

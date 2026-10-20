@@ -17,12 +17,24 @@ export async function api(path, opts = {}) {
   return r.json();
 }
 
+// Login yang aktif diperpanjang (maks. sekali sehari): HP yang dipakai rutin tidak pernah dipaksa
+// login ulang karena token 30 hari habis. Relay lama tanpa /api/renew: diam saja.
+export async function renewToken() {
+  if (!token() || Date.now() - (store.get('renewedAt') || 0) < 24 * 3600 * 1000) return;
+  try {
+    const r = await fetch('/api/renew', { method: 'POST', headers: { authorization: 'Bearer ' + token() } });
+    const t = r.ok && (await r.json()).token;
+    if (t) store.set('token', t);
+    store.set('renewedAt', Date.now());
+  } catch {}
+}
+
 // ---------- Layar: login ----------
 export function showLogin() {
   ui.set('snugcode', { dot: 'none' });
   $('#bar').hidden = true;
   const feats = [
-    ['shield', 'Terenkripsi end-to-end', 'relay tidak bisa membaca apa pun'],
+    ['shield', 'Terenkripsi end-to-end', 'relay hanya meneruskan pesan terenkripsi'],
     ['cloud', 'Tanpa PC pun bisa', 'runner cloud di GitHub Codespaces milikmu'],
     ['branch', 'Aman untuk repo-mu', 'satu worktree & branch per sesi'],
   ];
@@ -31,7 +43,7 @@ export function showLogin() {
       h('div', { class: 'hero login' },
         h('div', { class: 'brand' }, mascot('draw xl tap'), h('span', { class: 'wordmark' }, 'snugcode')),
         h('h1', { class: 'serif display' }, 'Coding dari saku,', h('br'), h('span', { class: 'accent-text' }, 'tenaga dari PC atau cloud.')),
-        h('p', { class: 'lead' }, 'Agen Claude Code berjalan di komputermu atau di cloud — analisis repo, edit, commit, dan push langsung dari HP.'),
+        h('p', { class: 'lead' }, 'Coding agent (Claude, GPT, Gemini, atau model lain pilihanmu) berjalan di komputermu atau di cloud — analisis repo, edit, commit, dan push langsung dari HP.'),
         h('div', { class: 'feats' }, ...feats.map(([icon, t1, t2], i) => h('div', { class: 'feat', style: `--i:${i}` }, h('span', { class: 'fi' }, ic(icon)), h('span', {}, h('b', {}, t1), h('span', {}, t2))))),
         h('a', { class: 'btn primary big', href: '/auth/login?kind=user', onclick: () => haptic() }, ic('github'), 'Login dengan GitHub'),
         h('div', { class: 'fine' }, 'Punya PC? Pakai akun GitHub yang sama dengan saat setup di PC. Tanpa PC? Pilih runner cloud setelah login.'),
@@ -54,7 +66,7 @@ export function machineActions(m) {
         : 'Runner dihapus dari akun dan langsung terputus. Hentikan juga container-nya di server (docker rm -f snugcode).'
       : 'PC ini dihapus dari akun dan langsung terputus. File & repo di PC tidak disentuh. Untuk menautkannya lagi, jalankan `snugcode setup` di PC.';
     if (!(await ui.confirm({ title: `Hapus ${m.name}?`, text, ok: `Hapus ${what}`, danger: true, icon: 'trash', stay: true }))) return;
-    ui.sheet(ui.head('Menghapus…', { sub: m.name, close: false }), h('div', { class: 'loading' }, mascot('think'), h('span', { class: 'shimmer' }, cloud ? 'Menghapus runner…' : 'Menghapus PC dari akun…')));
+    ui.sheet(ui.head('Menghapus…', { sub: m.name, close: false }), h('div', { class: 'loading' }, h('span', { class: 'shimmer' }, cloud ? 'Menghapus runner…' : 'Menghapus PC dari akun…')));
     try {
       if (cloud) await removeRunner(m);
       else {
@@ -121,8 +133,7 @@ export async function showMachines({ resume = false } = {}) {
   } catch (e) {
     return list.replaceChildren(h('div', { class: 'err' }, e.message));
   }
-  const install = 'npm i -g github:arfakaisar/snugcode && snugcode setup';
-  const howto = h('div', { class: 'copyline' }, h('code', {}, install), h('button', { class: 'copybtn', onclick: async (e) => (await copyText(install)) && (e.currentTarget.classList.add('done'), toast('Perintah disalin')) }, ic('copy'), 'salin'));
+  const howto = installHowto(machines.length);
   const cloudBtn = (label) => h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: () => (haptic(), cloudSetupSheet()) }, ic('cloud'), label);
   // Kembali dari izin Codespaces: lanjutkan wizard runner.
   const next = store.get('cloudNext');
@@ -136,7 +147,7 @@ export async function showMachines({ resume = false } = {}) {
         'Tanpa PC: agen berjalan di GitHub Codespaces milikmu, gratis dalam kuota bulanan GitHub.',
         cloudBtn('Pakai cloud — tanpa PC'),
       ),
-      h('details', { class: 'addpc' }, h('summary', {}, ic('monitor'), 'Pakai PC sendiri'), h('div', { class: 'muted small' }, 'Di komputer (Node.js 22+ dan git), jalankan:'), howto),
+      h('details', { class: 'addpc' }, h('summary', {}, ic('monitor'), 'Pakai PC sendiri'), h('div', { class: 'muted small' }, 'Di komputer (butuh Node.js 22+ dan git — pemasang mengeceknya), jalankan di terminal:'), howto),
     );
   const last = resume ? store.get('last') : null;
   const lastM = last && machines.find((m) => m.id === last.mid);
@@ -156,10 +167,59 @@ export async function showMachines({ resume = false } = {}) {
     ),
     h('details', { class: 'addpc' },
       h('summary', {}, ic('plus'), 'Tambah PC lain'),
-      h('div', { class: 'muted small' }, 'Pasang di komputer lain (Node.js 22+ dan git):'),
+      h('div', { class: 'muted small' }, 'Di komputer lain (butuh Node.js 22+ dan git), jalankan di terminal:'),
       howto,
       machines.some(isCodespace) ? null : h('div', { class: 'muted small', style: 'margin-top:14px' }, 'Atau tanpa PC:'),
       machines.some(isCodespace) ? null : cloudBtn('Buat runner cloud'),
     ),
   );
+}
+
+// ---------- Tambah PC: perintah pemasang + menunggu PC baru muncul ----------
+// Pemasang satu baris (web/install.sh / install.ps1) memeriksa Node & git lalu menjalankan setup. Setelah
+// perintah disalin, layar ini memantau daftar mesin dan langsung membuka PC baru begitu tertaut — pengguna
+// tidak perlu kembali dan menebak apakah setup di PC sudah selesai.
+function installHowto(known) {
+  const win = /Windows/.test(navigator.userAgent);
+  const cmds = {
+    unix: `curl -fsSL ${location.origin}/install.sh | sh`,
+    win: `irm ${location.origin}/install.ps1 | iex`,
+  };
+  let os = win ? 'win' : 'unix';
+  const code = h('code', {}, cmds[os]);
+  const wait = h('div', { class: 'muted small waitpc', hidden: true }, mascot('think'), h('span', { class: 'shimmer' }, 'Menunggu PC baru tertaut… layar ini terbuka otomatis.'));
+  const seg = h('div', { class: 'seg small' },
+    ...[['unix', 'macOS / Linux'], ['win', 'Windows']].map(([k, label]) =>
+      h('button', { class: os === k ? 'on' : '', onclick: (e) => ((os = k), code.replaceChildren(cmds[k]), seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget))) }, label),
+    ),
+  );
+  const copy = h('button', { class: 'copybtn', onclick: async (e) => {
+    if (!(await copyText(cmds[os]))) return;
+    e.currentTarget.classList.add('done');
+    toast('Perintah disalin — tempel di terminal PC');
+    watchNewMachine(known, wait);
+  } }, ic('copy'), 'salin');
+  return h('div', {}, seg, h('div', { class: 'copyline' }, code, copy), wait);
+}
+
+let watching = null;
+function watchNewMachine(known, el) {
+  el.hidden = false;
+  if (watching) return;
+  const until = Date.now() + 15 * 60 * 1000;
+  const tick = async () => {
+    if (!el.isConnected || Date.now() > until) return (watching = null);
+    if (document.visibilityState === 'visible') {
+      const r = await api('/api/machines').catch(() => null);
+      const fresh = r?.machines?.length > known && r.machines.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+      if (fresh) {
+        watching = null;
+        haptic([10, 40, 10]);
+        toast(`${fresh.name} tertaut ✓`);
+        return openMachine(fresh);
+      }
+    }
+    watching = setTimeout(tick, 4000);
+  };
+  watching = setTimeout(tick, 4000);
 }

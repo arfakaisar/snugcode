@@ -7,7 +7,7 @@
 //   Pending (1 DO per kode login) : menghubungkan login GitHub di browser
 //                                   dengan daemon yang sedang menunggu.
 import { DurableObject } from 'cloudflare:workers';
-import { SECURITY_HEADERS, PAGE_HEADERS } from './headers.js';
+import { securityHeaders, PAGE_HEADERS } from './headers.js';
 
 const enc = new TextEncoder();
 
@@ -71,7 +71,8 @@ function page(title, body, status = 200) {
 async function asset(env, request) {
   const res = await env.ASSETS.fetch(request);
   const headers = new Headers(res.headers);
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!headers.has(k)) headers.set(k, v);
+  const hosts = [new URL(request.url).host, env.PUBLIC_URL ? new URL(env.PUBLIC_URL).host : '', ...String(env.LEGACY_HOSTS || '').split(',').map((s) => s.trim())];
+  for (const [k, v] of Object.entries(securityHeaders(hosts))) if (!headers.has(k)) headers.set(k, v);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
@@ -142,6 +143,30 @@ async function limited(env, request, scope) {
   return !success;
 }
 
+// Token WebSocket: lewat subprotocol `snugcode, t.<token>` (tidak tercatat di log URL), atau `?token=`
+// untuk klien lama. Respons 101 harus memilih subprotocol `snugcode` (lihat Hub /ws).
+const WS_PROTO = 'snugcode';
+function wsToken(request, url) {
+  const protos = (request.headers.get('sec-websocket-protocol') || '').split(',').map((s) => s.trim());
+  const t = protos.find((s) => s.startsWith('t.'));
+  return t ? t.slice(2) : url.searchParams.get('token');
+}
+
+// Setelah login GitHub: konfirmasi eksplisit (POST + token bertanda tangan) sebelum PC ditautkan ke akun.
+async function linkPage(env, pc, user) {
+  const r = await pending(env, pc).fetch('https://p/peek');
+  if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
+  const { name } = await r.json();
+  const t = await signToken(env, { kind: 'link', pc, sub: user.id, login: user.login, exp: Date.now() + 10 * 60 * 1000 });
+  return page(
+    'Hubungkan PC?',
+    `<p>PC <b>${esc(name)}</b> (kode <code>${esc(pc)}</code>) minta ditautkan ke akun GitHub <b>@${esc(user.login)}</b>.</p>` +
+      `<p>Lanjutkan hanya bila kode ini sama dengan yang tampil di terminal PC-mu sendiri. Bila kamu menerima link ini dari orang lain, tutup halaman ini.</p>` +
+      `<form method="post" action="/auth/machine/confirm"><input type="hidden" name="t" value="${esc(t)}">` +
+      `<button style="font:inherit;background:#7ee787;color:#0b0e14;padding:10px 16px;border:0;border-radius:8px;font-weight:600;cursor:pointer">Ya, hubungkan PC ini</button></form>`,
+  );
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -151,7 +176,7 @@ export default {
     // Login selalu di alamat utama: callback OAuth App GitHub hanya boleh satu host.
     if (legacy && path === '/auth/login') return Response.redirect(env.PUBLIC_URL + path + url.search, 302);
 
-    if (!devAuth && ['/auth/login', '/auth/machine/start', '/api/machines/provision'].includes(path) && (await limited(env, request, path))) {
+    if (!devAuth && ['/auth/login', '/auth/machine/start', '/auth/machine/confirm', '/api/machines/provision'].includes(path) && (await limited(env, request, path))) {
       return path.startsWith('/api/') || request.method === 'POST' ? json({ error: 'Terlalu banyak permintaan. Coba lagi sebentar lagi.' }, 429) : page('Terlalu banyak permintaan', '<p>Coba lagi dalam satu menit.</p>', 429);
     }
 
@@ -162,20 +187,11 @@ export default {
       const kind = k === 'machine' || k === 'gh' ? k : 'user';
       if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Mode dev', '<p>Runner Codespaces butuh OAuth App GitHub (GITHUB_CLIENT_ID).</p>');
       const pc = url.searchParams.get('pc') || '';
-      // Menautkan PC ke akun butuh klik konfirmasi: link dari orang lain (kode milik PC mereka) tidak
-      // bisa diam-diam mendaftarkan PC itu ke akun yang sudah pernah mengizinkan OAuth App ini.
-      if (kind === 'machine' && url.searchParams.get('confirm') !== '1') {
+      // Kode PC harus masih menunggu. Konfirmasi penautan ditampilkan SETELAH login GitHub (lihat linkPage):
+      // konfirmasi sebelum login bisa dilewati cukup dengan menambahkan parameter ke link.
+      if (kind === 'machine') {
         const r = await pending(env, pc).fetch('https://p/peek');
         if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
-        const { name } = await r.json();
-        const next = new URL(url);
-        next.searchParams.set('confirm', '1');
-        return page(
-          'Hubungkan PC?',
-          `<p>PC <b>${esc(name)}</b> (kode <code>${esc(pc)}</code>) minta ditautkan ke akun GitHub-mu.</p>` +
-            `<p>Lanjutkan hanya bila kode ini sama dengan yang tampil di terminal PC-mu sendiri. Bila kamu menerima link ini dari orang lain, tutup halaman ini.</p>` +
-            `<p><a href="${esc(next.pathname + next.search)}" style="display:inline-block;background:#7ee787;color:#0b0e14;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Ya, hubungkan PC ini</a></p>`,
-        );
       }
       if (devAuth && !env.GITHUB_CLIENT_ID) {
         return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
@@ -215,19 +231,7 @@ export default {
         // Login tetap diperiksa PWA terhadap akun relay-nya sebelum dipakai.
         return Response.redirect(url.origin + '/#gh=' + encodeURIComponent(user.token) + '&ghlogin=' + encodeURIComponent(user.login), 302);
       }
-      if (kind === 'machine') {
-        const r = await pending(env, pc).fetch('https://p/claim', { method: 'POST', body: JSON.stringify({ user }) });
-        if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>');
-        const { name } = await r.json();
-        let result;
-        try {
-          result = await registerMachine(env, user, name);
-        } catch (e) {
-          return page('PC tidak bisa ditambahkan', `<p>${esc(e.message)}</p>`, 409);
-        }
-        await pending(env, pc).fetch('https://p/result', { method: 'POST', body: JSON.stringify(result) });
-        return page('PC terhubung ✓', `<p>PC <b>${esc(name)}</b> sekarang terhubung ke akun <b>@${esc(user.login)}</b>.</p><p>Kembali ke terminal untuk menyelesaikan setup. Tab ini boleh ditutup.</p>`);
-      }
+      if (kind === 'machine') return linkPage(env, pc, user);
       const token = await signToken(env, { kind: 'user', sub: user.id, login: user.login, iat: Date.now(), exp: Date.now() + USER_TTL });
       return Response.redirect(url.origin + '/#login=' + encodeURIComponent(token), 302);
     }
@@ -245,10 +249,37 @@ export default {
       return new Response(r.body, r);
     }
 
+    // Konfirmasi penautan PC (POST dari linkPage). Token `link` bertanda tangan hanya ada di halaman milik
+    // pengguna yang baru login, jadi link/form dari situs lain tidak bisa menautkan PC ke akunnya.
+    if (path === '/auth/machine/confirm' && request.method === 'POST') {
+      const form = await request.formData().catch(() => null);
+      const t = await verifyToken(env, String(form?.get('t') || ''));
+      if (!t || t.kind !== 'link' || !t.pc || !t.sub) return page('Konfirmasi kedaluwarsa', '<p>Ulangi dari link di terminal PC (<code>snugcode setup</code>).</p>', 400);
+      const r = await pending(env, t.pc).fetch('https://p/claim', { method: 'POST' });
+      if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan, sudah dipakai, atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>');
+      const { name } = await r.json();
+      const user = { id: t.sub, login: t.login };
+      let result;
+      try {
+        result = await registerMachine(env, user, name);
+      } catch (e) {
+        return page('PC tidak bisa ditambahkan', `<p>${esc(e.message)}</p>`, 409);
+      }
+      await pending(env, t.pc).fetch('https://p/result', { method: 'POST', body: JSON.stringify(result) });
+      return page('PC terhubung ✓', `<p>PC <b>${esc(name)}</b> sekarang terhubung ke akun <b>@${esc(user.login)}</b>.</p><p>Kembali ke terminal untuk menyelesaikan setup. Tab ini boleh ditutup.</p>`);
+    }
+
     // ---------- API untuk PWA ----------
     if (path === '/api/me') {
       const u = await authUser(env, request);
       return u ? json({ login: u.login }) : json({ error: 'unauthorized' }, 401);
+    }
+    // Perpanjang login yang masih aktif (PWA memanggilnya saat dibuka): tanpa ini HP dipaksa login ulang
+    // setiap 30 hari walau dipakai tiap hari. Token yang dicabut (logout-all) tidak bisa diperpanjang.
+    if (path === '/api/renew' && request.method === 'POST') {
+      const u = await authUser(env, request);
+      if (!u) return json({ error: 'unauthorized' }, 401);
+      return json({ token: await signToken(env, { kind: 'user', sub: u.sub, login: u.login, iat: Date.now(), exp: Date.now() + USER_TTL }) });
     }
     if (path === '/api/machines') {
       const u = await authUser(env, request);
@@ -302,17 +333,17 @@ export default {
     if (path === '/ws/machine' || path === '/ws/phone') {
       if (request.headers.get('upgrade') !== 'websocket') return json({ error: 'expected websocket' }, 426);
       if (path === '/ws/machine') {
-        const p = await verifyToken(env, url.searchParams.get('token'));
+        const p = await verifyToken(env, wsToken(request, url));
         if (!p || p.kind !== 'machine' || !p.sub || !p.mid) return json({ error: 'unauthorized' }, 401);
         return hub(env, p.sub).fetch(new Request('https://hub/ws?role=m&mid=' + encodeURIComponent(p.mid), request));
       }
-      const p = await userFromToken(env, url.searchParams.get('token'));
+      const p = await userFromToken(env, wsToken(request, url));
       if (!p) return json({ error: 'unauthorized' }, 401);
       const mid = url.searchParams.get('mid') || '';
       return hub(env, p.sub).fetch(new Request('https://hub/ws?role=p&mid=' + encodeURIComponent(mid), request));
     }
 
-    if (path === '/api/health') return json({ ok: true, devAuth, runnerRepo: runnerRepo(env), ...(legacy ? { legacy: true, publicUrl: env.PUBLIC_URL } : {}) });
+    if (path === '/api/health') return json({ ok: true, devAuth, wsProto: 1, runnerRepo: runnerRepo(env), ...(legacy ? { legacy: true, publicUrl: env.PUBLIC_URL } : {}) });
     return asset(env, request);
   },
 };
@@ -432,7 +463,8 @@ export class Hub extends DurableObject {
         server.send(JSON.stringify({ t: 'status', online, name: machines[mid].name, bin: 1 }));
         if (online) for (const m of this.ctx.getWebSockets('m:' + mid)) m.send(JSON.stringify({ t: 'open', cid }));
       }
-      return new Response(null, { status: 101, webSocket: client });
+      const proto = (request.headers.get('sec-websocket-protocol') || '').split(',').some((x) => x.trim() === WS_PROTO);
+      return new Response(null, { status: 101, webSocket: client, ...(proto ? { headers: { 'sec-websocket-protocol': WS_PROTO } } : {}) });
     }
     return json({ error: 'not found' }, 404);
   }

@@ -18,7 +18,7 @@ Analisis repo, edit kode, jalankan test, preview web app, commit, push, dan buat
 
 **[Instalasi](#instalasi-di-pc)** &nbsp;·&nbsp; **[Tanpa PC](#tanpa-pc-runner-cloud)** &nbsp;·&nbsp; **[Model & API key](#model--api-key)** &nbsp;·&nbsp; [Demo](#lihat-cara-kerjanya) &nbsp;·&nbsp; [Fitur](#fitur) &nbsp;·&nbsp; [Arsitektur](#arsitektur) &nbsp;·&nbsp; [Terminal](#terminal-snugcode) &nbsp;·&nbsp; [Keamanan](#keamanan) &nbsp;·&nbsp; [FAQ](#faq)
 
-<sub>Dulu bernama <b>pocketcode</b> — lihat <a href="#migrasi-dari-pocketcode">Migrasi dari pocketcode</a>.</sub>
+<sub><a href="README.en.md">English</a> · Dulu bernama <b>pocketcode</b> — lihat <a href="#migrasi-dari-pocketcode">Migrasi dari pocketcode</a>.</sub>
 
 </div>
 
@@ -93,7 +93,7 @@ Coding agent seperti Claude Code sangat membantu, tapi kamu harus duduk di depan
 <td width="33%" valign="top">
 
 **End-to-end encrypted**<br>
-<sub>Pairing PIN dengan PAKE (CPace / ristretto255), lalu setiap pesan dienkripsi XChaCha20-Poly1305. Relay tidak bisa membaca apa pun.</sub>
+<sub>Pairing PIN dengan PAKE (CPace / ristretto255), lalu setiap pesan dienkripsi XChaCha20-Poly1305. Relay hanya meneruskan pesan terenkripsi — batasannya dijelaskan terbuka di <a href="docs/keamanan.md">docs/keamanan.md</a>.</sub>
 
 </td>
 </tr>
@@ -358,8 +358,8 @@ lengkap dengan token mesin & PIN (lihat [`Dockerfile`](Dockerfile)). Untuk penye
 dengan env dari [`daemon/runner.js`](daemon/runner.js).
 
 > [!NOTE]
-> Di mode cloud, kode dan API key berada di mesin penyedia runner (GitHub, atau servermu). Relay tetap
-> tidak bisa membaca apa pun: pesan tetap E2EE, dan PIN maupun key tidak pernah lewat relay.
+> Di mode cloud, kode dan API key berada di mesin penyedia runner (GitHub, atau servermu). Pesan tetap E2EE,
+> dan PIN maupun key tidak pernah lewat relay dalam bentuk terbaca.
 
 ---
 
@@ -402,6 +402,21 @@ Runner cloud/Docker: `SNUGCODE_API_KEY` (+ `SNUGCODE_API_URL` untuk router) meny
 
 **Kebutuhan:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), akun GitHub, dan **akun ChatGPT atau API key model** (lihat [Model & API key](#model--api-key)).
 
+Cara tercepat — pemasang satu baris memeriksa Node.js & git, memasang snugcode, lalu menjalankan setup:
+
+```bash
+# macOS / Linux
+curl -fsSL https://snugcode.arfak.workers.dev/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://snugcode.arfak.workers.dev/install.ps1 | iex
+```
+
+Perintah yang sama ada di aplikasi HP (*Tambah PC* → salin), dan HP otomatis membuka PC baru begitu setup selesai.
+Atau manual:
+
 ```bash
 npm i -g github:arfakaisar/snugcode
 snugcode setup
@@ -439,6 +454,7 @@ flowchart LR
 1. Buka **https://snugcode.arfak.workers.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
 2. Pilih PC, lalu masukkan PIN.
 3. Menu browser → **Add to Home screen**, supaya terbuka layar penuh seperti aplikasi dan notifikasi push berjalan (wajib di iOS).
+4. Akun → **Izinkan notifikasi**. Izin berisiko rendah/sedang bisa langsung dijawab dari tombol *Izinkan / Tolak* di notifikasi (Android & desktop); pilih *Kabar yang dikirim → Penting saja* bila hanya ingin diberi tahu soal izin, pertanyaan, dan tugas selesai.
 
 ### Kontrol di layar sesi
 
@@ -448,11 +464,13 @@ flowchart LR
 | **Judul sesi** | Menu sesi: rincian branch/model, git, run, **File**, **Terminal**, ganti model, simpan `.env`, hapus sesi |
 | Ikon *play* (kanan atas) | Run & Preview: dev server, log, screenshot, link preview |
 | Ikon *branch* (kanan atas) | Git: status, diff (komentar per baris/hunk → *Kirim ke agen*, batalkan hunk/file), commit, push, Pull Request (badge = jumlah file berubah) |
-| **+** di composer | Lampiran & alat: kamera, galeri, mode rencana, mode shell, auto-izin, tinjau edit, aksi cepat |
+| **+** di composer | Lampiran & alat: kamera, galeri, mode rencana, mode shell, **otonomi agen**, aksi cepat & prompt tersimpan |
 | **Nama model** di composer | Ganti model & effort di tengah sesi (berlaku mulai pesan berikutnya) |
 | Pil mode di atas input | Mode yang aktif (Rencana / Shell / Auto-izin); ketuk untuk mematikan |
 | `!` di awal pesan | Jalankan sebagai perintah shell |
 | **rewind** di bawah pesanmu | Kembalikan semua file ke sebelum prompt itu |
+| Chip di bawah ringkasan selesai | Langkah berikutnya sekali ketuk: jalankan test, review, commit |
+| Menu sesi → **Biaya & batas** | Biaya sesi (perkiraan) dan batas biaya: prompt ditahan saat batas tercapai |
 | Tombol stop | Hentikan agen |
 | Tekan lama sesi (beranda) | Buka / hapus sesi |
 | Tarik ke bawah (daftar) | Muat ulang |
@@ -601,10 +619,13 @@ sequenceDiagram
     Note over HP,PC: HKDF(deviceSecret, ECDH) → 2 kunci XChaCha20-Poly1305<br/>+ nomor urut anti-replay
 ```
 
-- **Relay zero-knowledge** — tidak pernah melihat PIN, isi percakapan, kode, API key, login ChatGPT, atau token GitHub. Lalu lintas model langsung dari mesinmu ke provider, tidak lewat server snugcode.
+- **Relay tidak membaca isi pesan** — PIN, isi percakapan, kode, API key, login ChatGPT, dan token GitHub tidak pernah lewat relay dalam bentuk terbaca. Lalu lintas model langsung dari mesinmu ke provider. **Batasan penting:** relay juga menyajikan kode PWA, jadi pihak yang menguasai deploy relay bisa mengganti kode itu. Baca [docs/keamanan.md](docs/keamanan.md) untuk model ancaman lengkap, cara memverifikasi build PWA (`build.json`), dan cara self-host relay.
 - **Brute-force dibatasi** — setelah 5 kali PIN salah, pairing terkunci 15 menit (berlipat dua tiap kunci berikutnya, maks ±16 jam). `snugcode pin` di PC atau Ganti PIN dari HP lain membukanya langsung.
-- **Login relay bisa dicabut** — Akun → *Keluar dari semua perangkat* mencabut token login di semua HP & browser (mis. HP hilang). Menautkan PC lewat link selalu menampilkan halaman konfirmasi berisi nama & kode PC.
-- **PWA dengan CSP ketat** — tanpa skrip inline maupun skrip/font pihak ketiga (font di-host sendiri), sehingga token & secret perangkat di HP lebih sulit dicuri lewat XSS.
+- **Login relay bisa dicabut** — Akun → *Keluar dari semua perangkat* mencabut token login di semua HP & browser (mis. HP hilang). Menautkan PC lewat link selalu meminta konfirmasi setelah login GitHub (nama PC, kode, dan akun tampil; konfirmasi lewat POST bertoken, tidak bisa dilewati dengan parameter URL). Login yang dipakai rutin diperpanjang otomatis.
+- **PWA dengan CSP ketat** — tanpa skrip inline maupun skrip/font pihak ketiga (font di-host sendiri), dan WebSocket hanya ke relay sendiri, sehingga token & secret perangkat di HP lebih sulit dicuri lewat XSS. Token login dikirim lewat subprotocol WebSocket, bukan URL (tidak tercatat di log).
+- **Kartu izin bertingkat risiko** — setiap permintaan diberi label risiko rendah/sedang/tinggi beserta alasannya; risiko tinggi (hapus data, skrip dari internet, push, keluar folder sesi) tampil merah tanpa tombol *Selalu*, dan tidak bisa dijawab dari tombol notifikasi.
+- **Otonomi bertingkat** — *Tanya semua*, *Seimbang* (bawaan), *Rutin otomatis* (test/lint/build tanpa rangkaian perintah lolos sendiri), *Penuh* (auto-izin). Push, PR, dan file kredensial selalu bertanya di semua tingkat.
+- **Binary yang diunduh diverifikasi** — Codex & Gemini CLI dipatok versinya; `cloudflared` dipatok versi + SHA-256 resmi ([`daemon/cloudflared-version.json`](daemon/cloudflared-version.json)).
 - **Token GitHub** disuntikkan lewat env hanya ke perintah git milik daemon. Token tidak ditulis ke `.git/config` dan tidak terlihat oleh agen. `GITHUB_TOKEN`/`GH_TOKEN` yang ada di environment (mis. dari Codespaces) dibuang saat daemon start, jadi tidak terwariskan ke agen, Bash, dev server, atau `!perintah`.
 - **Setelan dari HP** — model & API key, login ChatGPT, PIN, dan daftar HP bisa diatur dari aplikasi (Pengaturan PC). Key dikirim lewat kanal E2EE, divalidasi ke endpoint-nya dulu, dan tidak pernah dikembalikan ke klien.
 - **API key tidak pernah masuk ke proses agen.** Proses `claude` / Codex (dan perintah agen) hanya memegang token lokal acak per koneksi; loopback proxy (`127.0.0.1`) menukarnya dengan key asli. Request tanpa token itu ditolak, jadi program lain di PC tidak bisa memakai key-mu.
@@ -778,6 +799,8 @@ Screenshot butuh Chrome, Edge, Chromium, atau Brave di PC (atau isi `browserExec
 - [x] Integrasi keychain OS untuk `secrets.json`
 - [x] Terminal interaktif (PTY) penuh di HP
 - [x] File explorer ringan & review diff per hunk
+- [x] Kartu izin bertingkat risiko, preset otonomi, batas biaya sesi, izin dari tombol notifikasi
+- [x] Pemasang satu baris, heartbeat koneksi & timeout RPC, build PWA yang bisa diverifikasi, panduan self-host relay
 - [ ] Tunnel preview E2EE lewat relay sendiri — butuh origin terpisah dari PWA (kode preview satu origin bisa membaca secret perangkat) dan dukungan WebSocket HMR
 - [ ] Amazon Bedrock & Google Vertex AI (butuh penandatanganan SigV4 / OAuth di proxy)
 

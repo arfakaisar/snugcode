@@ -3,7 +3,7 @@
 // Layar-layar ada di web/ui/*.js; state bersama di web/ui/state.js.
 import { store, token } from './conn.js';
 import { app } from './ui/state.js';
-import { showLogin, showMachines } from './ui/auth.js';
+import { renewToken, showLogin, showMachines } from './ui/auth.js';
 import { applyTheme, toast, ui } from './ui/dom.js';
 import { showSession } from './ui/session.js';
 import { acceptGhToken } from './ui/cloud.js';
@@ -50,8 +50,12 @@ function boot() {
   // Dibuka dari notifikasi push: #open=<mid>:<sid>
   const o = location.hash.match(/open=([\w-]+)(?::([\w-]+))?/);
   if (o) store.set('last', { mid: o[1], sid: o[2] });
+  // Tombol Izinkan/Tolak di notifikasi: dijawab begitu kartu izin itu muncul lagi setelah tersambung.
+  const pm = location.hash.match(/perm=([0-9a-f]{6,32}):(allow|deny)/);
+  if (o && pm) app.permFromPush = { pid: pm[1], decision: pm[2] === 'allow' ? 'allow' : 'deny' };
   if (m || o || g) history.replaceState(null, '', location.pathname);
   if (!token()) return showLogin();
+  renewToken();
   showMachines({ resume: true }).catch((e) => toast(e.message, true));
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -72,6 +76,9 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.addEventListener('message', async (ev) => {
     const o = ev.data?.open;
     if (!o?.mid) return;
+    if (ev.data.perm?.pid) app.permFromPush = { pid: String(ev.data.perm.pid), decision: ev.data.perm.decision === 'allow' ? 'allow' : 'deny' };
+    // Kartu izinnya sudah tampil (aplikasi terbuka di sesi itu): jawab sekarang.
+    if (app.permFromPush && app.current?.renderer?.permQueue.some((p) => p.pid === app.permFromPush.pid)) app.current.renderer.answerFromPush();
     if (app.current?.m.id !== o.mid || !app.current.ready) {
       store.set('last', { mid: o.mid, sid: o.sid });
       return showMachines({ resume: true });
@@ -84,10 +91,12 @@ document.addEventListener('visibilitychange', () => {
   const on = document.visibilityState === 'visible';
   // PWA yang dilanjutkan dari latar belakang tidak memuat ulang halaman: cek pembaruan di sini.
   if (on) navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
-  // Saat aplikasi dibuka lagi, sambung ulang segera bila koneksi putus.
-  if (on && app.conn && app.conn.ws?.readyState > 1 && !app.conn.closedByUser) app.conn.connect();
+  // Saat aplikasi dibuka lagi: sambung ulang bila putus, atau uji soket yang tampak terbuka (bisa setengah mati).
+  if (on) app.conn?.wake();
   // PC mengirim Web Push hanya saat aplikasi tidak sedang dilihat.
   if (app.conn?.channel) app.conn.call('visible', { on }).catch(() => {});
 });
+// Jaringan kembali (pindah Wi-Fi ↔ seluler): jangan tunggu heartbeat berikutnya.
+window.addEventListener('online', () => app.conn?.wake());
 boot();
 setTimeout(offerMove, 1200);

@@ -5,6 +5,8 @@
   "name": "pocketcode-relay",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
+  // Log & metrik Workers (dashboard Cloudflare → Observability): error relay terlihat tanpa wrangler tail.
+  "observability": { "enabled": true },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"

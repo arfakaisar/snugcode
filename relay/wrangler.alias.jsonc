@@ -6,6 +6,8 @@
   "name": "snugcode",
   "main": "src/alias.js",
   "compatibility_date": "2026-09-01",
+  // Log & metrik Workers (dashboard Cloudflare → Observability): error relay terlihat tanpa wrangler tail.
+  "observability": { "enabled": true },
   "assets": {
     "directory": "./public"
   },

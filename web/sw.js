@@ -39,21 +39,25 @@ self.addEventListener('push', (e) => {
     self.clients.matchAll({ type: 'window' }).then((wins) => {
       // Aplikasi sedang dilihat: notifikasi in-app sudah cukup.
       if (wins.some((w) => w.visibilityState === 'visible')) return;
-      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon-192.png', badge: 'icon-192.png', data: { sid: d.sid, mid: d.mid } });
+      // Izin berisiko rendah/sedang bisa dijawab dari notifikasi (aplikasi terbuka & menjawab lewat kanal E2EE);
+      // risiko tinggi tidak membawa pid, jadi selalu dibuka dan diputuskan di aplikasi.
+      const actions = d.pid ? [{ action: 'allow', title: 'Izinkan' }, { action: 'deny', title: 'Tolak' }] : [];
+      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon-192.png', badge: 'icon-192.png', actions, data: { sid: d.sid, mid: d.mid, pid: d.pid } });
     }),
   );
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const { sid, mid } = e.notification.data || {};
+  const { sid, mid, pid } = e.notification.data || {};
+  const decision = pid && (e.action === 'allow' || e.action === 'deny') ? e.action : null;
   const url = new URL('./', self.registration.scope);
-  if (mid) url.hash = `open=${mid}${sid ? ':' + sid : ''}`;
+  if (mid) url.hash = `open=${mid}${sid ? ':' + sid : ''}` + (decision ? `&perm=${pid}:${decision}` : '');
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
       const w = wins[0];
       if (!w) return self.clients.openWindow(url.href);
-      w.postMessage({ open: { mid, sid } });
+      w.postMessage({ open: { mid, sid }, perm: decision ? { pid, decision } : null });
       return w.focus();
     }),
   );
