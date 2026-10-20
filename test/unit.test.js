@@ -858,7 +858,7 @@ test('ganti nama: entri autostart lama (pocketcode) dipindahkan ke snugcode', as
   Object.assign(process.env, { HOME: home, USERPROFILE: home, APPDATA: home });
   try {
     const { autostartFilePath, isAutostartEnabled, syncAutostart } = await import('../daemon/autostart.js');
-    const legacy = autostartFilePath().replace(/snugcode/g, 'pocketcode');
+    const legacy = path.join(path.dirname(autostartFilePath()), path.basename(autostartFilePath()).replace(/snugcode/g, 'pocketcode'));
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
     fs.writeFileSync(legacy, 'lama');
     assert.ok(isAutostartEnabled());
