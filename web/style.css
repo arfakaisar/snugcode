@@ -1146,6 +1146,8 @@ html.kb.short #modes { display: none; }
 /* Progress proses lama (web/ui/progress.js): bar bergerak + tahap + waktu & perkiraan sisa */
 .prog { padding: 14px; border-radius: var(--r-lg); background: var(--surface); text-align: left; animation: rise .4s var(--spring) both; }
 .prog .ptop { display: flex; align-items: baseline; gap: 10px; }
+.prog .pretry { margin-top: 12px; text-align: center; }
+.prog .pretry p { margin: 0 0 10px; }
 .prog .plabel { flex: 1; min-width: 0; font-weight: 600; }
 .prog .ptime { flex: none; color: var(--dim); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 .prog .pbar { position: relative; height: 8px; margin: 10px 0 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
