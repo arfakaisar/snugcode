@@ -8,6 +8,7 @@
 // Langganan Claude (Pro/Max) dan login Gemini CLI/Antigravity TIDAK boleh dipakai aplikasi
 // pihak ketiga (ketentuan Anthropic & Google, 2026): hanya API key. Login ChatGPT diizinkan OpenAI
 // dan dijalankan lewat Codex resmi (lihat daemon/codex.js).
+import { ENGINE_TABLE } from './engine-table.js';
 
 /**
  * @typedef {'anthropic' | 'openai' | 'responses'} WireFormat
@@ -71,8 +72,8 @@ export function splitRef(ref) {
 export const joinRef = (conn, id) => (conn === 'router' ? id : `${conn}:${id}`);
 export const connKind = (conn) => String(conn || '').replace(/\d+$/, '');
 
-// Engine (harness) yang dipakai: 'claude' = Claude Agent SDK, 'codex' = Codex app-server.
-// Ditentukan per koneksi + model; daemon/engines.js memakai ini bersama format yang terdeteksi.
+// Engine (harness) yang dipakai: 'claude' = Claude Agent SDK, 'codex' = Codex app-server, 'gemini' = Gemini CLI (ACP).
+// Ditentukan per koneksi + model: tabel engine (shared/engine-table.js, dari benchmark) lalu format yang terdeteksi.
 const GPT_RE = /(^|\/)(gpt-|o\d(-|$)|codex)/i;
 export const isGptModel = (id) => GPT_RE.test(String(id || ''));
 export const isClaudeId = (id) => /(^|\/)claude-/i.test(String(id || ''));
@@ -80,11 +81,13 @@ export const isClaudeId = (id) => /(^|\/)claude-/i.test(String(id || ''));
 /**
  * @param {{ kind: string, formats?: Partial<Record<WireFormat, boolean>> }} conn
  * @param {string} id model tanpa awalan koneksi
- * @returns {{ engine: 'claude' | 'codex', wire: 'anthropic' | 'openai' | 'responses' | 'chatgpt' } | null}
+ * @returns {{ engine: 'claude' | 'codex' | 'gemini', wire: 'anthropic' | 'openai' | 'responses' | 'chatgpt' | 'gemini' } | null}
  */
 export function engineFor(conn, id) {
   const f = conn.formats || {};
   if (conn.kind === 'chatgpt') return { engine: 'codex', wire: 'chatgpt' };
+  const row = ENGINE_TABLE.find((r) => r.kind === conn.kind && new RegExp(r.model, 'i').test(String(id || '')));
+  if (row?.engine === 'gemini') return { engine: 'gemini', wire: 'gemini' };
   // Model GPT paling baik di harness-nya sendiri (Codex), bila endpoint melayani Responses API.
   if (f.responses && (conn.kind === 'openai' || isGptModel(id))) return { engine: 'codex', wire: 'responses' };
   if (f.anthropic) return { engine: 'claude', wire: 'anthropic' };
@@ -92,7 +95,7 @@ export function engineFor(conn, id) {
   return null;
 }
 
-export const ENGINE_LABEL = { claude: 'Claude Agent SDK', codex: 'Codex' };
+export const ENGINE_LABEL = { claude: 'Claude Agent SDK', codex: 'Codex', gemini: 'Gemini CLI' };
 
 export function maskKey(key) {
   const k = String(key || '');

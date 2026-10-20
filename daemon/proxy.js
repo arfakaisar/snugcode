@@ -56,8 +56,8 @@ function agentFor(protocol) {
 
 /**
  * @typedef {{
- *   wire: 'anthropic' | 'openai' | 'responses',
- *   base: () => string,            // anthropic: root tanpa /v1; openai/responses: base dengan /v1
+ *   wire: 'anthropic' | 'openai' | 'responses' | 'gemini',
+ *   base: () => string,            // anthropic/gemini: root tanpa /v1; openai/responses: base dengan /v1
  *   auth: () => Record<string, string> | null, // header otentikasi asli (dibaca tiap request)
  *   router?: boolean,              // sanitasi header & _ide (9router dan sejenisnya)
  *   kind?: string,                 // jenis koneksi (gemini: skema tool & thought signature)
@@ -75,7 +75,8 @@ export function startProxy({ log = () => {} } = {}) {
   /** @type {Map<string, { route: Route, buf: Buffer }>} */
   const routes = new Map();
   const find = (req) => {
-    const got = String(req.headers['x-api-key'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    // Gemini CLI (SDK @google/genai) mengirim token lokal di x-goog-api-key.
+    const got = String(req.headers['x-api-key'] || req.headers['x-goog-api-key'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const g = Buffer.from(got);
     for (const [, r] of routes) if (g.length === r.buf.length && timingSafeEqual(g, r.buf)) return r.route;
     return null;
@@ -89,7 +90,8 @@ export function startProxy({ log = () => {} } = {}) {
     passthrough(route, req, res);
   });
 
-  // Anthropic -> endpoint format Anthropic, atau Responses API (Codex) -> endpoint OpenAI: apa adanya.
+  // Anthropic -> endpoint format Anthropic, Responses API (Codex) -> endpoint OpenAI, Gemini API (Gemini CLI)
+  // -> Google: apa adanya.
   function passthrough(route, req, res) {
     const base = route.base().replace(/\/+$/, '');
     // Codex memanggil <base_url>/responses dengan base_url = proxy + /v1.
@@ -98,6 +100,7 @@ export function startProxy({ log = () => {} } = {}) {
     const transport = target.protocol === 'https:' ? https : http;
     const headers = { ...req.headers, host: target.host };
     delete headers['x-api-key'];
+    delete headers['x-goog-api-key'];
     delete headers.authorization;
     Object.assign(headers, route.auth() || {});
     delete headers['accept-encoding'];

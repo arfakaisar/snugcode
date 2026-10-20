@@ -79,7 +79,12 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/sessions.js` | Pengelola sesi (`SessionManager` & `Session`): tiga jenis sesi (repo/worktree, folder lokal dari terminal, Komputer), pemilihan engine per model dengan izin & checkpoint yang sama, parsing event streaming, permission gating (`askPermission`), hook PreToolUse, dan eksekusi direct shell (`!`). |
 | `daemon/engine-claude.js` | Engine Claude Agent SDK: opsi `query()` (daftar tool ramping, subagen, MCP snugcode, sandbox saat auto-izin, `settingSources: []` + `CLAUDE.md` proyek), hook pelebar Read/Grep untuk model non-Claude. |
 | `daemon/engine-codex.js` | Engine Codex: proses `codex app-server` per sesi (sandbox OS, jembatan MCP) dan `decideCodex` (izin Codex lewat kebijakan snugcode). |
-| `daemon/permissions.js` | Kebijakan izin bersama kedua engine (fungsi murni): folder data snugcode, file konfigurasi repo (`.claude/`, `.codex/`, `.mcp.json`, `.git/`), push ke remote, perintah keluar sandbox, aturan "Selalu". |
+| `daemon/engine-gemini.js` | Engine Gemini CLI: proses `gemini --acp` per sesi (token lokal proxy, `GEMINI_CLI_HOME` milik snugcode), fallback ke Claude Agent SDK bila Gemini CLI tidak bisa dipasang, dan `decideGemini` (izin tool call Gemini lewat kebijakan snugcode). |
+| `daemon/gemini.js` | Gemini CLI: pemasangan `@google/gemini-cli` (versi dipatok di `gemini-version.json`), setelan & `GEMINI.md` snugcode, klien JSON-RPC ACP (`AcpRpc`), `GeminiAgent` (event ACP → event snugcode, `fs/read_text_file`/`fs/write_text_file` lewat snugcode, mode rencana, `session/load`), instruksi proyek. |
+| `daemon/permissions.js` | Kebijakan izin bersama semua engine (fungsi murni): folder data snugcode, file konfigurasi repo (`.claude/`, `.codex/`, `.gemini/`, `.mcp.json`, `.git/`), push ke remote, perintah keluar sandbox, aturan "Selalu". |
+| `daemon/files.js` | File explorer dari HP: `resolveIn` (realpath; tolak di luar folder sesi & folder data snugcode), daftar folder (sembunyikan `.git` & symlink keluar), baca teks/gambar (deteksi biner, hash), tulis dengan deteksi konflik hash, `splitPatch` + `revertChange` (batalkan satu hunk lewat `git apply -R`, atau satu file). |
+| `daemon/pty.js` | Terminal interaktif: `@lydell/node-pty` (opsional), maks 4 PTY per sesi, scrollback 256 KB yang diputar ulang saat dibuka lagi, output dikumpulkan per 16 ms, satu pelanggan per terminal (HP terakhir yang membuka). |
+| `daemon/keychain.js` | `snugcode keychain on`: `secrets.json` dienkripsi XChaCha20-Poly1305 dengan kunci di keychain OS (macOS `security`, Secret Service `secret-tool`, DPAPI di Windows → `secrets.key`); kunci di-cache per proses, pesan jelas bila keychain terkunci. |
 | `daemon/sandbox.js` | Sandbox OS untuk Bash engine Claude: deteksi dukungan (bubblewrap + socat + probe namespace / Seatbelt), opsi `sandbox` SDK (tolak baca kredensial, tulis hanya worktree & cache paket, hook/config git terkunci), dan `info/exclude` untuk placeholder sandbox. |
 | `daemon/proxy.js` | Loopback HTTP proxy lokal (`127.0.0.1`) multi-rute: satu token lokal per koneksi+format, key asli disuntikkan per request. Rute `anthropic` (diteruskan apa adanya; khusus router: sanitasi header & `_ide`), `openai` (diterjemahkan, lihat `translate.js`), `responses` (Codex → endpoint OpenAI). |
 | `daemon/translate.js` | Penerjemah Anthropic Messages ⇄ OpenAI Chat Completions (request, stream SSE, error, `count_tokens`): skema tool & *thought signature* Gemini 3, effort dari akhiran ID → `reasoning_effort`, cache token → `cache_read_input_tokens`. |
@@ -87,6 +92,8 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/codex.js` | Engine Codex: pemasangan `@openai/codex` (versi dipatok di `codex-version.json`), klien JSON-RPC `codex app-server`, profil sandbox (tolak baca folder data snugcode), login ChatGPT dengan device code, daftar model ChatGPT, dan `CodexAgent` (event Codex → event snugcode, izin lewat kebijakan snugcode). |
 | `daemon/mcp-bridge.js` | Server MCP stdio untuk engine Codex: tool `dev_*`/`preview_screenshot` diteruskan ke daemon lewat kanal lokal dengan token jembatan per sesi (hanya bisa memanggil tool dev sesi itu). |
 | `shared/providers.js` | Katalog provider (URL, pola key, format), key yang ditolak (token langganan Claude, OAuth Google, admin key), referensi model `<koneksi>:<model>`, dan pemilihan engine per koneksi+model (`engineFor`). |
+| `shared/engine-table.js` | Tabel engine bawaan per jenis koneksi + pola model (diisi dari `npm run bench`), dibaca `engineFor` sebelum aturan format. |
+| `scripts/bench.mjs` | `npm run bench`: tugas coding yang sama (perbaiki bug, fitur, rename lintas file) di tiap engine per model, dinilai test; tabel lulus/waktu/token + saran baris `engine-table.js`. Folder data sementara, koneksi disalin dari PC ini. |
 | `daemon/updater.js` | Self-update (instalasi `git` maupun `npm -g`): kanal `stable` (rilis bertag, bawaan) / `main`, rollback ke versi sebelumnya, graceful restart berjangka. |
 | `daemon/keepawake.js` | Anti-sleep service: menjaga CPU & koneksi jaringan PC tetap menyala saat daemon berjalan. |
 | `daemon/github.js` | Integrasi Git & GitHub REST API: pembuatan `git worktree`, branching, auto-prune, status, diff, commit, push, dan PR. |
@@ -103,14 +110,14 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `daemon/agents.js` | Definisi ulang subagen bawaan (Explore, Plan, general-purpose, claude) dengan effort rendah; modelnya model ringan sesi. |
 | `daemon/checkpoint.js` | Snapshot worktree per prompt (index git sementara) dan rewind. |
 | `daemon/webpush.js` | Web Push terenkripsi (RFC 8291 + VAPID) ke HP saat PWA ditutup. |
-| `daemon/runner.js` | Runner cloud (tanpa PC): `bootstrapCloud` mengisi config/secrets dari env secara idempoten (token mesin, PIN, relay, router, model), `stopRunner` menghentikan runner yang menganggur (Codespaces API dengan token dari HP, atau keluar dari container), `reportStatus` melaporkan kegagalan konfigurasi ke relay. |
-| `.devcontainer/`, `Dockerfile` | Runner Codespaces: `install.sh` (postCreate: Chromium + paket snugcode), `start.sh` (postStart: `snugcode cloud` di latar belakang; fallback ke kode repo bila paket global gagal), `lib.sh` (folder data `/workspaces/.snugcode` atau `~/.snugcode`, log, laporan tahap ke relay). `Dockerfile`: image yang sama untuk VPS/Fly.io (volume `/data`). |
+| `daemon/runner.js` | Runner cloud (tanpa PC): `bootstrapCloud` mengisi config/secrets dari env secara idempoten (token mesin, PIN, relay, router, model), `stopRunner` menghentikan runner yang menganggur (Codespaces API dengan token dari HP, atau keluar dari container), `reportStatus` melaporkan kegagalan konfigurasi ke relay, `tickUsage`/`usageSummary` mencatat perkiraan core-jam per bulan (`runner-usage.json`, tampil di menu runner). |
+| `.devcontainer/`, `Dockerfile` | Runner Codespaces: `install.sh` (onCreate, ikut prebuild bila diatur: Chromium, bubblewrap + socat, paket snugcode), `start.sh` (postStart: `snugcode cloud` di latar belakang; fallback ke kode repo bila paket global gagal), `lib.sh` (folder data `/workspaces/.snugcode` atau `~/.snugcode`, log, laporan tahap ke relay). `Dockerfile`: image yang sama untuk VPS/Fly.io (volume `/data`). |
 | `relay/src/index.js` | Cloudflare Worker `pocketcode-relay` + Durable Objects (`Hub` dan `Pending`) sebagai message broker aman. Lihat tabel endpoint di bawah. |
 | `relay/src/headers.js` | Security header PWA (CSP ketat) — satu sumber untuk `_headers` aset dan respons relay. |
 | `relay/src/alias.js` | Worker alias `snugcode` (alamat publik `snugcode.arfak.workers.dev`): menyajikan PWA dan meneruskan semua request lain ke relay lewat service binding. |
 | `web/app.js` | Titik masuk PWA: boot, service worker, sambung ulang saat aplikasi kembali terlihat, impor data dari alamat lama (`#import=`), token Codespaces dari fragmen (`#gh=`). |
 | `web/sw.js` | Service worker stale-while-revalidate; nama cache = hash isi aset (diisi `build:web`). |
-| `web/ui/*.js` | Layar PWA per modul: `dom` (elemen, ikon, toast, header/sheet), `auth` (login & daftar mesin, hapus mesin dari daftar), `machine` (koneksi PC, pairing, update, login GitHub PC, menu Pengaturan PC), `sessions` (beranda, drawer, sesi baru: tab Repository/Komputer), `session`, `renderer` (event agen), `run`, `git`, `model-picker`, `push`, `progress` (bar tahap + perkiraan sisa); state bersama di `state.js` (`app.conn`, `app.current`, `app.me`). |
+| `web/ui/*.js` | Layar PWA per modul: `dom` (elemen, ikon, toast, header/sheet), `auth` (login & daftar mesin, hapus mesin dari daftar), `machine` (koneksi PC, pairing, update, login GitHub PC, menu Pengaturan PC), `sessions` (beranda, drawer, sesi baru: tab Repository/Komputer), `session`, `renderer` (event agen), `run`, `git` (diff + review per hunk), `files` (explorer & editor), `terminal` (xterm.js, dimuat terpisah dari `xterm.js`), `model-picker`, `push`, `progress` (bar tahap + perkiraan sisa); state bersama di `state.js` (`app.conn`, `app.current`, `app.me`). |
 | `web/eta.js` | Perhitungan progress tanpa DOM: bar per tahap yang melambat mendekati akhir, sisa waktu, durasi tahap yang dipelajari per HP. |
 | `web/conn.js` | Koneksi terenkripsi HP ↔ PC: pairing PIN, auth perangkat, kanal E2EE teks/biner, RPC. |
 | `web/codespaces.js` | Klien GitHub Codespaces tanpa DOM: cari fork runner, secret terenkripsi (sealed box) khusus repo fork, buat/cari/nyalakan/hentikan/hapus codespace. |
@@ -125,7 +132,7 @@ Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan 
 | `scripts/docs-images.mjs`, `scripts/icons.mjs` | `npm run docs:images` (gambar & GIF README dari UI asli, butuh relay dev) dan `npm run icons` (PNG/maskable/apple-touch dari SVG). |
 | `tsconfig.json` | `tsc --checkJs` untuk seluruh JS (daemon, shared, web); relay punya tsconfig sendiri dengan tipe `wrangler types`. `npm run typecheck`, juga di CI. |
 | `.github/workflows/` | `ci.yml`: cek sintaks, typecheck, unit test (Linux/Windows/macOS), bundle PWA, lalu e2e (agen, runner cloud, UI) di Linux. `deploy.yml`: `npm run deploy` saat `main` berubah di `relay/`, `web/`, `shared/` (atau manual), butuh secret `CLOUDFLARE_API_TOKEN`. |
-| `test/` | `e2e-harness.mjs` (setup bersama), `e2e-ui.mjs` (`npm run test:ui`: PWA di Chrome + TUI di pty), `unit.test.js` & `providers.test.js` (`npm test`, juga dijalankan CI di Linux/Windows/macOS), `e2e-connections.mjs` (`npm run test:e2e:connections`: koneksi dari HP, endpoint OpenAI-only lewat penerjemah, Codex asli dengan izin/sandbox/jembatan MCP), `e2e-agent.mjs` (`npm run test:e2e`: HP → relay lokal → daemon → Agent SDK → mock 9router; butuh `npm run dev:relay`), `e2e-cloud.mjs` (`npm run test:e2e:cloud`: provision → `snugcode cloud` → pairing otomatis → setelan dari HP), `worktree.it.mjs` (integrasi git, butuh internet), `e2e-phone.mjs` (simulasi HP manual). |
+| `test/` | `features.test.js` (`npm test`: explorer, konflik edit, batalkan hunk, PTY, keychain, engine Gemini, perkiraan kuota runner), `e2e-gemini.mjs` (`npm run test:e2e:gemini`: Gemini CLI asli vs Gemini API tiruan — izin shell, tulis file lewat ACP, `session/load`, mode rencana, key tidak sampai ke Gemini CLI), `e2e-harness.mjs` (setup bersama), `e2e-ui.mjs` (`npm run test:ui`: PWA di Chrome + TUI di pty), `unit.test.js` & `providers.test.js` (`npm test`, juga dijalankan CI di Linux/Windows/macOS), `e2e-connections.mjs` (`npm run test:e2e:connections`: koneksi dari HP, endpoint OpenAI-only lewat penerjemah, Codex asli dengan izin/sandbox/jembatan MCP), `e2e-agent.mjs` (`npm run test:e2e`: HP → relay lokal → daemon → Agent SDK → mock 9router; butuh `npm run dev:relay`), `e2e-cloud.mjs` (`npm run test:e2e:cloud`: provision → `snugcode cloud` → pairing otomatis → setelan dari HP), `worktree.it.mjs` (integrasi git, butuh internet), `e2e-phone.mjs` (simulasi HP manual). |
 
 ### Runner cloud (tanpa PC)
 Mesin di relay tidak harus PC. `POST /api/machines/provision` (akun yang login) mendaftarkan mesin `kind: 'cloud'`
@@ -256,9 +263,10 @@ Pengguna menyambungkan model dari HP (**Pengaturan PC → Model & API key**, RPC
 | Koneksi `chatgpt` | **Codex** | login ChatGPT milik Codex (`CODEX_HOME`) |
 | Endpoint punya Responses API dan model GPT (atau koneksi `openai`) | **Codex** | provider kustom Codex → proxy (rute `responses`) |
 | Endpoint punya format Anthropic | **Claude Agent SDK** | proxy (rute `anthropic`), diteruskan apa adanya |
+| Baris `shared/engine-table.js` cocok (saat ini: koneksi `gemini` + model `gemini-*`) | **Gemini CLI** | `GOOGLE_GEMINI_BASE_URL` → proxy (rute `gemini`, format Gemini API asli) |
 | Hanya OpenAI Chat Completions | **Claude Agent SDK** | proxy (rute `openai`) + penerjemah format |
 
-`SNUGCODE_ENGINE=claude` memaksa Claude Agent SDK untuk endpoint yang juga punya format Anthropic/OpenAI. Sesi menyimpan referensi model, bukan engine; ganti model ke koneksi/engine lain membuat proses agen baru pada prompt berikutnya.
+`SNUGCODE_ENGINE=claude|codex|gemini` memaksa engine itu bila endpoint-nya mendukung (dipakai juga oleh `npm run bench`). Sesi menyimpan referensi model, bukan engine; ganti model ke koneksi/engine lain membuat proses agen baru pada prompt berikutnya.
 
 ### Engine Codex (`daemon/codex.js`)
 - Dipasang sekali ke `~/.snugcode/tools/codex` saat pertama dibutuhkan (versi dipatok; protokol app-server masih eksperimental). Satu proses `codex app-server` per sesi, dipakai ulang antar prompt; thread Codex disimpan di meta sesi (`codexThreadId`) dan dilanjutkan dengan `thread/resume`.
@@ -267,6 +275,14 @@ Pengguna menyambungkan model dari HP (**Pengaturan PC → Model & API key**, RPC
 - Checkpoint diambil sebelum giliran Codex dimulai (Codex tidak punya hook "tunggu sebelum tool"). Mode rencana = sandbox `readOnly` untuk giliran itu.
 - Tool dev snugcode tersedia lewat `mcp_servers.snugcode` → `daemon/mcp-bridge.js` → kanal lokal daemon (token jembatan per sesi; `dev_start` & screenshot URL luar tetap lewat izin).
 - Event: delta pesan & reasoning → teks/thinking, `commandExecution`/`fileChange`/`mcpToolCall`/`webSearch` → kartu tool + hasil, `turn/plan/updated` → kartu rencana, `thread/tokenUsage/updated` → token & cache per giliran, `turn/completed` → ringkasan selesai.
+
+### Engine Gemini CLI (`daemon/gemini.js`, `daemon/engine-gemini.js`)
+- Dipasang sekali ke `~/.snugcode/tools/gemini` (versi dipatok di `gemini-version.json`); bila gagal (mis. offline), model Gemini dijalankan Claude Agent SDK lewat penerjemah dengan catatan di sesi. Satu proses `gemini --acp` per sesi; sesi Gemini disimpan di meta (`geminiSessionId`) dan dilanjutkan dengan `session/load` (riwayat yang diputar ulang diabaikan).
+- Otentikasi metode `gateway`: `GOOGLE_GEMINI_BASE_URL` = proxy lokal, `GEMINI_API_KEY` = token lokal (dikirim sebagai `x-goog-api-key`, ditukar proxy dengan key asli). Kredensial Google lain di env dibuang. `GEMINI_CLI_HOME` = `~/.snugcode/gemini/<repo|computer>` berisi `settings.json` (auto-update, statistik & telemetri mati, folder trust aktif, `enter_plan_mode` dimatikan) dan `GEMINI.md` = `geminiPrompt`.
+- Folder kerja tidak pernah ditandai tepercaya: `.gemini/settings.json` repo (MCP, hook, `discoveryCommand`) tidak dimuat. Konsekuensinya Gemini CLI juga tidak menjalankan server MCP stdio (tanpa tool `dev_*`; dev server lewat shell latar belakang Gemini) dan tidak memuat instruksi proyek — `GEMINI.md`/`AGENTS.md`/`CLAUDE.md` di root folder kerja disisipkan di prompt pertama sesi baru.
+- Izin (`session/request_permission` → `decideGemini`): `execute` → kebijakan Bash (`decideCodex('command')`; Gemini CLI tanpa sandbox OS, jadi `unsandboxedAuto` membuat perintah tetap bertanya saat auto-izin), `edit`/`delete`/`move` → kebijakan edit dengan diff dari ACP, `switch_mode` → ExitPlanMode, `fetch` → WebFetch/WebSearch, lainnya bertanya.
+- File di dalam folder kerja dibaca/ditulis lewat klien (`fs/read_text_file`, `fs/write_text_file`): folder data snugcode ditolak, tulis menunggu checkpoint. File yang belum ada dibaca sebagai teks kosong (Gemini CLI 0.64 tidak mengenali error ENOENT lewat ACP).
+- Event: `agent_message_chunk`/`agent_thought_chunk` → teks/thinking, `tool_call`/`tool_call_update` → kartu tool (shell = Bash, edit = Edit dengan diff) + hasil, `plan` → kartu rencana, `usage_update` → konteks %, hasil `session/prompt` → ringkasan selesai (token & cache). Model per prompt lewat `session/set_model` (akhiran effort dibuang), mode rencana lewat `session/set_mode plan`.
 
 ### Router (9router, OmniRoute, LiteLLM, …)
 Router tetap didukung sebagai koneksi biasa (key + URL). Header SDK disanitasi dan suffix `_ide` dibuang hanya untuk koneksi router. Router yang meneruskan langganan Claude/Antigravity (provider `cc/`, `ag/`) berisiko bagi akun pengguna (lihat §1 butir 6).
@@ -370,6 +386,14 @@ Output perintah di-stream secara real-time ke layar HP (maks. 512 KB, dihentikan
 - **Checkpoint & rewind**: tiap prompt menyimpan snapshot worktree (termasuk perubahan yang belum di-commit; `node_modules` dikecualikan). Tombol ↺ di prompt atau `/rewind` mengembalikan semua file.
 - **Web Push**: aktifkan dari menu → *Izinkan notifikasi*. Notifikasi muncul saat agen selesai, butuh izin, atau bertanya, walau PWA ditutup (iOS: tambahkan ke Home Screen dulu).
 
+### F. File explorer, review diff & terminal dari HP
+- **File** (menu sesi): telusuri worktree (`files`), baca teks/gambar (`fileRead`; >400 KB hanya lewat kanal biner), edit & file baru (`fileWrite` dengan hash: file yang sudah berubah di PC ditolak). Agen diberi tahu di prompt berikutnya bahwa pengguna mengubah file (`userChanged` → `meta.note`). *Tanya agen* mengisi composer dengan path file.
+- **Review diff** (layar Git): diff diparse per file/hunk; komentar per baris atau hunk dikumpulkan lalu *Kirim ke agen* sebagai satu pesan berisi kutipan kode. *Batalkan hunk/file* (`revert`, ditolak saat agen berjalan): `git apply -R` untuk satu hunk, `git checkout HEAD --` untuk satu file, file baru dihapus.
+- **Terminal** (menu sesi): PTY di PC (`termOpen`/`termAttach`/`termIn`/`termResize`/`termClose`, event `term`), xterm.js dimuat saat pertama dibuka, baris tombol Esc/Tab/Ctrl/Alt/panah/^C, input dikumpulkan per 8 ms. Shell tetap hidup saat layar ditutup atau koneksi putus (output terakhir diputar ulang); terminal yang hidup membuat runner cloud tidak dianggap menganggur. Butuh paket opsional `@lydell/node-pty`.
+
+### G. Keychain OS untuk `secrets.json`
+- `snugcode keychain on|off|status`. Saat aktif, `secrets.json` berisi `{ snugcodeKeychain: 1, kc, n, c }` (XChaCha20-Poly1305, AAD `snugcode-secrets-v1`); kunci 256-bit hanya di keychain OS, satu item per folder data. Mode file dipertahankan saat menulis ulang. Bila kunci tidak bisa dibuka, daemon berhenti dengan pesan jelas (tidak pernah menimpa dengan secrets kosong). `secrets.key` (DPAPI) ikut dilindungi dari agen.
+
 ---
 
 ## 9. Panduan Konfigurasi & Perintah CLI
@@ -415,7 +439,8 @@ snugcode autostart on
 | `snugcode update --rollback` | Kembali ke versi sebelum pembaruan terakhir (instalasi npm). `--channel stable\|main` mengganti kanal pembaruan. |
 | `snugcode devices` | Melihat daftar perangkat HP yang saat ini terpasang (*paired*). |
 | `snugcode revoke <id\|all>` | Mencabut izin akses perangkat HP tertentu atau semua perangkat (restart daemon agar berlaku). |
-| `snugcode status` | Menampilkan ringkasan konfigurasi: runtime, relay, akun, model & model ringan, login GitHub, jumlah HP, status kunci PIN. |
+| `snugcode status` | Menampilkan ringkasan konfigurasi: runtime, relay, akun, model & model ringan, login GitHub, jumlah HP, status kunci PIN, keychain. |
+| `snugcode keychain on\|off\|status` | Mengenkripsi `secrets.json` dengan kunci di keychain OS / mengembalikannya ke teks biasa / status (lihat §8.G). |
 | `snugcode cloud` | Runner cloud: konfigurasi dari env (`daemon/runner.js`), daemon di bawah supervisor (`--no-supervise` untuk langsung). |
 | `snugcode help` | Daftar perintah. |
 
@@ -428,7 +453,8 @@ Flag non-interaktif `setup`: `--router`, `--key`, `--model`, `--github device|cr
 - `daemon.log`, `daemon.pid`, `daemon.sock`: Log, ID proses, dan unix socket IPC untuk TUI (Windows: named pipe `\\.\pipe\pocketcode-<hash>`). Runner cloud: `cloud.log` & `install.log`.
 - `workspaces/<owner>__<repo>/`: Base clone (`_base`, disimpan 3 hari setelah sesi terakhir dihapus) dan direktori git worktree per sesi coding (`s-<id>`).
 - `sessions/`: `index.json` (daftar sesi; bila rusak disimpan sebagai `index.json.broken-*` dan sesi dipulihkan dari worktree) dan riwayat event JSONL per sesi (`<sessionId>.jsonl`).
-- `env/`: Template `.env` per repo. `bin/`: `cloudflared` dan shim pnpm/yarn (`bin/pm`). `tools/`: corepack.
+- `env/`: Template `.env` per repo. `bin/`: `cloudflared` dan shim pnpm/yarn (`bin/pm`). `tools/`: corepack, `codex/`, `gemini/` (dipasang saat pertama dibutuhkan).
+- `codex/`, `gemini/`: `CODEX_HOME` dan `GEMINI_CLI_HOME` milik snugcode. `secrets.key`: kunci DPAPI (Windows, `keychain on`). `runner-usage.json`: perkiraan core-jam runner Codespaces.
 - `claude/`: Direktori konfigurasi khusus Agent SDK (`CLAUDE_CONFIG_DIR`, termasuk `plans/`) terpisah dari instalasi Claude Code pengguna.
 
 ---
@@ -454,11 +480,12 @@ Flag non-interaktif `setup`: `--router`, `--key`, `--model`, `--github device|cr
 - [x] Laporan tahap runner, progress bar dengan perkiraan sisa, hapus mesin dari daftar, sambung ulang izin Codespaces.
 - [x] Workflow Deploy (relay + PWA dari GitHub Actions).
 - [x] Koneksi multi-provider: login ChatGPT (Codex) & API key apa pun dengan deteksi otomatis; engine per model (Claude Agent SDK / Codex), penerjemah format OpenAI, sandbox OS untuk Codex.
-- [ ] Engine Gemini CLI (ACP) untuk model Gemini, dan benchmark harness per model (tabel engine bawaan dari data).
+- [x] Engine Gemini CLI (ACP) untuk model Gemini, dan benchmark harness per model (`npm run bench` → `shared/engine-table.js`).
 - [x] Pengamanan: sandbox OS untuk auto-izin engine Claude, setelan proyek tidak dimuat, konfigurasi repo dilindungi, token relay terpisah jenis & bisa dicabut, konfirmasi penautan PC, CSP PWA, rate limit, kunci PIN berbatas waktu.
 - [x] Rilis bertag (kanal stable) + rollback; notifikasi push "runner berhenti".
-- [ ] Tampilan kuota Codespaces dan prebuild codespace.
-- [ ] Integrasi OS Keychain (Windows Credential Manager / macOS Keychain / Linux SecretService) untuk `secrets.json`.
-- [ ] Panel Terminal Interaktif PTY penuh di HP.
-- [ ] Tunnel preview E2EE lewat relay sendiri (Service Worker), pengganti quick tunnel Cloudflare.
-- [ ] File explorer/editor ringan dan review diff per hunk dengan komentar ke agen.
+- [x] Perkiraan kuota Codespaces (core-jam dicatat runner) dan prebuild codespace (`onCreateCommand`, panduan di `.devcontainer/README.md`).
+- [x] Integrasi keychain OS (macOS Keychain / Secret Service / DPAPI) untuk `secrets.json`.
+- [x] Terminal interaktif PTY penuh di HP.
+- [x] File explorer/editor ringan dan review diff per hunk dengan komentar ke agen.
+- [ ] Tunnel preview E2EE lewat relay sendiri. Ditunda: preview harus di origin terpisah dari PWA (kode preview satu origin bisa membaca token & secret perangkat di storage PWA), dan Service Worker tidak bisa meneruskan WebSocket HMR.
+- [ ] Amazon Bedrock & Google Vertex AI (proxy perlu penandatanganan SigV4 / token OAuth layanan).

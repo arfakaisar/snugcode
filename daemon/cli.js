@@ -15,7 +15,7 @@ import util from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
-import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR, isCloud, scrubSecretEnv, resetPinLock, pinLockedUntil } from './config.js';
+import { loadConfig, saveConfig, loadSecrets, saveSecrets, ensureDirs, HOME, SESSIONS_DIR, isCloud, scrubSecretEnv, resetPinLock, pinLockedUntil, secretsSealed, setKeychain } from './config.js';
 import { DEFAULT_RELAY_URL, GITHUB_CLIENT_ID, DEFAULT_ROUTER_URL, PACKAGE_SPEC } from './defaults.js';
 import { deviceFlowLogin, gitCredentialToken, gh } from './github.js';
 import { pinToPrs, PIN_RE, normalizePin } from '../shared/crypto.js';
@@ -26,7 +26,7 @@ import { checkUpdate, performUpdate, performRollback, updateChannel } from './up
 import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, syncAutostart } from './autostart.js';
 
 const CLI = fileURLToPath(import.meta.url);
-const COMMAND_NAMES = ['setup', 'login', 'connect', 'disconnect', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud'];
+const COMMAND_NAMES = ['setup', 'login', 'connect', 'disconnect', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud', 'keychain'];
 const args = process.argv.slice(2);
 // Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
 // perintah dianggap prompt awal: snugcode "jelaskan repo ini".
@@ -369,7 +369,22 @@ function status() {
     github: cfg.githubLogin || null,
     devices: Object.keys(sec.devices).length,
     pinLocked: !!pinLockedUntil(sec),
+    keychain: secretsSealed(),
   });
+}
+
+// secrets.json terenkripsi dengan kunci di keychain OS (lihat daemon/keychain.js). Daemon yang sedang
+// berjalan ikut menyimpan dalam mode baru pada penulisan berikutnya; tidak perlu restart.
+async function keychain() {
+  const sub = args.find((a) => !a.startsWith('-')) || 'status';
+  if (sub === 'status') {
+    console.log(secretsSealed() ? c.g('✓ secrets.json terenkripsi, kuncinya di keychain OS') : c.d('secrets.json tidak terenkripsi (izin file 600). Aktifkan: snugcode keychain on'));
+    return;
+  }
+  if (sub !== 'on' && sub !== 'off') throw new Error('Pakai: snugcode keychain on | off | status');
+  const r = setKeychain(sub === 'on');
+  if (sub === 'on') console.log(r === 'sudah aktif' ? c.d('Keychain sudah aktif.') : c.g(`✓ secrets.json dienkripsi; kuncinya disimpan di ${r}.`) + c.d('\n  Tanpa keychain itu (mis. login lewat SSH saat keychain terkunci) daemon tidak bisa membaca secrets.'));
+  else console.log(r === 'sudah mati' ? c.d('Keychain memang tidak aktif.') : c.g('✓ secrets.json kembali tidak terenkripsi (izin file 600); kunci dihapus dari keychain.'));
 }
 
 // Login ulang GitHub saja (mis. token dicabut), tanpa mengulang seluruh setup.
@@ -593,6 +608,7 @@ function help() {
   snugcode pin              ganti PIN / buka kunci
   snugcode devices          HP yang terpasang;  snugcode revoke <id|all>
   snugcode status           ringkasan konfigurasi
+  snugcode keychain on|off  enkripsi secrets.json dengan kunci di keychain OS (macOS/Windows/Linux desktop)
   snugcode cloud            runner cloud tanpa PC (Codespaces/Docker), dikonfigurasi lewat env & HP`);
 }
 
@@ -671,7 +687,7 @@ async function cloud() {
   run();
 }
 
-const commands = { tui, help, cloud, setup, login, connect, disconnect, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status };
+const commands = { tui, help, cloud, setup, login, connect, disconnect, start, stop, restart: cliRestart, update: cliUpdate, clean: cliClean, autostart, pin: resetPin, devices, revoke: () => revoke(args.find((a) => !a.startsWith('--'))), status, keychain };
 Promise.resolve(commands[cmd]()).catch((e) => {
   console.error(c.r('✗ ' + (e?.message || e)));
   process.exit(1);

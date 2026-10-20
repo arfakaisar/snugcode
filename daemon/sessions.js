@@ -10,11 +10,12 @@ import { randomBytes } from 'node:crypto';
 import { SESSIONS_DIR, CLAUDE_DIR, WORKSPACES, SESSION_INDEX, writeJson, readSessionIndex } from './config.js';
 import { prepareWorktree, removeWorktree, inspectLocalRepo, currentBranch, repoDirName } from './github.js';
 import { startProxy } from './proxy.js';
-import { resolveRoute, authHeaders, knownRefs, allConnections, getConn } from './providers.js';
+import { resolveRoute, authHeaders, geminiRoot, knownRefs, allConnections, getConn } from './providers.js';
 import { todosFromInput, todoText } from '../shared/events.js';
 import { PLANS_DIR, isInside, isSensitivePath, isProtectedRepoPath, SECRET_CMD_RE, toolPaths, isLocalUrl, isRemoteWrite, escapesSandbox, neverAlways, suggestedRules, ruleText, ruleMatches } from './permissions.js';
 import { AGENT_TOOLS, widenToolInput, isClaudeModel, startClaudeAgent } from './engine-claude.js';
 import { startCodexAgent, decideCodex } from './engine-codex.js';
+import { startGeminiAgent, decideGemini } from './engine-gemini.js';
 import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
@@ -402,6 +403,15 @@ export class Session extends EventEmitter {
     });
   }
 
+  // Pengguna mengubah file langsung (editor / batalkan hunk di HP): dicatat di riwayat, dan agen diberi
+  // tahu di prompt berikutnya agar tidak mengedit berdasarkan isi lama.
+  userChanged(what, note) {
+    const line = `[snugcode] The user ${what} outside of this conversation. Re-read affected files before editing them.`;
+    this.meta.note = this.meta.note ? this.meta.note + '\n' + line : line;
+    this.mgr.saveIndex();
+    this.emitEvent({ k: 'note', d: note });
+  }
+
   // Kembalikan semua file worktree ke kondisi sebelum prompt `seq` dijalankan.
   async rewindTo(seq) {
     if (this.meta.computer) throw new Error('Checkpoint dan rewind hanya tersedia untuk sesi repository git.');
@@ -446,15 +456,31 @@ export class Session extends EventEmitter {
     }
   }
 
-  // Engine per model (engine-claude.js / engine-codex.js); izin, checkpoint & event tetap milik sesi.
+  // Engine per model (engine-claude.js / engine-codex.js / engine-gemini.js); izin, checkpoint & event tetap milik sesi.
   async startAgent() {
     const route = resolveRoute(this.mgr.secrets, this.meta.model);
-    return route.engine === 'codex' ? startCodexAgent(this, route) : startClaudeAgent(this, route);
+    if (route.engine === 'codex') return startCodexAgent(this, route);
+    if (route.engine !== 'gemini') return startClaudeAgent(this, route);
+    try {
+      return await startGeminiAgent(this, route);
+    } catch (e) {
+      // Gemini CLI tidak bisa dipasang/dijalankan (mis. npm offline): model yang sama lewat Claude Agent SDK.
+      if (!route.conn.formats?.openai && !route.conn.openai) throw e;
+      this.mgr.log('! ' + e.message);
+      if (!this.warnedGemini) this.emitEvent({ k: 'note', d: `◆ ${e.message.slice(0, 200)} Model ini dijalankan lewat Claude Agent SDK.` });
+      this.warnedGemini = true;
+      return startClaudeAgent(this, { ...route, engine: 'claude', wire: 'openai' });
+    }
   }
 
   // Keputusan izin untuk permintaan Codex (dipanggil CodexAgent), lihat engine-codex.js.
   decideCodex(kind, p) {
     return decideCodex(this, kind, p);
+  }
+
+  // Keputusan izin untuk tool call Gemini CLI (dipanggil GeminiAgent), lihat engine-gemini.js.
+  decideGemini(tc) {
+    return decideGemini(this, tc);
   }
 
   // Hook PreToolUse untuk tool yang bisa mengubah file. Berjalan juga untuk tool yang lolos lewat
@@ -623,8 +649,8 @@ export class Session extends EventEmitter {
     }
     const agent = await this.ensureAgent();
     const done = new Promise((resolve) => (this.turn = { resolve, agent }));
-    // Codex tidak punya hook "tunggu sebelum tool": checkpoint harus selesai sebelum giliran dimulai.
-    if (agent.kind === 'codex' && this.cpReady) await this.cpReady;
+    // Codex/Gemini CLI tidak punya hook "tunggu sebelum tool": checkpoint harus selesai sebelum giliran dimulai.
+    if ((agent.kind === 'codex' || agent.kind === 'gemini') && this.cpReady) await this.cpReady;
     await agent.push({ text: prompt, images });
     return done;
   }
@@ -902,8 +928,8 @@ export class SessionManager {
     const cur = () => getConn(this.secrets, id) || conn;
     t = this.proxy.register({
       wire: /** @type {any} */ (wire),
-      base: () => (wire === 'anthropic' ? cur().anthropic : cur().openai) || '',
-      auth: () => authHeaders(cur(), wire === 'anthropic' ? 'anthropic' : 'openai'),
+      base: () => (wire === 'gemini' ? geminiRoot(cur()) : wire === 'anthropic' ? cur().anthropic : cur().openai) || '',
+      auth: () => authHeaders(cur(), wire === 'anthropic' || wire === 'gemini' ? wire : 'openai'),
       router: !!(conn.router || conn.kind === 'router'),
       kind: conn.kind,
     });

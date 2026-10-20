@@ -97,7 +97,7 @@ test('detectConnection: endpoint kustom -> format dideteksi tanpa memanggil mode
 test('detectConnection: Gemini & OpenAI -> model non-chat dibuang', async () => {
   const g = await D.detectConnection({ key: 'AIza' + 'b'.repeat(35) }, { fetchImpl: fakeFetch({ 'GET https://generativelanguage.googleapis.com/v1beta/openai/models': () => [200, { data: [{ id: 'models/gemini-3.8-pro' }, { id: 'models/gemini-3.8-flash' }, { id: 'models/text-embedding-005' }, { id: 'models/imagen-4' }] }] }) });
   assert.deepEqual(g.models.map((m) => m.id), ['gemini:gemini-3.8-pro', 'gemini:gemini-3.8-flash']);
-  assert.equal(g.models[0].engine, 'claude');
+  assert.equal(g.models[0].engine, 'gemini', 'model Gemini memakai harness Gemini CLI');
   const o = await D.detectConnection({ key: 'sk-proj-' + 'd'.repeat(40) }, { fetchImpl: fakeFetch({ 'GET https://api.openai.com/v1/models': () => [200, { data: [{ id: 'gpt-5.5' }, { id: 'gpt-5.5-codex' }, { id: 'text-embedding-3-large' }, { id: 'gpt-realtime' }, { id: 'dall-e-3' }] }] }) });
   assert.deepEqual(o.models.map((m) => m.id), ['openai:gpt-5.5', 'openai:gpt-5.5-codex']);
   assert.equal(o.models[0].engine, 'codex', 'model GPT memakai harness Codex');
@@ -109,7 +109,9 @@ test('engineFor & resolveRoute: harness paling cocok per koneksi dan model', () 
   assert.deepEqual(E({ responses: true, openai: true }, 'openai')('gpt-5.5'), { engine: 'codex', wire: 'responses' });
   assert.deepEqual(E({ anthropic: true, openai: true, responses: true })('cx/gpt-5.5-codex'), { engine: 'codex', wire: 'responses' });
   assert.deepEqual(E({ anthropic: true, openai: true, responses: true })('cc/claude-opus-5-5'), { engine: 'claude', wire: 'anthropic' });
-  assert.deepEqual(E({ openai: true }, 'gemini')('gemini-3.8-pro'), { engine: 'claude', wire: 'openai' });
+  assert.deepEqual(E({ openai: true }, 'gemini')('gemini-3.8-pro'), { engine: 'gemini', wire: 'gemini' });
+  // Model Gemini lewat router (format OpenAI/Anthropic saja) tetap di Claude Agent SDK.
+  assert.deepEqual(E({ openai: true })('gemini-3.8-pro'), { engine: 'claude', wire: 'openai' });
   assert.equal(E({})('x'), null);
 
   const sec = { connections: { anthropic: { kind: 'anthropic', key: 'k', anthropic: 'https://api.anthropic.com', formats: { anthropic: true } }, gemini: { kind: 'gemini', key: 'g', openai: 'https://g/v1', formats: { openai: true } } } };
@@ -117,8 +119,17 @@ test('engineFor & resolveRoute: harness paling cocok per koneksi dan model', () 
   assert.equal(r.model, 'claude-opus-5-5');
   assert.equal(r.effort, 'high');
   assert.equal(r.engine, 'claude');
-  // Gemini lewat penerjemah: effort tetap di ID (diterjemahkan proxy jadi reasoning_effort).
+  // Gemini: effort tetap di ID (Gemini CLI memakai ID asli, penerjemah proxy memakai reasoning_effort).
   assert.equal(D.resolveRoute(sec, 'gemini:gemini-3.8-pro-high').model, 'gemini-3.8-pro-high');
+  assert.equal(D.resolveRoute(sec, 'gemini:gemini-3.8-pro').engine, 'gemini');
+  assert.equal(D.geminiRoot(sec.connections.gemini), 'https://g/v1');
+  assert.equal(D.geminiRoot({ openai: 'https://generativelanguage.googleapis.com/v1beta/openai/' }), 'https://generativelanguage.googleapis.com');
+  process.env.SNUGCODE_ENGINE = 'claude';
+  try {
+    assert.deepEqual(D.resolveRoute(sec, 'gemini:gemini-3.8-pro').wire, 'openai', 'SNUGCODE_ENGINE=claude memaksa Claude Agent SDK');
+  } finally {
+    delete process.env.SNUGCODE_ENGINE;
+  }
   assert.throws(() => D.resolveRoute(sec, 'openai:gpt-5.5'), /sudah dihapus/);
   assert.throws(() => D.resolveRoute({}, 'cc/claude-opus-5-5'), /Model & API key/);
 });

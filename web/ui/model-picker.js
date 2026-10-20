@@ -159,7 +159,7 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
       }
       const isSel = g === sel.group;
       const inUse = g.variants.some((v) => v.id === cur);
-      const badges = [g.engine === 'codex' ? 'Codex' : null, g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'gambar' : null].filter(Boolean);
+      const badges = [g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : null, g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'gambar' : null].filter(Boolean);
       out.push(
         h('div', { class: 'model' + (isSel ? ' sel' : ''), role: 'button', tabindex: '0', onclick: () => {
           if (sel.group === g) return;

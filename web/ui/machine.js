@@ -12,6 +12,7 @@ import { sessionSub, showSessions, showSessionsMeta } from './sessions.js';
 import { cloudPin, codespacesError, connectButton, connectCodespaces, ghcs, idleSheet, isAuthError, isCodespace, openRunnerOnGithub, removeRunner, stopRunnerNow, wakeRunner } from './cloud.js';
 import { connectionsSheet, settingsItems } from './settings.js';
 import { progress } from './progress.js';
+import { ENGINE_LABEL } from '../../shared/providers.js';
 
 // ---------- Koneksi ke satu PC ----------
 /** @param {{ id: string, name?: string, kind?: string, provider?: string }} m @param {{ sid?: string }} [opts] */
@@ -78,10 +79,11 @@ export function openMachine(m, { sid } = {}) {
       showSessions();
       if (info.runtime === 'cloud') setupCloud(info);
       else if (info.routerConfigured === false) connectionsSheet({ first: true });
-    } else if (app.current.session) (reattach(), ui.sub(sessionSub(app.current.session)));
+    } else if (app.current.session) (reattach(), app.current.onTermReady?.(), ui.sub(sessionSub(app.current.session)));
     else showSessionsMeta();
   });
   app.conn.on('events', (msg) => app.current?.onEvents?.(msg));
+  app.conn.on('term', (msg) => app.current?.onTerm?.(msg));
   app.conn.on('github', (msg) => onGithubStatus(msg));
   // Login ChatGPT selesai (atau gagal) di mesin; daftar koneksi & model default berubah.
   app.conn.on('chatgpt', (msg) => app.current?.onChatgpt?.(msg));
@@ -427,7 +429,7 @@ export async function githubLoginSheet() {
 
 export function modelItem(t1, id, onclick) {
   const engine = app.current?.info?.model === id ? app.current.info.engine : null;
-  return menuItem({ icon: 'cpu', t1, t2: (M.modelLabel(id, { provider: true }) || '(belum dipilih)') + (engine ? ' · ' + (engine === 'codex' ? 'Codex' : 'Claude Agent SDK') : ''), onclick });
+  return menuItem({ icon: 'cpu', t1, t2: (M.modelLabel(id, { provider: true }) || '(belum dipilih)') + (engine ? ' · ' + (ENGINE_LABEL[engine] || engine) : ''), onclick });
 }
 
 export function showMachineMenu() {
@@ -459,7 +461,7 @@ export function showMachineMenu() {
       modelItem('Default untuk sesi baru', info.model, () => pick('Model default', 'model')),
       // Model ringan subagen dipilih otomatis oleh daemon (Claude Haiku 5.5 / Gemini 3.8 Flash).
       info.lightModel
-        ? menuItem({ icon: 'bolt', t1: 'Model ringan (subagen) · otomatis', t2: M.modelLabel(info.lightModel) + (info.engine === 'codex' ? ' · diatur Codex' : ''), chev: false, onclick: () => toast('Dipilih otomatis dari koneksi yang sama: Haiku untuk Claude, Flash untuk Gemini/DeepSeek. Model GPT memakai subagen Codex.') })
+        ? menuItem({ icon: 'bolt', t1: 'Model ringan (subagen) · otomatis', t2: M.modelLabel(info.lightModel) + (info.engine === 'codex' ? ' · diatur Codex' : info.engine === 'gemini' ? ' · diatur Gemini CLI' : ''), chev: false, onclick: () => toast('Dipilih otomatis dari koneksi yang sama: Haiku untuk Claude, Flash untuk Gemini/DeepSeek. Model GPT memakai subagen Codex.') })
         : modelItem('Model kecil (tugas ringan)', info.smallModel || info.model, () => pick('Model kecil', 'smallModel')),
     ),
     h('div', { class: 'label' }, 'GitHub'),
@@ -472,6 +474,7 @@ export function showMachineMenu() {
     cloud
       ? h('div', { class: 'group' },
           menuItem({ icon: 'clock', t1: 'Berhenti otomatis', t2: idle ? `setelah ${idle} menit tidak dipakai${info.runner?.autoStop ? '' : ' · belum aktif'}` : 'mati — runner terus menyala', onclick: () => idleSheet(showMachineMenu) }),
+          isCodespace(m) && info.runner?.usage ? usageItem(info.runner.usage) : null,
           isCodespace(m) ? menuItem({ icon: 'stop', t1: 'Hentikan runner sekarang', t2: 'menyala lagi saat kamu membukanya', onclick: () => runnerAction('stop') }) : null,
           isCodespace(m) ? menuItem({ icon: 'github', t1: 'Buka codespace di GitHub', t2: 'log runner: /workspaces/.snugcode/cloud.log', onclick: () => runnerAction('github') }) : null,
           isCodespace(m) ? menuItem({ icon: 'key', t1: ghcs() ? 'Hubungkan ulang GitHub Codespaces' : 'Hubungkan GitHub Codespaces (perlu)', t2: ghcs() ? `@${ghcs().login || '?'} · untuk menyalakan & menghentikan runner` : 'HP ini belum bisa menyalakan runner', onclick: () => connectCodespaces('wake') }) : null,
@@ -524,6 +527,18 @@ export function showMachineMenu() {
       menuItem({ icon: 'unlink', t1: 'Lupakan pairing HP ini', t2: 'Perlu PIN lagi untuk tersambung', danger: true, chev: false, onclick: () => (store.set('dev.' + app.current.m.id, null), ui.closeSheet(), openMachine(app.current.m)) }),
     ),
   );
+}
+
+// Perkiraan pemakaian kuota Codespaces bulan ini (dicatat runner sendiri; billing GitHub tidak bisa dibaca).
+function usageItem(u) {
+  const pct = u.free ? Math.min(100, Math.round((u.coreHours / u.free) * 100)) : 0;
+  return menuItem({
+    icon: 'bolt',
+    t1: `±${u.coreHours} core-jam bulan ini`,
+    t2: `${u.hours} jam × ${u.cores} core · ${pct}% dari ${u.free} gratis (GitHub Free)`,
+    chev: false,
+    onclick: () => toast('Perkiraan dari lama runner menyala bulan ini (UTC). Waktu menyalakan codespace dan codespace lain di akunmu tidak terhitung; angka pasti ada di github.com/settings/billing.', false, 6000),
+  });
 }
 
 async function runnerAction(kind) {
