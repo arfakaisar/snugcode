@@ -64,5 +64,7 @@ for (const [src, out, size] of [
   await page.screenshot({ path: path.join(WEB, out), omitBackground: true });
   console.log('✔ ' + out);
 }
+// iOS juga mencari /apple-touch-icon-precomposed.png di root bila tag <link> tidak terbaca.
+fs.copyFileSync(path.join(WEB, 'apple-touch-icon.png'), path.join(WEB, 'apple-touch-icon-precomposed.png'));
 fs.rmSync(path.join(WEB, 'apple-touch-icon.svg'));
 await browser.close();
