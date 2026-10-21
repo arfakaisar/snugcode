@@ -2,7 +2,7 @@
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { api, showLogin } from './auth.js';
-import { applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
+import { TEXT_SCALES, applyTextScale, applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
 
 // ---------- Notifikasi & Web Push ----------
 // Kunci VAPID dibuat di HP lalu dibagikan ke tiap PC lewat kanal E2EE: satu langganan push
@@ -62,6 +62,24 @@ export function themePicker() {
   return seg;
 }
 
+function textScalePicker() {
+  const cur = Number(store.get('textScale')) || 1;
+  const seg = h('div', { class: 'seg' });
+  seg.append(...TEXT_SCALES.map(([z, label]) => h('button', {
+    class: z === cur ? 'on' : '',
+    'aria-label': label,
+    title: label,
+    'aria-pressed': String(z === cur),
+    onclick: (e) => {
+      haptic(8);
+      store.set('textScale', z === 1 ? null : z);
+      applyTextScale(z);
+      for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget), b.setAttribute('aria-pressed', String(b === e.currentTarget));
+    },
+  }, h('span', { style: `font: 600 ${Math.round(15 * z)}px/1 var(--serif)` }, 'A'))));
+  return seg;
+}
+
 async function logoutAll() {
   if (!(await ui.confirm({ title: 'Keluar dari semua perangkat?', text: 'Semua HP & browser (termasuk yang ini) harus login GitHub lagi. PC dan pairing PIN tidak berubah.', ok: 'Keluar semua', danger: true, icon: 'logout', stay: true }))) return;
   try {
@@ -99,6 +117,8 @@ export function accountMenu() {
     login ? h('div', { class: 'profile' }, h('span', { class: 'meav big' }, login[0].toUpperCase()), h('div', {}, h('b', {}, '@' + login), h('div', { class: 'dim small' }, 'login lewat GitHub'))) : null,
     h('div', { class: 'label' }, 'Tema'),
     themePicker(),
+    h('div', { class: 'label' }, 'Ukuran teks'),
+    textScalePicker(),
     h('div', { class: 'label' }, 'Perangkat ini'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
