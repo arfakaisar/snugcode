@@ -1,6 +1,6 @@
 # Runner snugcode di container (Fly.io, Railway, VPS, …): daemon yang sama dengan di PC, tanpa PC.
 #   docker build -t snugcode .
-#   docker run -d --restart unless-stopped -v snugcode:/data -e SNUGCODE_RELAY=https://snugcode.arfak.workers.dev \
+#   docker run -d --restart unless-stopped -v snugcode:/data -e SNUGCODE_RELAY=https://snugcode.dev \
 #     -e SNUGCODE_MACHINE_TOKEN=<token> -e SNUGCODE_PAIR_PIN=<pin> snugcode
 # Perintah lengkap (token & PIN) dibuat aplikasi HP: Tambah mesin → Runner cloud → Server sendiri.
 # Model (API key / login ChatGPT) dan login GitHub diatur dari aplikasi HP (atau env SNUGCODE_API_KEY). Platform yang menyalakan container

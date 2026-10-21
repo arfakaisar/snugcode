@@ -1,4 +1,4 @@
-# Pemasang snugcode untuk Windows (PowerShell):  irm https://snugcode.arfak.workers.dev/install.ps1 | iex
+# Pemasang snugcode untuk Windows (PowerShell):  irm https://snugcode.dev/install.ps1 | iex
 # Memeriksa Node.js 22+ & git, memasang snugcode, lalu menjalankan `snugcode setup`.
 $ErrorActionPreference = 'Stop'
 function Die($m) { Write-Host "x $m" -ForegroundColor Red; exit 1 }

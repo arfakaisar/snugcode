@@ -406,12 +406,12 @@ Cara tercepat — pemasang satu baris memeriksa Node.js & git, memasang snugcode
 
 ```bash
 # macOS / Linux
-curl -fsSL https://snugcode.arfak.workers.dev/install.sh | sh
+curl -fsSL https://snugcode.dev/install.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://snugcode.arfak.workers.dev/install.ps1 | iex
+irm https://snugcode.dev/install.ps1 | iex
 ```
 
 Perintah yang sama ada di aplikasi HP (*Tambah PC* → salin), dan HP otomatis membuka PC baru begitu setup selesai.
@@ -444,14 +444,14 @@ snugcode autostart on
 
 ```mermaid
 flowchart LR
-    A["Buka<br/>snugcode.arfak.workers.dev"] --> B["Login<br/>dengan GitHub"]
+    A["Buka<br/>snugcode.dev"] --> B["Login<br/>dengan GitHub"]
     B --> C["Pilih PC"]
     C --> D["Masukkan PIN<br/><i>(sekali saja)</i>"]
     D --> E["Sesi baru<br/>pilih repo & branch"]
     E --> F["Ketik permintaan"]
 ```
 
-1. Buka **https://snugcode.arfak.workers.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
+1. Buka **https://snugcode.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
 2. Pilih PC, lalu masukkan PIN.
 3. Menu browser → **Add to Home screen**, supaya terbuka layar penuh seperti aplikasi dan notifikasi push berjalan (wajib di iOS).
 4. Akun → **Izinkan notifikasi**. Izin berisiko rendah/sedang bisa langsung dijawab dari tombol *Izinkan / Tolak* di notifikasi (Android & desktop); pilih *Kabar yang dikirim → Penting saja* bila hanya ingin diberi tahu soal izin, pertanyaan, dan tugas selesai.
@@ -693,7 +693,7 @@ npm run docs:images                        # buat ulang gambar & GIF README (but
 <details>
 <summary><b>Untuk pemilik: deploy relay</b></summary>
 
-Relay terdiri dari dua worker: `pocketcode-relay` (relay + Durable Objects; nama lama dipertahankan agar data akun & PC tetap) dan alias `snugcode` yang menyajikan PWA di `snugcode.arfak.workers.dev` dan meneruskan sisanya lewat service binding. OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
+Relay terdiri dari dua worker: `pocketcode-relay` (relay + Durable Objects; nama lama dipertahankan agar data akun & PC tetap) dan alias `snugcode` yang menyajikan PWA di `snugcode.dev` dan meneruskan sisanya lewat service binding. OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
 
 ```bash
 npm install && (cd relay && npm install)
@@ -704,7 +704,7 @@ Tanpa PC: workflow [`Deploy`](.github/workflows/deploy.yml) menjalankan perintah
 
 Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TOKEN_SECRET` diganti, semua login HP dan PC harus diulang.
 
-*Authorization callback URL* OAuth App harus `https://snugcode.arfak.workers.dev/auth/callback` (OAuth App hanya mengizinkan satu host, karena itu login di host lama dialihkan ke alamat ini). Repo yang di-fork untuk runner Codespaces diatur lewat var `RUNNER_REPO` di `relay/wrangler.jsonc`.
+*Authorization callback URL* OAuth App harus `https://snugcode.dev/auth/callback` (OAuth App hanya mengizinkan satu host, karena itu login di host lama dialihkan ke alamat ini). Repo yang di-fork untuk runner Codespaces diatur lewat var `RUNNER_REPO` di `relay/wrangler.jsonc`.
 </details>
 
 ---
@@ -714,7 +714,7 @@ Secret relay di Cloudflare: `GITHUB_CLIENT_SECRET` dan `TOKEN_SECRET`. Kalau `TO
 snugcode adalah nama baru pocketcode. Protokol, data, dan pairing tidak berubah:
 
 - **Folder data** `~/.pocketcode` tetap dipakai bila sudah ada (pairing HP, sesi, worktree, riwayat agen). Instalasi baru memakai `~/.snugcode`.
-- **Alamat aplikasi** kini `https://snugcode.arfak.workers.dev`: worker alias `snugcode` menyajikan PWA dan meneruskan API & WebSocket ke worker relay lama lewat service binding, jadi akun, PC tertaut, dan data tidak berubah. PC yang masih memakai URL lama tetap tersambung. Di alamat lama, PWA menawarkan **Pindah sekarang** (login, pairing PC, dan tema ikut dipindahkan, tanpa login/PIN lagi) dan halaman login dialihkan ke alamat baru.
+- **Alamat aplikasi** kini `https://snugcode.dev`: worker alias `snugcode` menyajikan PWA dan meneruskan API & WebSocket ke worker relay lama lewat service binding, jadi akun, PC tertaut, dan data tidak berubah. PC yang masih memakai URL lama tetap tersambung. Di alamat lama, PWA menawarkan **Pindah sekarang** (login, pairing PC, dan tema ikut dipindahkan, tanpa login/PIN lagi) dan halaman login dialihkan ke alamat baru.
 - Env `POCKETCODE_*`, file `.pocketcode.json`, dan entri autostart lama tetap dikenali; autostart lama dipindahkan otomatis.
 
 Pembaruan jarak jauh dari daemon versi lama **tidak** bisa pindah sendiri ke paket baru, jadi tiap PC perlu dimigrasi sekali. Aplikasi HP menampilkan banner **"Pindahkan PC ini ke snugcode"** yang bisa menjalankannya lewat sesi, atau jalankan sendiri di terminal PC:
