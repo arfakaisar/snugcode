@@ -94,6 +94,13 @@ const pending = (env, code) => env.PENDING.get(env.PENDING.idFromName('p:' + cod
 const USER_TTL = 30 * 24 * 3600 * 1000;
 // Batas mesin per akun (PC + runner cloud): mencegah Hub tumbuh tanpa batas.
 const MAX_MACHINES = 20;
+// Mesin yang mati mendadak (codespace dihentikan, PC dicabut listriknya, jaringan hilang) tidak sempat
+// menutup soketnya, dan Cloudflare bisa menahan soket itu tanpa batas: mesin tampak online terus. Daemon
+// mengirim `ping` tiap 25 detik (dijawab otomatis tanpa membangunkan DO), jadi soket yang tidak ping selama
+// ini dianggap mati. Bisa diperkecil lewat var MACHINE_STALE_MS (uji).
+const STALE_MS = 80_000;
+// Selama ada HP tersambung, soket mesin diperiksa berkala (alarm) agar HP yang sedang menunggu diberi tahu.
+const SWEEP_MS = 30_000;
 
 // extra: { kind: 'cloud', provider: 'codespace' | 'container' } untuk runner cloud (tanpa PC).
 async function registerMachine(env, user, name, extra = {}) {
@@ -395,8 +402,53 @@ export class Hub extends DurableObject {
     return (await this.ctx.storage.get('machines')) || {};
   }
 
-  online(mid) {
-    return this.ctx.getWebSockets('m:' + mid).length > 0;
+  get staleMs() {
+    return +(/** @type {any} */ (this.env).MACHINE_STALE_MS) || STALE_MS;
+  }
+
+  // Soket mesin yang masih hidup (ping terakhir belum lama). Soket yang mati ditutup; bila mesin jadi
+  // tidak punya soket hidup sama sekali, ia dicatat offline dan HP yang menunggu diberi tahu.
+  async live(mid, now = Date.now()) {
+    const alive = [];
+    let last = 0;
+    for (const ws of this.ctx.getWebSockets('m:' + mid)) {
+      if (ws.readyState !== 1) continue; // bukan OPEN: sudah ditutup, tinggal menunggu close
+      const t = Math.max(this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0, ws.deserializeAttachment()?.at || 0);
+      if (now - t <= this.staleMs) {
+        alive.push(ws);
+        continue;
+      }
+      last = Math.max(last, t);
+      ws.serializeAttachment({ ...ws.deserializeAttachment(), stale: 1 });
+      try {
+        ws.close(4006, 'stale');
+      } catch {}
+    }
+    if (last && !alive.length) await this.offline(mid, last);
+    return alive;
+  }
+
+  async online(mid) {
+    return (await this.live(mid)).length > 0;
+  }
+
+  async offline(mid, at = Date.now()) {
+    const machines = await this.machines();
+    if (machines[mid]) {
+      machines[mid].lastSeen = at;
+      await this.ctx.storage.put('machines', machines);
+    }
+    for (const p of this.ctx.getWebSockets('p:' + mid)) p.send(JSON.stringify({ t: 'status', online: false }));
+  }
+
+  async scheduleSweep() {
+    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + Math.min(SWEEP_MS, this.staleMs));
+  }
+
+  async alarm() {
+    const mids = new Set(this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((a) => a?.role === 'p').map((a) => a.mid));
+    for (const mid of mids) await this.live(mid);
+    if (mids.size) await this.scheduleSweep();
   }
 
   async fetch(request) {
@@ -421,7 +473,11 @@ export class Hub extends DurableObject {
       return json({ ok: true });
     }
     if (url.pathname === '/machines') {
-      const list = Object.entries(machines).map(([id, m]) => ({ id, name: m.name, online: this.online(id), lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt, boot: m.boot || null }));
+      const online = {};
+      for (const id of Object.keys(machines)) online[id] = await this.online(id);
+      // live() bisa mencatat lastSeen mesin yang baru ketahuan mati: baca ulang.
+      const now = await this.machines();
+      const list = Object.entries(now).map(([id, m]) => ({ id, name: m.name, online: !!online[id], lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt, boot: m.boot || null }));
       return json({ machines: list });
     }
     if (url.pathname === '/boot') {
@@ -446,7 +502,7 @@ export class Hub extends DurableObject {
       if (role === 'm') {
         for (const old of this.ctx.getWebSockets('m:' + mid)) old.close(4000, 'replaced');
         this.ctx.acceptWebSocket(server, ['m:' + mid]);
-        server.serializeAttachment({ role: 'm', mid });
+        server.serializeAttachment({ role: 'm', mid, at: Date.now() });
         // Relay ini meneruskan frame biner (daemon lama mengabaikan pesan ini).
         server.send(JSON.stringify({ t: 'hello', bin: 1 }));
         // Beritahu PC tentang HP yang sudah menunggu, dan HP bahwa PC online.
@@ -459,9 +515,10 @@ export class Hub extends DurableObject {
         const cid = randomId(9);
         this.ctx.acceptWebSocket(server, ['p:' + mid, 'c:' + cid]);
         server.serializeAttachment({ role: 'p', mid, cid });
-        const online = this.online(mid);
-        server.send(JSON.stringify({ t: 'status', online, name: machines[mid].name, bin: 1 }));
-        if (online) for (const m of this.ctx.getWebSockets('m:' + mid)) m.send(JSON.stringify({ t: 'open', cid }));
+        const live = await this.live(mid);
+        server.send(JSON.stringify({ t: 'status', online: live.length > 0, name: machines[mid].name, bin: 1 }));
+        for (const m of live) m.send(JSON.stringify({ t: 'open', cid }));
+        await this.scheduleSweep();
       }
       const proto = (request.headers.get('sec-websocket-protocol') || '').split(',').some((x) => x.trim() === WS_PROTO);
       return new Response(null, { status: 101, webSocket: client, ...(proto ? { headers: { 'sec-websocket-protocol': WS_PROTO } } : {}) });
@@ -474,7 +531,7 @@ export class Hub extends DurableObject {
     if (typeof message !== 'string') {
       if (att.role === 'p') {
         const frame = withCid(att.cid, message);
-        for (const m of this.ctx.getWebSockets('m:' + att.mid)) m.send(frame);
+        for (const m of await this.live(att.mid)) m.send(frame);
         return;
       }
       const b = new Uint8Array(message);
@@ -485,7 +542,7 @@ export class Hub extends DurableObject {
       return;
     }
     if (att.role === 'p') {
-      for (const m of this.ctx.getWebSockets('m:' + att.mid)) m.send(JSON.stringify({ t: 'd', cid: att.cid, d: message }));
+      for (const m of await this.live(att.mid)) m.send(JSON.stringify({ t: 'd', cid: att.cid, d: message }));
       return;
     }
     let f;
@@ -517,12 +574,9 @@ export class Hub extends DurableObject {
       for (const m of this.ctx.getWebSockets('m:' + att.mid)) m.send(JSON.stringify({ t: 'close', cid: att.cid }));
       return;
     }
-    if (this.ctx.getWebSockets('m:' + att.mid).some((s) => s !== ws)) return;
-    const machines = await this.machines();
-    if (machines[att.mid]) {
-      machines[att.mid].lastSeen = Date.now();
-      await this.ctx.storage.put('machines', machines);
-    }
-    for (const p of this.ctx.getWebSockets('p:' + att.mid)) p.send(JSON.stringify({ t: 'status', online: false }));
+    // Soket yang ditutup live() karena mati: offline-nya sudah dicatat di sana.
+    if (att.stale) return;
+    if ((await this.live(att.mid)).some((s) => s !== ws)) return;
+    await this.offline(att.mid);
   }
 }

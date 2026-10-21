@@ -174,7 +174,7 @@ mesin tanpa harus tersambung.
 | `POST /api/machines/provision` | Daftarkan runner cloud tanpa login dari mesinnya; mengembalikan token mesin ke PWA. |
 | `POST /api/runner/status` | Laporan tahap runner (token mesin). |
 | `DELETE /api/machines/<mid>` | Hapus mesin; soket PC & HP-nya ditutup (4003). |
-| `GET /ws/machine`, `GET /ws/phone?mid=` | WebSocket daemon & HP; frame teks atau biner `[cid][payload]`. Token lewat subprotocol `snugcode, t.<token>` (relay menjawab `snugcode`), atau `?token=` untuk klien lama. |
+| `GET /ws/machine`, `GET /ws/phone?mid=` | WebSocket daemon & HP; frame teks atau biner `[cid][payload]`. Token lewat subprotocol `snugcode, t.<token>` (relay menjawab `snugcode`), atau `?token=` untuk klien lama. Mesin online = punya soket yang `ping` dalam 80 detik terakhir (dijawab otomatis); soket tanpa ping ditutup dengan 4006 dan mesin dicatat offline (mesin yang mati mendadak tidak menutup soketnya). |
 | `GET /api/health` | `devAuth`, `wsProto` (token WebSocket lewat subprotocol), `runnerRepo`, dan penanda host lama (`legacy`, `publicUrl`). |
 | `GET /build.json`, `/install.sh`, `/install.ps1` | Aset statis: hash build PWA, pemasang satu baris. |
 

@@ -65,9 +65,13 @@ jobs:
           WRANGLER_SEND_METRICS: 'false'
         run: |
           (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &)
-          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && exit 0; sleep 1; done
-          cat wrangler.log; exit 1
+          # Relay kedua dengan batas soket mati 3 detik: uji mesin yang mati tanpa menutup soket (e2e-relay).
+          (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --var MACHINE_STALE_MS:3000 --port 8788 --ip 127.0.0.1 --inspector-port 9230 --persist-to ../.wrangler-stale > ../wrangler-stale.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && curl -sf http://127.0.0.1:8788/api/health && exit 0; sleep 1; done
+          cat wrangler.log wrangler-stale.log; exit 1
       - run: npm run test:e2e:relay
+        env:
+          RELAY_STALE: http://127.0.0.1:8788
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
       # Koneksi multi-provider: endpoint OpenAI-only lewat penerjemah (Claude Agent SDK) dan model GPT
@@ -98,4 +102,5 @@ jobs:
           name: e2e-diagnostik
           path: |
             wrangler.log
+            wrangler-stale.log
             ${{ runner.temp }}/shots

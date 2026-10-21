@@ -113,4 +113,51 @@ const wsStatus = (token) =>
   assert.equal((await fetch(RELAY + '/fonts/jetbrains-mono-400.woff2')).status, 200);
   ok('PWA: CSP ketat, tanpa skrip inline & font pihak ketiga');
 }
+// 6. Mesin yang mati tanpa menutup soket (codespace dihentikan, PC dicabut) tidak tampak online terus.
+// Butuh relay kedua dengan MACHINE_STALE_MS kecil (CI: RELAY_STALE), agar uji tidak menunggu 80 detik.
+if (process.env.RELAY_STALE) {
+  const R = process.env.RELAY_STALE;
+  const WS = R.replace(/^http/, 'ws');
+  const owner = user + '-stale';
+  const auth = { authorization: 'Bearer ' + (await (async () => decodeURIComponent((await fetch(`${R}/auth/dev/login?kind=user&login=${owner}`, { redirect: 'manual' })).headers.get('location').split('#login=')[1]))()) };
+  const { code } = await (await fetch(R + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'mati' }) })).json();
+  const page = await (await fetch(`${R}/auth/dev/login?kind=machine&pc=${code}&login=${owner}`)).text();
+  await fetch(R + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t: page.match(/name="t" value="([^"]+)"/)[1] }) });
+  const { mid, token: mt } = await (await fetch(`${R}/auth/machine/poll?code=${code}`)).json();
+  const online = async () => (await (await fetch(R + '/api/machines', { headers: auth })).json()).machines.find((m) => m.id === mid).online;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Mesin "hidup": ping tiap 1 detik seperti daemon (tiap 25 detik).
+  const machine = () =>
+    new Promise((resolve) => {
+      const ws = new WebSocket(WS + '/ws/machine', ['snugcode', 't.' + mt]);
+      ws.onopen = () => resolve({ ws, ping: setInterval(() => ws.send('ping'), 1000) });
+    });
+  const m1 = await machine();
+  await sleep(5000);
+  assert.equal(await online(), true, 'mesin yang terus ping tetap online melewati batas stale');
+  const statuses = [];
+  const phone = new WebSocket(`${WS}/ws/phone?mid=${mid}`, ['snugcode', 't.' + auth.authorization.slice(7)]);
+  phone.onmessage = (ev) => typeof ev.data === 'string' && ev.data !== 'pong' && JSON.parse(ev.data).t === 'status' && statuses.push(JSON.parse(ev.data).online);
+  const phonePing = setInterval(() => phone.readyState === 1 && phone.send('ping'), 1000);
+  await sleep(1500);
+  assert.deepEqual(statuses, [true]);
+  // "Codespace dihentikan": soket tetap terbuka, tapi tidak ada ping lagi.
+  clearInterval(m1.ping);
+  const closed = new Promise((r) => (m1.ws.onclose = (ev) => r(ev.code)));
+  const t0 = Date.now();
+  while (statuses.length < 2 && Date.now() - t0 < 15000) await sleep(250);
+  assert.deepEqual(statuses, [true, false], 'HP yang sedang tersambung diberi tahu mesin offline (alarm)');
+  assert.equal(await online(), false);
+  assert.equal(await closed, 4006, 'soket mati ditutup relay');
+  // Mesin menyala lagi: online kembali dan HP diberi tahu.
+  const m2 = await machine();
+  await sleep(500);
+  assert.equal(await online(), true);
+  assert.equal(statuses.at(-1), true);
+  clearInterval(m2.ping);
+  m2.ws.close();
+  clearInterval(phonePing);
+  phone.close();
+  ok('mesin yang mati tanpa menutup soket jadi offline; HP diberi tahu; menyala lagi → online');
+}
 console.log('\nSemua uji relay lulus.');

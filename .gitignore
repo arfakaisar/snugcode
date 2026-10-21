@@ -4,3 +4,4 @@ relay/.dev.vars
 relay/.wrangler/
 relay/public/
 relay/worker-configuration.d.ts
+.wrangler-stale/
