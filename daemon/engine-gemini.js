@@ -1,5 +1,5 @@
-// Engine Gemini CLI (`gemini --acp`): harness resmi Google untuk model Gemini. Satu proses per sesi;
-// Gemini CLI hanya melihat loopback proxy + token lokal, izin lewat kebijakan snugcode (decideGemini).
+// Gemini CLI engine (`gemini --acp`): Google's official harness for Gemini models. One process per session;
+// Gemini CLI only sees the loopback proxy + a local token, permissions go through snugcode's policy (decideGemini).
 import { GeminiAgent, geminiCommand, installGemini, geminiHome, geminiEnv, diffOf } from './gemini.js';
 import { decideCodex } from './engine-codex.js';
 import { toolchainEnv } from './toolchain.js';
@@ -8,16 +8,16 @@ export async function startGeminiAgent(s, route) {
   const cfg = s.mgr.config;
   let cmd = geminiCommand(cfg);
   if (!cmd) {
-    s.emitEvent({ k: 'note', d: '◆ Memasang Gemini CLI untuk model ini (sekali saja, ±1–2 menit)…' });
+    s.emitEvent({ k: 'note', d: '◆ Installing Gemini CLI for this model (once, ~1–2 min)…' });
     cmd = await installGemini(cfg);
-    s.emitEvent({ k: 'note', d: '✓ Gemini CLI terpasang' });
+    s.emitEvent({ k: 'note', d: '✓ Gemini CLI installed' });
   }
   const proxy = s.mgr.proxy;
   const proxyUrl = proxy ? await proxy.ready().catch(() => null) : null;
-  if (!proxyUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
+  if (!proxyUrl) throw new Error('The snugcode loopback proxy is not running. Restart the daemon (`snugcode restart`).');
   const token = s.mgr.tokenFor(route.conn, 'gemini');
   const computer = !!s.meta.computer;
-  // Model & mode rencana berlaku per prompt (session/set_model, session/set_mode): tidak masuk kunci.
+  // Model & plan mode apply per prompt (session/set_model, session/set_mode): not part of the key.
   const key = ['gemini', cmd.join(' '), route.conn.id, token, proxyUrl, computer].join('|');
   const cur = s.agent;
   if (cur && !cur.dead && cur.key === key) {
@@ -36,19 +36,19 @@ export async function startGeminiAgent(s, route) {
   } catch (e) {
     agent.close();
     if (s.agent === agent) s.agent = null;
-    throw new Error('Gemini CLI gagal dimulai: ' + e.message);
+    throw new Error('Gemini CLI failed to start: ' + e.message);
   }
   return agent;
 }
 
-// Keputusan izin untuk tool call Gemini CLI (session/request_permission), kebijakan yang sama dengan
-// engine lain: perintah shell & edit file lewat decideCodex, peralihan dari mode rencana = ExitPlanMode.
+// Permission decision for Gemini CLI tool calls (session/request_permission), same policy as the
+// other engines: shell commands & file edits via decideCodex, leaving plan mode = ExitPlanMode.
 export async function decideGemini(s, tc) {
   const cwd = s.meta.cwd;
   const kind = tc.kind || 'other';
   const title = String(tc.title || '');
   if (kind === 'execute') {
-    // Judul tool call shell Gemini CLI = perintahnya.
+    // The title of a Gemini CLI shell tool call = its command.
     const command = String(tc.rawInput?.command || title);
     return (await decideCodex(s, 'command', { command })) === 'accept';
   }
@@ -63,13 +63,13 @@ export async function decideGemini(s, tc) {
     const r = await s.askPermission('ExitPlanMode', { plan }, {});
     return r.behavior === 'allow';
   }
-  // Sisanya (web fetch, tool lain) lewat kebijakan umum: WebFetch/WebSearch aman, lainnya bertanya.
+  // Everything else (web fetch, other tools) uses the general policy: WebFetch/WebSearch are safe, the rest ask.
   const tool = toolOf(tc);
   const r = await s.askPermission(kind === 'fetch' ? (tool === 'google_web_search' ? 'WebSearch' : 'WebFetch') : 'gemini__' + tool, { url: tc.rawInput?.url, command: title }, {});
   return r.behavior === 'allow';
 }
 
-// ID tool call Gemini CLI berbentuk `<nama tool>__<nama tool>_<waktu>_<n>`.
+// Gemini CLI tool call IDs look like `<tool name>__<tool name>_<time>_<n>`.
 export const toolOf = (tc) => String(tc.toolCallId || '').split('__')[0] || String(tc.title || '').split(/[\s(]/)[0] || 'tool';
 
 const contentPlan = (tc) =>

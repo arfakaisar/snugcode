@@ -1,9 +1,9 @@
-// Status login GitHub milik daemon + login ulang dari HP/terminal.
+// The daemon's GitHub login status + re-login from the phone/terminal.
 //
-// Token OAuth App tidak kedaluwarsa, tapi bisa dicabut (dari pengaturan GitHub,
-// "Revoke all user tokens", tidak dipakai setahun, atau terdeteksi bocor).
-// Daemon mengecek token secara berkala; bila tidak berlaku, HP & terminal
-// diberi tahu dan bisa memulai device flow — kodenya tampil di layar mereka.
+// OAuth App tokens don't expire, but can be revoked (from GitHub settings,
+// "Revoke all user tokens", unused for a year, or detected as leaked).
+// The daemon checks the token periodically; if it's no longer valid, the phone & terminal
+// are told and can start a device flow — the code is shown on their screens.
 import { EventEmitter } from 'node:events';
 import { gh, deviceFlowStart, deviceFlowWait, TOKEN_INVALID } from './github.js';
 import { saveConfig } from './config.js';
@@ -28,7 +28,7 @@ export class GithubAuth extends EventEmitter {
   set(state) {
     if (state === this.state) return;
     this.state = state;
-    if (state !== 'ok') this.d.log(`! GitHub: ${state === 'missing' ? 'belum login' : 'token tidak berlaku'} — login ulang dari HP, /login di terminal, atau \`snugcode login\`.`);
+    if (state !== 'ok') this.d.log(`! GitHub: ${state === 'missing' ? 'not signed in' : 'token no longer valid'} — sign in again from the phone, /login in the terminal, or \`snugcode login\`.`);
     this.emit('change', this.status());
   }
 
@@ -50,7 +50,7 @@ export class GithubAuth extends EventEmitter {
       this.set('ok');
     } catch (e) {
       if (e.message === TOKEN_INVALID) this.set('invalid');
-      // Gangguan jaringan: status tidak diubah.
+      // Network trouble: status unchanged.
     }
     return this.status();
   }
@@ -59,9 +59,9 @@ export class GithubAuth extends EventEmitter {
     if (this.state !== 'invalid') this.set('invalid');
   }
 
-  // Mulai device flow (atau pakai ulang kode yang masih berlaku).
+  // Start a device flow (or reuse a code that's still valid).
   async begin() {
-    if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur di snugcode.');
+    if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID is not set in snugcode.');
     if (this.pending && Date.now() < this.pending.expiresAt - 30000 && !this.pending.error) return this.status();
     const start = await deviceFlowStart(GITHUB_CLIENT_ID);
     const pending = { code: start.user_code, uri: start.verification_uri, expiresAt: Date.now() + (start.expires_in || 900) * 1000 };
@@ -70,7 +70,7 @@ export class GithubAuth extends EventEmitter {
     deviceFlowWait(GITHUB_CLIENT_ID, start)
       .then(async (token) => {
         const me = await gh(token, 'GET', '/user');
-        // secrets dipakai bersama SessionManager & RPC: token baru langsung berlaku, tanpa restart.
+        // secrets are shared with SessionManager & RPC: the new token applies immediately, no restart.
         this.d.secrets.githubToken = token;
         this.d.saveSecrets();
         this.d.config.githubLogin = me.login;
@@ -78,7 +78,7 @@ export class GithubAuth extends EventEmitter {
         saveConfig(this.d.config);
         this.login = me.login;
         if (this.pending === pending) this.pending = null;
-        this.d.log(`✓ GitHub login ulang: @${me.login}`);
+        this.d.log(`✓ GitHub signed in again: @${me.login}`);
         this.state = 'ok';
         this.emit('change', this.status());
       })

@@ -1,4 +1,4 @@
-// Uji integrasi worktree (butuh internet, pakai repo publik octocat/Hello-World).
+// Worktree integration test (needs internet, uses the public repo octocat/Hello-World).
 //   node test/worktree.it.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,38 +10,37 @@ const { prepareWorktree, removeWorktree, git } = await import('../daemon/github.
 const REPO = 'octocat/Hello-World';
 const ok = (m) => console.log('✔ ' + m);
 
-// 1. Lanjutkan branch default (dulu gagal: "'master' is already used by worktree at …/_base").
+// 1. Continue the default branch (used to fail: "'master' is already used by worktree at …/_base").
 const s1 = await prepareWorktree(null, REPO, { branch: 'master', sessionId: 'a1' });
 assert.equal((await git(s1.cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim(), 'master');
 assert.ok(fs.existsSync(path.join(s1.cwd, 'README')));
-ok('lanjutkan branch default (master)');
+ok('continue the default branch (master)');
 
-// 2. Branch yang sama di sesi kedua -> pesan jelas.
-await assert.rejects(prepareWorktree(null, REPO, { branch: 'master', sessionId: 'a2' }), /sedang dibuka di sesi lain \(a1\)/);
-ok('branch yang sedang dipakai sesi lain ditolak dengan pesan jelas');
+// 2. The same branch in a second session -> a clear message.
+await assert.rejects(prepareWorktree(null, REPO, { branch: 'master', sessionId: 'a2' }), /is open in another session \(a1\)/);
+ok('a branch in use by another session is rejected with a clear message');
 
-// 3. Branch baru dari base default.
+// 3. A new branch from the default base.
 const s3 = await prepareWorktree(null, REPO, { branch: 'snug/a3', sessionId: 'a3' });
 assert.equal(s3.base, 'master');
-ok('branch baru dari base default');
-
-// 4. Branch lain yang ada di GitHub -> tracking origin.
+ok('new branch from the default base');
+// 4. Another branch that exists on GitHub -> tracks origin.
 const s4 = await prepareWorktree(null, REPO, { branch: 'test', sessionId: 'a4' });
 assert.equal((await git(s4.cwd, ['rev-parse', '--abbrev-ref', '@{upstream}'])).trim(), 'origin/test');
-ok('lanjutkan branch remote lain (test) dengan upstream');
+ok('continue another remote branch (test) with an upstream');
 
-// 5. Branch lokal dari sesi yang sudah dihapus (belum di-push) -> commit-nya tetap ada.
+// 5. A local branch from a deleted session (not pushed yet) -> its commit is still there.
 fs.writeFileSync(path.join(s3.cwd, 'x.txt'), 'x');
 await git(s3.cwd, ['add', '-A']);
-await git(s3.cwd, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'lokal']);
+await git(s3.cwd, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'local']);
 await removeWorktree(s3.cwd);
 const s5 = await prepareWorktree(null, REPO, { branch: 'snug/a3', sessionId: 'a5' });
-assert.equal((await git(s5.cwd, ['log', '-1', '--pretty=%s'])).trim(), 'lokal');
-ok('lanjutkan branch lokal yang belum di-push tanpa kehilangan commit');
+assert.equal((await git(s5.cwd, ['log', '-1', '--pretty=%s'])).trim(), 'local');
+ok('continue an unpushed local branch without losing commits');
 
-// 6. Setelah sesi 1 dihapus, master bisa dibuka lagi.
+// 6. After session 1 is deleted, master can be opened again.
 await removeWorktree(s1.cwd);
 await prepareWorktree(null, REPO, { branch: 'master', sessionId: 'a6' });
-ok('branch bisa dibuka lagi setelah sesi lamanya dihapus');
+ok('a branch can be opened again after its old session is deleted');
 
 fs.rmSync(process.env.SNUGCODE_HOME, { recursive: true, force: true });

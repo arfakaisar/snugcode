@@ -30,7 +30,7 @@ jobs:
           if [ "$v" != "$GITHUB_REF_NAME" ]; then echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $v"; exit 1; fi
       - run: npm ci
       - run: npm test
-      # Hash PWA hasil build dari kode bertag: bandingkan dengan https://<relay>/build.json (docs/keamanan.md).
+      # Hash PWA hasil build dari kode bertag: bandingkan dengan https://<relay>/build.json (docs/security.md).
       - run: npm run build:web
       - name: Buat rilis GitHub
         env:

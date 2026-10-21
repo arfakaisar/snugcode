@@ -1,26 +1,26 @@
-// Checkpoint per prompt: isi worktree (termasuk file yang belum di-commit) disimpan sebagai
-// tree git lewat index sementara, tanpa menyentuh index, branch, atau stash pengguna.
-// Rewind mengembalikan semua file ke snapshot dan menghapus file yang dibuat setelahnya.
+// Per-prompt checkpoints: the worktree contents (including uncommitted files) are saved as a git
+// tree through a temporary index, without touching the user's index, branch, or stash.
+// Rewind restores every file to the snapshot and deletes files created afterwards.
 import path from 'node:path';
 import fs from 'node:fs';
 import { git } from './github.js';
 
-// node_modules tanpa .gitignore bisa berisi ratusan ribu file: jangan pernah di-snapshot.
+// node_modules without a .gitignore can hold hundreds of thousands of files: never snapshot it.
 const PATHSPEC = ['--', '.', ':(exclude,glob)**/node_modules/**'];
 
-// Lokasi index sementara per worktree tidak berubah: cukup tanya git sekali.
+// The temporary index location per worktree never changes: ask git once.
 const indexFiles = new Map();
 async function indexEnv(cwd) {
   let file = indexFiles.get(cwd);
   if (!file) {
-    file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'] /* nama lama dipertahankan: checkpoint sesi lama tetap bisa di-rewind */)).trim());
+    file = path.resolve(cwd, (await git(cwd, ['rev-parse', '--git-path', 'pocketcode-index'] /* old name kept: checkpoints of old sessions can still be rewound */)).trim());
     indexFiles.set(cwd, file);
   }
   fs.rmSync(file + '.lock', { force: true });
   return { GIT_INDEX_FILE: file };
 }
 
-// Index sementara dipakai ulang antar snapshot, jadi hanya file yang berubah yang di-hash ulang.
+// The temporary index is reused between snapshots, so only changed files are re-hashed.
 export async function snapshot(cwd) {
   const env = await indexEnv(cwd);
   await git(cwd, ['add', '-A', ...PATHSPEC], null, { env });

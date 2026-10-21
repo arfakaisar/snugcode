@@ -1,10 +1,10 @@
-// Kriptografi bersama untuk daemon (Node) dan PWA (browser).
+// Shared cryptography for the daemon (Node) and the PWA (browser).
 //
-// 1. Pairing PIN  : CPace di atas ristretto255. Relay meneruskan pesan tapi
-//                   tidak bisa melihat PIN maupun menebaknya secara offline.
-//                   Hasilnya: deviceSecret permanen yang disimpan di HP & PC.
-// 2. Kanal sesi   : setiap koneksi melakukan handshake (deviceSecret + X25519
-//                   ephemeral) -> kunci XChaCha20-Poly1305 per arah.
+// 1. PIN pairing   : CPace over ristretto255. The relay forwards messages but
+//                   can neither see the PIN nor guess it offline.
+//                   Result: a permanent deviceSecret stored on the phone & PC.
+// 2. Session channel: every connection does a handshake (deviceSecret + ephemeral
+//                   X25519) -> an XChaCha20-Poly1305 key per direction.
 import { ristretto255, ristretto255_hasher as R, x25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
@@ -37,15 +37,15 @@ function ctEqual(a, b) {
   return d === 0;
 }
 
-// PIN boleh huruf + angka, tidak peka huruf besar/kecil (keyboard HP sering
-// mengkapitalkan huruf pertama).
+// The PIN may contain letters + digits and is case-insensitive (phone keyboards often
+// capitalize the first letter).
 export const PIN_RE = /^[a-z0-9]{6,12}$/i;
 export const normalizePin = (pin) => String(pin).trim().toLowerCase();
 
-// PIN -> password-related string. Disimpan daemon (bukan PIN mentahnya).
+// PIN -> password-related string. Stored by the daemon (not the raw PIN).
 export async function pinToPrs(pin, machineId) {
-  // Label 'pocketcode-*' di file ini adalah identitas protokol, bukan merek: jangan diganti, atau
-  // HP & PC yang sudah dipasangkan (dan versi campuran saat pembaruan) tidak bisa saling verifikasi.
+  // The 'pocketcode-*' labels in this file are protocol identities, not branding: don't change them, or
+  // already-paired phones & PCs (and mixed versions during updates) can't verify each other.
   return scryptAsync(enc(normalizePin(pin)), enc('pocketcode-pin:' + machineId), { N: 2 ** 15, r: 8, p: 1, dkLen: 32 });
 }
 
@@ -62,7 +62,7 @@ function cpaceKeys(sid, ya, yb, k) {
   };
 }
 
-// Sisi HP (inisiator). Langkah 1 -> kirim { sid, ya } ke PC.
+// Phone side (initiator). Step 1 -> send { sid, ya } to the PC.
 export function pairStartPhone(prs) {
   const sid = randomBytes(16);
   const G = cpaceGenerator(prs, sid);
@@ -71,7 +71,7 @@ export function pairStartPhone(prs) {
   return { state: { sid, a, Ya }, msg: { sid: bytesToHex(sid), ya: bytesToHex(Ya) } };
 }
 
-// Sisi PC. Terima { sid, ya } -> balas { yb, macB }. Simpan state untuk verifikasi macA.
+// PC side. Receive { sid, ya } -> reply { yb, macB }. Keep state to verify macA.
 export function pairRespondMachine(prs, msg) {
   const sid = hexToBytes(msg.sid);
   const Ya = hexToBytes(msg.ya);
@@ -87,7 +87,7 @@ export function pairRespondMachine(prs, msg) {
   return { state: { keys, transcript }, msg: { yb: bytesToHex(Yb), macB: bytesToHex(macB) } };
 }
 
-// Sisi HP. Verifikasi macB; null berarti PIN salah. Jika benar -> kirim { macA }.
+// Phone side. Verify macB; null means a wrong PIN. If correct -> send { macA }.
 export function pairFinishPhone(state, msg) {
   const Yb = hexToBytes(msg.yb);
   const PYb = ristretto255.Point.fromBytes(Yb);
@@ -99,14 +99,14 @@ export function pairFinishPhone(state, msg) {
   return { deviceSecret: keys.deviceSecret, msg: { macA: bytesToHex(hmac(sha256, keys.macKeyA, transcript)) } };
 }
 
-// Sisi PC. Verifikasi macA -> deviceSecret, atau null bila gagal.
+// PC side. Verify macA -> deviceSecret, or null on failure.
 export function pairVerifyMachine(state, msg) {
   const expect = hmac(sha256, state.keys.macKeyA, state.transcript);
   if (!ctEqual(expect, hexToBytes(msg.macA))) return null;
   return state.keys.deviceSecret;
 }
 
-// ---------- Handshake kanal sesi ----------
+// ---------- Session channel handshake ----------
 function sessionKeys(secret, na, nb, ea, eb, ss) {
   const okm = hkdf(sha256, concatBytes(secret, ss), concatBytes(na, nb), concatBytes(enc('pocketcode-session'), ea, eb), 96);
   return { p2m: okm.slice(0, 32), m2p: okm.slice(32, 64), mac: okm.slice(64, 96) };
@@ -151,7 +151,7 @@ export function authVerifyMachine(state, msg) {
   return new Channel(state.keys.m2p, state.keys.p2m);
 }
 
-// Kanal terenkripsi dua arah dengan nomor urut (anti-replay).
+// Two-way encrypted channel with sequence numbers (anti-replay).
 export class Channel {
   constructor(sendKey, recvKey) {
     this.sendKey = sendKey;
@@ -173,11 +173,11 @@ export class Channel {
     return m;
   }
 
-  // ---------- Kanal biner (protokol v2) ----------
-  // Frame WebSocket biner: [versi 1B][nonce 24B][ciphertext]. Plaintext: [flag 1B][seq 4B BE][potongan JSON].
-  // Dibanding frame teks (JSON → base64 → JSON lagi) ukurannya ±25–35% lebih kecil dan relay
-  // tidak perlu mem-parse JSON. Pesan > BIN_CHUNK dipecah (flag MORE), jadi tidak lagi
-  // terbentur batas 1MB per frame relay. Nomor urut dipakai bersama dengan frame teks.
+  // ---------- Binary channel (protocol v2) ----------
+  // Binary WebSocket frame: [version 1B][nonce 24B][ciphertext]. Plaintext: [flag 1B][seq 4B BE][JSON fragment].
+  // Compared to text frames (JSON → base64 → JSON again) it's ~25–35% smaller and the relay
+  // doesn't need to parse JSON. Messages > BIN_CHUNK are split (MORE flag), so they no longer
+  // hit the relay's 1MB-per-frame limit. Sequence numbers are shared with text frames.
   sealBin(obj) {
     const body = enc(JSON.stringify(obj));
     const frames = [];
@@ -193,10 +193,10 @@ export class Channel {
     return frames;
   }
 
-  // Hasil `undefined` = potongan pesan; pesan utuh dikembalikan setelah potongan terakhir.
+  // `undefined` result = a message fragment; the whole message is returned after the last fragment.
   openBin(frame) {
     const b = frame instanceof Uint8Array ? frame : new Uint8Array(frame);
-    if (b.length < 1 + 24 + 16 + 5 || b[0] !== BIN_V1[0]) throw new Error('frame biner tidak dikenal');
+    if (b.length < 1 + 24 + 16 + 5 || b[0] !== BIN_V1[0]) throw new Error('unknown binary frame');
     const pt = xchacha20poly1305(this.recvKey, b.subarray(1, 25)).decrypt(b.subarray(25));
     const s = new DataView(pt.buffer, pt.byteOffset).getUint32(1);
     if (!(s > this.recvSeq)) throw new Error('replay');
@@ -204,7 +204,7 @@ export class Channel {
     const part = pt.subarray(5);
     this.parts ??= [];
     this.partsLen = (this.partsLen || 0) + part.length;
-    if (this.partsLen > BIN_MAX) throw new Error('pesan terlalu besar');
+    if (this.partsLen > BIN_MAX) throw new Error('message too large');
     this.parts.push(part);
     if (pt[0] & FLAG_MORE) return undefined;
     const whole = this.parts.length === 1 ? part : concatBytes(...this.parts);
@@ -219,8 +219,8 @@ const FLAG_MORE = 1;
 export const BIN_CHUNK = 256 * 1024;
 const BIN_MAX = 64 * 1024 * 1024;
 
-// Bingkai relay biner: [panjang cid 1B][cid ASCII][payload]. Dipakai PC <-> relay
-// (relay menambah/membuang cid; HP hanya melihat payload).
+// Binary relay frame: [cid length 1B][cid ASCII][payload]. Used PC <-> relay
+// (the relay adds/strips the cid; the phone only sees the payload).
 export function frameWithCid(cid, payload) {
   const id = enc(cid);
   const out = new Uint8Array(1 + id.length + payload.length);

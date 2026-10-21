@@ -1,5 +1,5 @@
-// Tabel metode RPC daemon (HP lewat relay & terminal lewat IPC): satu fungsi per metode, (conn, params) -> hasil.
-// `c.d` = Daemon (server.js), `c.big` = kanal biner. Validasi input di sini: pesan klien tidak pernah dipercaya.
+// The daemon's RPC method table (phone via relay & terminal via IPC): one function per method, (conn, params) -> result.
+// `c.d` = Daemon (server.js), `c.big` = binary channel. Input is validated here: client messages are never trusted.
 import * as C from '../shared/crypto.js';
 import { saveConfig, isCloud, resetPinLock } from './config.js';
 import { getConn, detectConnection, resolveRoute, probeRoute } from './providers.js';
@@ -14,17 +14,17 @@ import { checkPush } from './webpush.js';
 import { listDir, readFile, writeFile, revertChange } from './files.js';
 
 // ---------- RPC ----------
-// Validasi input RPC: pesan dari HP/terminal tidak pernah dipercaya bentuknya.
+// RPC input validation: the shape of messages from the phone/terminal is never trusted.
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 export function need(v, name, { type = 'string', max = 100_000 } = {}) {
-  if (type === 'string' && (typeof v !== 'string' || !v || v.length > max)) throw new Error(`${name} tidak valid`);
-  if (type === 'number' && !Number.isFinite(+v)) throw new Error(`${name} tidak valid`);
+  if (type === 'string' && (typeof v !== 'string' || !v || v.length > max)) throw new Error(`invalid ${name}`);
+  if (type === 'number' && !Number.isFinite(+v)) throw new Error(`invalid ${name}`);
   return type === 'number' ? +v : v;
 }
 export const opt = (v, name, o) => (v == null || v === '' ? undefined : need(v, name, o));
 
-// Model default saat koneksi baru dipasang dari HP: Claude Sonnet/Opus bila ada, lalu Claude lain,
-// lalu model GPT Codex, Gemini Pro, lalu yang pertama.
+// Default model when a new connection is added from the phone: Claude Sonnet/Opus if present, then other Claude,
+// then Codex GPT models, Gemini Pro, then the first one.
 export function defaultModel(ids) {
   const pref = [/^cc\/claude-sonnet/, /^cc\/claude-opus/, /^(cc\/|[a-z]+:)?claude-sonnet/, /^(cc\/|[a-z]+:)?claude-opus/, /^(cc\/)?claude-/, /claude/, /gpt-[\d.]+-codex(?!-mini)/, /gpt-[\d.]+$/, /gemini.*pro/, /gemini/];
   for (const re of pref) {
@@ -34,64 +34,64 @@ export function defaultModel(ids) {
   return ids[0];
 }
 
-// Tabel metode RPC: (conn, params) -> hasil. `conn.d` = Daemon, `conn.big` = kanal biner (tanpa batas 1MB relay).
+// RPC method table: (conn, params) -> result. `conn.d` = Daemon, `conn.big` = binary channel (no 1MB relay limit).
 export const RPC = {
   info: (c) => c.info(),
   updateStatus: (c) => checkUpdate(c.d.config, c.d.secrets),
   async update(c) {
-    // claude.exe yang masih jalan mengunci file-nya → npm gagal memasang binary baru.
+    // A still-running claude.exe locks its file → npm fails to install the new binary.
     await c.d.sessions.stopAll();
     const res = await performUpdate(c.d.config, c.d.secrets);
     restartDaemon(c.d, { delay: 1200 });
-    return { ok: true, message: 'Update berhasil dipasang. PC sedang me-restart daemon...', commit: res.commit };
+    return { ok: true, message: 'Update installed. The PC is restarting the daemon...', commit: res.commit };
   },
-  // Versi baru bermasalah: pasang lagi versi sebelum pembaruan terakhir.
+  // The new version misbehaves: reinstall the version from before the last update.
   async rollback(c) {
     await c.d.sessions.stopAll();
     const res = await performRollback(c.d.config);
     restartDaemon(c.d, { delay: 1200 });
-    return { ok: true, message: `Kembali ke ${res.commit}. PC sedang me-restart daemon...`, commit: res.commit };
+    return { ok: true, message: `Rolled back to ${res.commit}. The PC is restarting the daemon...`, commit: res.commit };
   },
   restart(c) {
     restartDaemon(c.d, { delay: 1000 });
-    return { ok: true, message: 'Daemon sedang me-restart...' };
+    return { ok: true, message: 'The daemon is restarting...' };
   },
-  // `snugcode stop/restart` dari PC: berhenti dengan rapi agar dev server & tunnel ikut mati
-  // (di Windows, process.kill tidak menjalankan handler apa pun).
+  // `snugcode stop/restart` from the PC: stop cleanly so dev servers & tunnels die too
+  // (on Windows, process.kill doesn't run any handlers).
   shutdown(c) {
-    if (!c.local) throw new Error('Hanya dari terminal PC');
+    if (!c.local) throw new Error('Only from the PC terminal');
     setTimeout(() => Promise.resolve(c.d.stop()).finally(() => process.exit(0)), 50);
     return true;
   },
   githubStatus: (c, p) => (p.check ? c.d.github.check() : c.d.github.status()),
   githubLogin: (c) => c.d.github.begin(),
-  models: async (c) => (await c.d.models()).models.map((m) => m.id), // versi lama: daftar ID saja
+  models: async (c) => (await c.d.models()).models.map((m) => m.id), // old version: IDs only
   modelsInfo: async (c, p) => (await c.d.models({ fresh: !!p.fresh })).models,
-  // Model semua koneksi + koneksi yang gagal dihubungi (ditampilkan di pemilih model).
+  // Models from all connections + connections that failed (shown in the model picker).
   modelsAll: (c, p) => c.d.models({ fresh: !!p.fresh }),
   async probeModel(c, p) {
     const route = resolveRoute(c.d.secrets, need(p.model, 'model', { max: 300 }));
-    // ChatGPT: kesehatan model dijamin Codex; menguji lewat app-server terlalu mahal untuk tiap pilihan.
+    // ChatGPT: model health is guaranteed by Codex; testing via the app-server is too expensive for every pick.
     if (route.wire === 'chatgpt') return { ok: true, ms: 0, text: 'ChatGPT' };
     return probeRoute(route);
   },
   setModel(c, p) {
-    // Model ringan (subagen) tidak lagi bisa dipilih: otomatis dari koneksi yang sama (Haiku / Flash).
+    // The light model (subagents) can no longer be picked: it comes from the same connection automatically (Haiku / Flash).
     if (p.model) {
       const model = need(p.model, 'model', { max: 300 });
-      resolveRoute(c.d.secrets, model); // koneksi model ini harus ada
+      resolveRoute(c.d.secrets, model); // this model's connection must exist
       c.d.config.model = model;
     }
     saveConfig(c.d.config);
     return c.info();
   },
-  // ---------- koneksi model (API key official, router, endpoint kustom, login ChatGPT) ----------
-  // Key dikirim lewat kanal E2EE, divalidasi ke endpoint-nya dulu, dan tidak pernah dikembalikan ke klien.
+  // ---------- model connections (official API keys, routers, custom endpoints, ChatGPT login) ----------
+  // Keys are sent over the E2EE channel, validated against their endpoint first, and never returned to clients.
   connections: (c) => c.d.connList(),
   async connAdd(c, p) {
     const key = opt(p.key, 'API key', { max: 2000 })?.trim();
     const url = opt(p.url, 'URL', { max: 400 })?.trim();
-    const kind = opt(p.kind, 'jenis', { max: 32 });
+    const kind = opt(p.kind, 'kind', { max: 32 });
     const det = await detectConnection({ key, url, kind });
     const { models, ...conn } = det;
     const id = c.d.saveConnection(conn, { replace: opt(p.replace, 'id', { max: 40 }), models });
@@ -101,7 +101,7 @@ export const RPC = {
     c.d.removeConnection(need(p.id, 'id', { max: 40 }));
     return c.info();
   },
-  // Login ChatGPT (langganan Plus/Pro) lewat Codex resmi, dengan kode perangkat yang bisa diselesaikan dari HP.
+  // ChatGPT login (Plus/Pro subscription) via the official Codex, with a device code that can be completed from the phone.
   async chatgptLogin(c) {
     const d = c.d;
     const r = await chatgptLoginStart(d.config, {
@@ -109,9 +109,9 @@ export const RPC = {
       onDone: ({ ok, account, err }) => {
         if (ok) {
           d.saveConnection({ kind: 'chatgpt', label: 'ChatGPT', formats: {}, account: { email: account?.email || null, plan: account?.planType || null } }, { replace: 'chatgpt' });
-          d.log(`✓ ChatGPT tersambung${account?.email ? ' sebagai ' + account.email : ''}`);
+          d.log(`✓ ChatGPT connected${account?.email ? ' as ' + account.email : ''}`);
         }
-        d.broadcast({ ev: 'chatgpt', ok, err: ok ? null : err || 'Login ChatGPT gagal', info: null });
+        d.broadcast({ ev: 'chatgpt', ok, err: ok ? null : err || 'ChatGPT login failed', info: null });
         d.broadcast({ ev: 'connections', list: d.connList() });
       },
     });
@@ -122,24 +122,24 @@ export const RPC = {
     if (getConn(c.d.secrets, 'chatgpt')) c.d.removeConnection('chatgpt');
     return c.info();
   },
-  // ---------- jembatan MCP engine Codex (hanya koneksi jembatan satu sesi) ----------
+  // ---------- Codex engine MCP bridge (single-session bridge connections only) ----------
   devTools(c) {
-    if (!c.bridge) throw new Error('Hanya untuk jembatan MCP');
+    if (!c.bridge) throw new Error('Only for the MCP bridge');
     return devToolList();
   },
   devTool(c, p) {
-    if (!c.bridge) throw new Error('Hanya untuk jembatan MCP');
+    if (!c.bridge) throw new Error('Only for the MCP bridge');
     return callDevTool(c.bridge, need(p.name, 'tool', { max: 64 }), p.args && typeof p.args === 'object' ? p.args : {});
   },
-  // ---------- setelan dari HP (dulu hanya `snugcode setup` / `pin` / `devices` / `revoke`) ----------
-  // Bentuk lama (aplikasi versi lama): satu router = koneksi `router`.
+  // ---------- settings from the phone (formerly only `snugcode setup` / `pin` / `devices` / `revoke`) ----------
+  // Old shape (old app versions): a single router = the `router` connection.
   async configure(c, p) {
     const cur = getConn(c.d.secrets, 'router');
     const url = p.routerUrl != null && p.routerUrl !== '' ? need(p.routerUrl, 'URL router', { max: 300 }).trim().replace(/\/+$/, '') : cur?.openai || c.d.config.routerUrl;
-    if (!/^https?:\/\/[^\s/]+/i.test(url || '')) throw new Error('URL router harus diawali http:// atau https://');
+    if (!/^https?:\/\/[^\s/]+/i.test(url || '')) throw new Error('The router URL must start with http:// or https://');
     const key = p.routerKey ? need(p.routerKey, 'key 9router', { max: 1000 }).trim() : cur?.key;
-    if (!key) throw new Error('Key 9router kosong');
-    // Divalidasi dulu: key/URL yang salah tidak menimpa konfigurasi yang sedang berjalan.
+    if (!key) throw new Error('The 9router key is empty');
+    // Validated first: a wrong key/URL doesn't overwrite the running configuration.
     const { models, ...conn } = await detectConnection({ key, url, kind: 'router' });
     c.d.saveConnection(conn, { replace: 'router', models });
     return c.info();
@@ -158,11 +158,11 @@ export const RPC = {
     const devs = c.d.secrets.devices;
     const ids = p.id === 'all' ? Object.keys(devs) : [need(p.id, 'id', { max: 64 })];
     for (const id of ids) {
-      if (!devs[id]) throw new Error('Perangkat tidak ditemukan');
+      if (!devs[id]) throw new Error('Device not found');
       delete devs[id];
     }
     c.d.saveSecrets();
-    // Diputus setelah balasan terkirim (perangkat yang mencabut dirinya sendiri tetap menerima jawaban).
+    // Disconnected after the reply is sent (a device revoking itself still gets the answer).
     setTimeout(() => {
       for (const x of c.d.conns.values()) if (ids.includes(x.deviceId)) c.d.kick(x.cid, 'revoked');
     }, 300);
@@ -170,32 +170,32 @@ export const RPC = {
   },
   async setPin(c, p) {
     const pin = need(p.pin, 'PIN', { max: 12 });
-    if (!C.PIN_RE.test(pin)) throw new Error('PIN harus 6–12 huruf/angka.');
+    if (!C.PIN_RE.test(pin)) throw new Error('The PIN must be 6–12 letters/digits.');
     const s = c.d.secrets;
     s.prs = C.bytesToHex(await C.pinToPrs(pin, c.d.config.machineId));
     resetPinLock(s);
     c.d.saveSecrets();
     return true;
   },
-  // Runner cloud: token Codespaces milik HP (scope `codespace`) agar runner bisa menghentikan dirinya
-  // sendiri saat menganggur, dan batas menit menganggur. Disimpan di secrets.json (tertutup bagi agen).
+  // Cloud runner: the phone's Codespaces token (`codespace` scope) so the runner can stop itself
+  // when idle, plus the idle minutes limit. Stored in secrets.json (closed to the agent).
   runnerConfig(c, p) {
     const cfg = c.d.config;
-    if (!isCloud(cfg)) throw new Error('Hanya untuk runner cloud');
+    if (!isCloud(cfg)) throw new Error('Only for cloud runners');
     if (p.token !== undefined) {
       if (p.token) c.d.secrets.runnerToken = need(p.token, 'token', { max: 400 });
       else delete c.d.secrets.runnerToken;
       c.d.saveSecrets();
     }
     if (p.idleStopMinutes != null) {
-      cfg.idleStopMinutes = Math.max(0, Math.min(24 * 60, need(p.idleStopMinutes, 'menit', { type: 'number' })));
+      cfg.idleStopMinutes = Math.max(0, Math.min(24 * 60, need(p.idleStopMinutes, 'minutes', { type: 'number' })));
       saveConfig(cfg);
     }
     return c.info().runner;
   },
   setSessionModel(c, p) {
     const s = c.d.sessions.get(p.id);
-    if (s.status === 'running') throw new Error('Tunggu agen selesai (atau Stop) sebelum ganti model.');
+    if (s.status === 'running') throw new Error('Wait for the agent to finish (or Stop it) before switching models.');
     const model = need(p.model, 'model', { max: 200 });
     if (s.meta.model !== model) {
       s.emitEvent({ k: 'note', d: `◆ model: ${s.meta.model} → ${model}` });
@@ -205,11 +205,11 @@ export const RPC = {
     return s.summary();
   },
   repos(c, p) {
-    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub. Login dari Pengaturan PC → GitHub di aplikasi, atau jalankan `snugcode login` di PC.');
+    if (!c.d.secrets.githubToken) throw new Error('This PC isn\'t signed in to GitHub. Sign in from PC settings → GitHub in the app, or run `snugcode login` on the PC.');
     return listRepos(c.d.secrets.githubToken, opt(p.q, 'q', { max: 200 }), c.d.config.githubLogin);
   },
   async branches(c, p) {
-    if (!REPO_RE.test(p.repo || '')) throw new Error('repo tidak valid');
+    if (!REPO_RE.test(p.repo || '')) throw new Error('invalid repo');
     const list = await gh(c.d.secrets.githubToken, 'GET', `/repos/${p.repo}/branches?per_page=100`);
     return list.map((b) => b.name);
   },
@@ -218,8 +218,8 @@ export const RPC = {
   attach(c, p) {
     const s = c.d.sessions.get(p.id);
     c.subscribe(s);
-    // Frame relay teks dibatasi ~1MB: kirim riwayat terbaru saja bila terlalu besar.
-    // Kanal biner memecah pesan besar, jadi batasnya jauh lebih longgar.
+    // Text relay frames are capped at ~1MB: only send recent history if it's too large.
+    // The binary channel splits large messages, so its limit is much looser.
     const since = +p.since || 0;
     const all = mergeText(s.since(since));
     const limit = c.big ? 4_000_000 : 500_000;
@@ -248,7 +248,7 @@ export const RPC = {
     return s.summary();
   },
   rewind: (c, p) => c.d.sessions.get(p.id).rewindTo(need(p.seq, 'seq', { type: 'number' })),
-  // ---------- proses latar belakang & preview ----------
+  // ---------- background processes & preview ----------
   project(c, p) {
     const s = c.d.sessions.get(p.id);
     return { ...detectProject(s.meta.cwd), procs: s.procs.list(), preview: s.previewInfo() };
@@ -268,18 +268,18 @@ export const RPC = {
   async screenshot(c, p) {
     const s = c.d.sessions.get(p.id);
     const port = s.procs.list().find((x) => x.name === p.name)?.port;
-    if (!port) throw new Error('Port dev server belum terdeteksi');
+    if (!port) throw new Error('Dev server port not detected yet');
     const clamp = (v, def) => Math.min(1600, Math.max(240, +v || def));
     const r = await capture(`http://localhost:${port}${String(p.path || '/').replace(/^(?!\/)/, '/')}`, { width: clamp(p.width, 390), height: clamp(p.height, 844), cfg: c.d.config });
-    if (r.data.length > (c.big ? 6_000_000 : 450_000)) throw new Error('Screenshot terlalu besar untuk dikirim; perkecil viewport.');
+    if (r.data.length > (c.big ? 6_000_000 : 450_000)) throw new Error('Screenshot too large to send; use a smaller viewport.');
     return { data: r.data, mime: r.mime, title: r.title, logs: r.logs };
   },
   envSave(c, p) {
     const s = c.d.sessions.get(p.id);
-    if (s.meta.local || s.meta.computer) throw new Error('Fitur template .env hanya untuk sesi repository git.');
+    if (s.meta.local || s.meta.computer) throw new Error('.env templates are only for git repository sessions.');
     return saveEnv(s.meta.repo, s.meta.cwd);
   },
-  // ---------- terminal interaktif (PTY) ----------
+  // ---------- interactive terminal (PTY) ----------
   async termOpen(c, p) {
     const t = await c.d.terms.open(c.d.sessions.get(p.id), { cols: p.cols, rows: p.rows });
     return c.d.terms.attach(t.tid, c);
@@ -302,13 +302,13 @@ export const RPC = {
     c.d.terms.close(p.tid);
     return true;
   },
-  // ---------- Web Push (HP) ----------
+  // ---------- Web Push (phone) ----------
   pushSub(c, p) {
     const dev = c.d.secrets.devices[c.deviceId];
-    if (!dev) throw new Error('Hanya untuk HP yang dipasangkan');
+    if (!dev) throw new Error('Only for paired phones');
     if (p.sub) dev.push = checkPush(p);
     else if (!('level' in p)) delete dev.push;
-    // 'all' | 'important' (hanya izin, pertanyaan & selesai).
+    // 'all' | 'important' (only permissions, questions & finished).
     if (p.level === 'all' || p.level === 'important') dev.pushLevel = p.level;
     c.d.saveSecrets();
     return true;
@@ -331,7 +331,7 @@ export const RPC = {
   },
   budget(c, p) {
     const s = c.d.sessions.get(p.id);
-    s.setBudget(need(p.usd, 'batas', { type: 'number' }));
+    s.setBudget(need(p.usd, 'budget', { type: 'number' }));
     return s.summary();
   },
   autonomy(c, p) {
@@ -344,7 +344,7 @@ export const RPC = {
     await c.d.sessions.remove(p.id);
     return true;
   },
-  // Dipicu pengguna: clone dasar repo yang tidak dipakai sesi mana pun ikut dihapus sekarang.
+  // Triggered by the user: base clones not used by any session are removed now as well.
   cleanup: (c) => c.d.sessions.cleanupOrphans({ minAgeMs: 0, repoTtlMs: 0 }),
   status: async (c, p) => {
     const s = c.d.sessions.get(p.id);
@@ -372,42 +372,42 @@ export const RPC = {
   files: (c, p) => listDir(c.d.sessions.get(p.id).meta.cwd, opt(p.path, 'path', { max: 4096 }) || ''),
   fileRead(c, p) {
     const r = readFile(c.d.sessions.get(p.id).meta.cwd, need(p.path, 'path', { max: 4096 }));
-    // Kanal teks relay dibatasi ±1 MB: file besar hanya lewat kanal biner.
-    if (!c.big && (r.text?.length > 400_000 || r.image?.data.length > 400_000)) throw new Error('File terlalu besar untuk koneksi ini; perbarui aplikasi.');
+    // The text relay channel is capped at ~1 MB: large files only go over the binary channel.
+    if (!c.big && (r.text?.length > 400_000 || r.image?.data.length > 400_000)) throw new Error('File too large for this connection; update the app.');
     return r;
   },
   fileWrite(c, p) {
     const s = c.d.sessions.get(p.id);
-    const r = writeFile(s.meta.cwd, need(p.path, 'path', { max: 4096 }), typeof p.text === 'string' ? p.text : need(p.text, 'isi'), { hash: opt(p.hash, 'hash', { max: 64 }), create: !!p.create });
-    s.userChanged(`${p.create ? 'created' : 'edited'} ${r.path}`, `✎ ${r.path} ${p.create ? 'dibuat' : 'diedit'} dari HP`);
+    const r = writeFile(s.meta.cwd, need(p.path, 'path', { max: 4096 }), typeof p.text === 'string' ? p.text : need(p.text, 'text'), { hash: opt(p.hash, 'hash', { max: 64 }), create: !!p.create });
+    s.userChanged(`${p.create ? 'created' : 'edited'} ${r.path}`, `✎ ${r.path} ${p.create ? 'created' : 'edited'} from the phone`);
     return r;
   },
   async revert(c, p) {
     const s = c.d.sessions.get(p.id);
-    if (s.status === 'running') throw new Error('Hentikan agen dulu sebelum membatalkan perubahan.');
+    if (s.status === 'running') throw new Error('Stop the agent before reverting changes.');
     const r = await revertChange(s.meta.cwd, need(p.path, 'path', { max: 4096 }), opt(p.hunk, 'hunk', { max: 2_000_000 }));
-    s.userChanged(`reverted ${p.hunk ? 'part of the changes' : 'all uncommitted changes'} in ${r.path}`, `↺ ${p.hunk ? 'satu hunk' : 'semua perubahan'} ${r.path} dibatalkan dari HP`);
+    s.userChanged(`reverted ${p.hunk ? 'part of the changes' : 'all uncommitted changes'} in ${r.path}`, `↺ ${p.hunk ? 'one hunk' : 'all changes'} in ${r.path} reverted from the phone`);
     return r;
   },
   commit(c, p) {
-    if (!p.message?.trim()) throw new Error('Pesan commit kosong');
+    if (!p.message?.trim()) throw new Error('Empty commit message');
     const cfg = c.d.config;
     const identity = cfg.githubLogin ? { login: cfg.githubLogin, id: cfg.githubId } : null;
     return gitCommit(c.d.sessions.get(p.id).meta.cwd, String(p.message).trim(), identity);
   },
   async push(c, p) {
-    if (!c.d.secrets.githubToken) throw new Error('PC ini belum login GitHub.');
+    if (!c.d.secrets.githubToken) throw new Error('This PC isn\'t signed in to GitHub.');
     const s = c.d.sessions.get(p.id);
     const branch = await gitPush(s.meta.cwd, c.d.secrets.githubToken);
-    s.emitEvent({ k: 'note', d: `⇡ push ke origin/${branch}` });
+    s.emitEvent({ k: 'note', d: `⇡ pushed to origin/${branch}` });
     return branch;
   },
   async pr(c, p) {
     const s = c.d.sessions.get(p.id);
-    // Sesi lokal bisa pindah branch dari terminal: pakai branch yang sedang aktif (dibaca tanpa git).
+    // Local sessions may switch branches from the terminal: use the current branch (read without git).
     const head = currentBranch(s.meta.cwd) || (await gitStatus(s.meta.cwd)).branch;
     const pr = await createPR(c.d.secrets.githubToken, s.meta.repo, { head, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
-    s.emitEvent({ k: 'note', d: `PR #${pr.number} dibuat: ${pr.url}` });
+    s.emitEvent({ k: 'note', d: `PR #${pr.number} created: ${pr.url}` });
     return pr;
   },
 };

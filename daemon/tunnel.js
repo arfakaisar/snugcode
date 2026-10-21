@@ -1,8 +1,8 @@
-// Preview dev server dari HP/laptop lain lewat Cloudflare quick tunnel (tanpa akun).
-// Tunnel tidak diarahkan langsung ke dev server, tapi ke gerbang lokal yang mewajibkan
-// token rahasia; token hanya dikirim ke HP lewat kanal E2EE, jadi URL tunnel yang bocor
-// tidak bisa dipakai. Gerbang juga menulis ulang Host/Origin ke localhost agar dev server
-// (Vite allowedHosts, Next allowedDevOrigins) menerima request, termasuk WebSocket HMR.
+// Preview dev servers from a phone/another laptop via a Cloudflare quick tunnel (no account).
+// The tunnel doesn't point at the dev server directly but at a local gate that requires a
+// secret token; the token is only sent to the phone over the E2EE channel, so a leaked tunnel URL
+// is useless. The gate also rewrites Host/Origin to localhost so dev servers
+// (Vite allowedHosts, Next allowedDevOrigins) accept the request, including HMR WebSockets.
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -35,19 +35,19 @@ function onPath() {
   }
 }
 
-// Versi dipatok + SHA-256 dari catatan rilis resmi (daemon/cloudflared-version.json): binary yang diunduh
-// dijalankan di PC, jadi tidak pernah "latest" tanpa verifikasi. Perbarui: versi + hash dari rilis GitHub.
+// Pinned version + SHA-256 from the official release notes (daemon/cloudflared-version.json): the downloaded binary
+// runs on the PC, so it's never "latest" without verification. To update: version + hash from the GitHub release.
 const PIN = JSON.parse(fs.readFileSync(new URL('./cloudflared-version.json', import.meta.url), 'utf8'));
 
 async function download(dest) {
   const asset = releaseAsset();
   const want = PIN.sha256[asset];
-  if (!want) throw new Error(`cloudflared untuk ${asset} belum didukung; pasang cloudflared sendiri (PATH) atau isi cloudflaredExecutable di config.json.`);
+  if (!want) throw new Error(`cloudflared for ${asset} isn't supported yet; install cloudflared yourself (PATH) or set cloudflaredExecutable in config.json.`);
   const res = await fetch(`https://github.com/cloudflare/cloudflared/releases/download/${PIN.version}/${asset}`);
-  if (!res.ok) throw new Error(`Gagal mengunduh cloudflared (${res.status})`);
+  if (!res.ok) throw new Error(`Failed to download cloudflared (${res.status})`);
   const buf = Buffer.from(await res.arrayBuffer());
   const got = createHash('sha256').update(buf).digest('hex');
-  if (got !== want) throw new Error(`cloudflared yang diunduh tidak cocok dengan checksum resmi (${asset}); unduhan dibatalkan.`);
+  if (got !== want) throw new Error(`The downloaded cloudflared doesn't match the official checksum (${asset}); download aborted.`);
   fs.mkdirSync(BIN_DIR, { recursive: true });
   const tmp = path.join(BIN_DIR, asset + '.part');
   fs.writeFileSync(tmp, buf);
@@ -60,7 +60,7 @@ async function download(dest) {
 }
 
 let installing = null;
-// cloudflared: config.json → ~/.snugcode/bin → PATH → unduh sekali dari rilis GitHub.
+// cloudflared: config.json → ~/.snugcode/bin → PATH → download once from the GitHub release.
 export function cloudflaredPath(cfg = {}) {
   if (cfg.cloudflaredExecutable) return Promise.resolve(cfg.cloudflaredExecutable);
   const local = path.join(BIN_DIR, EXE);
@@ -73,7 +73,7 @@ export function cloudflaredPath(cfg = {}) {
 const page = (title, text) =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="background:#07090d;color:#dbe2ea;font:15px/1.6 ui-monospace,monospace;padding:32px 18px;max-width:560px;margin:auto"><h2 style="color:#5ee6a0">${title}</h2><p>${text}</p>`;
 
-// `target` bisa diganti (gate.retarget) tanpa membuat tunnel baru: URL & cookie tetap sama.
+// `target` can be changed (gate.retarget) without a new tunnel: the URL & cookie stay the same.
 export function startGate(target, token) {
   const want = Buffer.from(token);
   const valid = (t) => typeof t === 'string' && t.length === token.length && timingSafeEqual(Buffer.from(t), want);
@@ -91,7 +91,7 @@ export function startGate(target, token) {
   };
   const deny = (res) => {
     res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(page('Link preview tidak valid', 'Buka preview lewat tombol Preview di aplikasi snugcode.'));
+    res.end(page('Invalid preview link', 'Open the preview with the Preview button in the snugcode app.'));
   };
 
   /** @type {http.Server & { retarget?: (port: number) => void }} */
@@ -114,13 +114,13 @@ export function startGate(target, token) {
     up.on('error', () => {
       if (res.headersSent) return res.destroy();
       res.writeHead(502, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', refresh: '3' });
-      res.end(page('Dev server belum siap', `Tidak ada yang menjawab di port ${target}. Halaman ini memuat ulang otomatis.`));
+      res.end(page('Dev server not ready yet', `Nothing is answering on port ${target}. This page reloads automatically.`));
     });
     res.on('close', () => res.writableFinished || up.destroy());
     req.pipe(up);
   });
 
-  // WebSocket (HMR Vite/Next/webpack): cek cookie, lalu salurkan socket mentah.
+  // WebSocket (Vite/Next/webpack HMR): check the cookie, then pipe the raw socket.
   server.on('upgrade', (req, sock, head) => {
     if (!valid(cookie(req))) return sock.end('HTTP/1.1 401 Unauthorized\r\nconnection: close\r\n\r\n');
     const up = net.connect({ host: 'localhost', port: target, autoSelectFamily: true }, () => {
@@ -137,7 +137,7 @@ export function startGate(target, token) {
   server.retarget = (port) => {
     target = port;
     local = `localhost:${port}`;
-    // Koneksi keep-alive / HMR lama masih menunjuk dev server sebelumnya.
+    // Keep-alive / old HMR connections still point at the previous dev server.
     server.closeIdleConnections?.();
   };
 
@@ -147,10 +147,10 @@ export function startGate(target, token) {
   });
 }
 
-// Subdomain trycloudflare baru butuh beberapa detik sampai DNS dan edge-nya siap (sebelum itu
-// 530). Jangan berikan link sebelum gerbang kita sendiri menjawab lewat tunnel: resolver HP akan
-// menyimpan cache "tidak ditemukan" beberapa menit. Resolver publik dipakai langsung agar tidak
-// terkena cache negatif OS di PC.
+// A new trycloudflare subdomain needs a few seconds until its DNS and edge are ready (530 before
+// that). Don't hand out the link until our own gate answers through the tunnel: the phone's resolver
+// would cache "not found" for minutes. Public resolvers are used directly to avoid
+// the PC's OS negative cache.
 async function waitReady(url, ms = 30000) {
   const host = new URL(url).hostname;
   const r = new dns.Resolver({ timeout: 2000, tries: 1 });
@@ -167,7 +167,7 @@ async function waitReady(url, ms = 30000) {
   }
 }
 
-// Buka tunnel ke `port`. Hasil: { url, link (dengan token), close() }.
+// Open a tunnel to `port`. Result: { url, link (with token), close() }.
 /** @param {number} port @param {{ cfg?: object, onExit?: () => void }} [opts] */
 export async function openTunnel(port, { cfg, onExit } = {}) {
   const token = randomBytes(24).toString('base64url');
@@ -184,15 +184,15 @@ export async function openTunnel(port, { cfg, onExit } = {}) {
     const url = await new Promise((resolve, reject) => {
       let log = '';
       let found = null;
-      const timer = setTimeout(() => reject(new Error('cloudflared tidak memberi URL dalam 45 detik')), 45000);
-      // URL muncul sebelum tunnel siap; tunggu koneksi pertama terdaftar agar link langsung bisa dibuka.
+      const timer = setTimeout(() => reject(new Error('cloudflared gave no URL within 45 seconds')), 45000);
+      // The URL appears before the tunnel is ready; wait for the first registered connection so the link opens right away.
       child.stderr.on('data', (d) => {
         log = (log + d).slice(-8000);
         found ??= log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)?.[0];
         if (found && /Registered tunnel connection/.test(log)) (clearTimeout(timer), resolve(found));
       });
       child.once('error', (e) => (clearTimeout(timer), reject(e)));
-      child.once('exit', (code) => (clearTimeout(timer), reject(new Error('cloudflared berhenti: ' + (log.match(/(?:ERR|error).*$/im)?.[0] || 'exit ' + code)))));
+      child.once('exit', (code) => (clearTimeout(timer), reject(new Error('cloudflared stopped: ' + (log.match(/(?:ERR|error).*$/im)?.[0] || 'exit ' + code)))));
     });
     await waitReady(url);
     child.once('exit', () => (gate.close(), onExit?.()));

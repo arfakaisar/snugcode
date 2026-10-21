@@ -1,6 +1,6 @@
-// Utilitas DOM bersama: elemen, ikon, tema, viewport, toast, header/layar/sheet/drawer,
-// gestur sentuh (tarik sheet, geser drawer, tarik-untuk-muat-ulang, tekan lama), markdown.
-// Semua animasi hanya memakai transform/opacity (CSS atau Web Animations) agar ringan di HP.
+// Shared DOM utilities: elements, icons, theme, viewport, toast, header/screen/sheet/drawer,
+// touch gestures (drag sheet, swipe drawer, pull-to-refresh, long press), markdown.
+// All animations use only transform/opacity (CSS or Web Animations) to stay light on phones.
 import { md as mdRender } from '../md.js';
 import { store } from '../conn.js';
 import { app } from './state.js';
@@ -19,8 +19,8 @@ export function h(tag, attrs = {}, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
   return el;
 }
-// replaceChildren/append bawaan mengubah null menjadi teks "null"; banyak tampilan
-// memakai pola `kondisi ? elemen : null`, jadi nilai kosong diabaikan di sini.
+// Native replaceChildren/append turn null into the text "null"; many views use the
+// `cond ? element : null` pattern, so empty values are skipped here.
 for (const method of ['replaceChildren', 'append']) {
   const orig = Element.prototype[method];
   Element.prototype[method] = function (...kids) {
@@ -30,7 +30,7 @@ for (const method of ['replaceChildren', 'append']) {
 export const coarse = matchMedia('(pointer: coarse)').matches;
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 export const haptic = (/** @type {number | number[]} */ ms = 12) => navigator.vibrate?.(ms);
-// Animasi sekali jalan lewat Web Animations API (tanpa reflow paksa); dilewati bila gerak dikurangi.
+// One-shot animation via the Web Animations API (no forced reflow); skipped with reduced motion.
 /** @param {Element | null | undefined} el @param {Keyframe[]} frames @param {number | KeyframeAnimationOptions} [opts] */
 export function anim(el, frames, opts = 260) {
   if (!el?.animate || reduce.matches) return null;
@@ -40,14 +40,14 @@ export const pop = (el) => anim(el, [{ transform: 'scale(.6)', opacity: 0.4 }, {
 export function ago(ts) {
   if (!ts) return '';
   const s = (Date.now() - ts) / 1000;
-  if (s < 60) return 'baru saja';
-  if (s < 3600) return Math.floor(s / 60) + ' mnt';
-  if (s < 86400) return Math.floor(s / 3600) + ' jam';
-  return Math.floor(s / 86400) + ' hari';
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min';
+  if (s < 86400) return Math.floor(s / 3600) + ' h';
+  return Math.floor(s / 86400) + ' d';
 }
 export function greeting() {
   const hr = new Date().getHours();
-  return hr < 4 ? 'Selamat malam' : hr < 11 ? 'Selamat pagi' : hr < 15 ? 'Selamat siang' : hr < 18 ? 'Selamat sore' : 'Selamat malam';
+  return hr < 4 ? 'Good evening' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
 }
 export async function copyText(text) {
   try {
@@ -64,7 +64,7 @@ export async function copyText(text) {
   }
 }
 
-// ---------- ikon (SVG statis) ----------
+// ---------- icons (static SVG) ----------
 export const P = {
   back: '<path d="m15 18-6-6 6-6"/>',
   menu: '<path d="M4 8h16M4 16h10"/>',
@@ -128,11 +128,11 @@ export function ic(name, cls = '') {
   t.innerHTML = `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
   return /** @type {SVGElement} */ (t.content.firstChild);
 }
-// Maskot "Snug": mochi clay bertopi tidur bintang, berselimut, dengan "zzz". Semua gerak ada di CSS:
-//   (bawaan) tidur: bernapas, topi bergoyang, zzz melayang
-//   think       : bangun & bekerja — mata berkedip, kepala mengangguk, kaki "mengetik", titik berpikir
-//   draw        : muncul meletup (squash & stretch) lalu selimut naik
-//   tap         : bisa dicolek — melompat kaget sebentar
+// "Snug" mascot: a clay mochi in a starry nightcap, under a blanket, with "zzz". All motion is CSS:
+//   (default) sleep: breathing, swaying cap, floating zzz
+//   think          : awake & working — blinking, nodding, "typing" paws, thinking dots
+//   draw           : pops in (squash & stretch), then the blanket rises
+//   tap            : pokeable — a short startled hop
 const MASCOT = `<ellipse class="m-shadow" cx="32" cy="58.6" rx="21" ry="2.4"/>
 <g class="m-bob"><g class="m-breath">
 <path class="m-body" d="M13 50C13 33 21 21.5 32 21.5S51 33 51 50Z"/>
@@ -166,7 +166,7 @@ export function mascot(cls = '') {
   return svg;
 }
 
-// ---------- tema: sistem / terang / gelap ----------
+// ---------- theme: system / light / dark ----------
 export function applyTheme(t = store.get('theme') || 'system') {
   const root = document.documentElement;
   if (t === 'system') delete root.dataset.theme;
@@ -176,26 +176,26 @@ export function applyTheme(t = store.get('theme') || 'system') {
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => applyTheme());
 
-// ---------- ukuran teks ----------
-// Zoom halaman dikunci (seperti aplikasi native), jadi pembaca yang butuh huruf lebih besar memakai skala
-// ini: CSS `zoom` pada isi layar, sheet & drawer (header dan terminal punya ukurannya sendiri).
+// ---------- text size ----------
+// Page zoom is locked (like a native app), so readers who need larger type use this scale:
+// CSS `zoom` on screen content, sheet & drawer (header and terminal have their own sizes).
 /** @type {[number, string][]} */
-export const TEXT_SCALES = [[0.9, 'Kecil'], [1, 'Normal'], [1.15, 'Besar'], [1.3, 'Sangat besar']];
+export const TEXT_SCALES = [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large']];
 export function applyTextScale(z = Number(store.get('textScale')) || 1) {
   if (z === 1) document.documentElement.style.removeProperty('--text-scale');
   else document.documentElement.style.setProperty('--text-scale', String(z));
 }
 
-// ---------- viewport: shell mengikuti area yang benar-benar terlihat ----------
-// iOS tidak mengecilkan layout saat keyboard muncul; tanpa ini composer
-// tertutup keyboard dan halaman ikut bergeser.
+// ---------- viewport: the shell follows the actually visible area ----------
+// iOS doesn't shrink the layout when the keyboard opens; without this the composer
+// is hidden behind the keyboard and the page shifts.
 export const vv = window.visualViewport;
 export let kbOpen = false;
 export function syncViewport() {
   const vh = vv ? vv.height : window.innerHeight;
   const open = vv ? window.innerHeight - vv.height > 140 || (document.activeElement?.matches?.('input,textarea') && screen.height - vh > 260) : false;
-  // --app-h/--app-top hanya dipakai saat keyboard terbuka (html.kb); selain itu shell menempel ke tepi
-  // layar lewat CSS, karena di PWA iOS innerHeight/visualViewport bisa kurang sebesar status bar.
+  // --app-h/--app-top are only used while the keyboard is open (html.kb); otherwise the shell sticks to the
+  // screen edges via CSS, since in an iOS PWA innerHeight/visualViewport can be short by the status bar.
   const hgt = vh;
   const root = document.documentElement.style;
   root.setProperty('--app-h', vh + 'px');
@@ -216,10 +216,10 @@ document.addEventListener('focusin', () => setTimeout(syncViewport, 60));
 document.addEventListener('focusout', () => setTimeout(syncViewport, 120));
 syncViewport();
 
-// ---------- zoom dikunci seperti aplikasi native ----------
-// Chrome/Android menghormati meta viewport (user-scalable=no) & touch-action; Safari iOS mengabaikan
-// user-scalable, jadi gestur cubitnya (gesture*, khusus WebKit) dibatalkan di sini. Listener gesture
-// tidak ikut menahan scroll, beda dengan touchmove non-pasif.
+// ---------- zoom locked like a native app ----------
+// Chrome/Android honor the meta viewport (user-scalable=no) & touch-action; iOS Safari ignores
+// user-scalable, so its pinch gestures (gesture*, WebKit-only) are cancelled here. Gesture listeners
+// don't block scrolling, unlike a non-passive touchmove.
 for (const t of ['gesturestart', 'gesturechange']) document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
 
 // ---------- toast ----------
@@ -239,7 +239,7 @@ export function toast(msg, bad = false, ms = 3200) {
   return el;
 }
 
-// ---------- header / layar / sheet ----------
+// ---------- header / screen / sheet ----------
 /**
  * @typedef {{ icon: string, label: string, onclick: () => void }} HeaderAction
  * @typedef {{ sub?: string, back?: () => void, menu?: boolean, actions?: (HeaderAction | Element)[], dot?: string, onTitle?: () => void, titleLabel?: string }} HeaderOpts
@@ -247,7 +247,7 @@ export function toast(msg, bad = false, ms = 3200) {
  * @typedef {{ title: string, text?: string, ok?: string, danger?: boolean, icon?: string, stay?: boolean }} ConfirmOpts
  */
 export const ui = {
-  /** Arah transisi layar berikutnya: 1 = maju, -1 = kembali. */
+  /** Direction of the next screen transition: 1 = forward, -1 = back. */
   dir: 1,
   sdir: 1,
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -326,15 +326,15 @@ export const ui = {
   /** @param {string} title @param {SheetHeadOpts} [opts] */
   head(title, { sub, back, close = true } = {}) {
     return h('div', { class: 'sheethead' },
-      back ? h('button', { class: 'iconbtn small', 'aria-label': 'Kembali', onclick: () => ((ui.sdir = -1), back()) }, ic('back')) : null,
+      back ? h('button', { class: 'iconbtn small', 'aria-label': 'Back', onclick: () => ((ui.sdir = -1), back()) }, ic('back')) : null,
       h('h2', {}, title, sub ? h('span', { class: 'sub' }, sub) : null),
-      close ? h('button', { class: 'iconbtn small', 'aria-label': 'Tutup', onclick: () => ui.closeSheet() }, ic('x')) : null,
+      close ? h('button', { class: 'iconbtn small', 'aria-label': 'Close', onclick: () => ui.closeSheet() }, ic('x')) : null,
     );
   },
-  // Pengganti confirm(): sheet dengan ikon, teks, Batal / OK. `stay` = sheet tetap terbuka setelah OK
-  // (pemanggil langsung mengganti isinya, mis. menampilkan progres).
+  // confirm() replacement: a sheet with icon, text, Cancel / OK. `stay` = the sheet stays open after OK
+  // (the caller replaces its content right away, e.g. to show progress).
   /** @param {ConfirmOpts} o @returns {Promise<boolean>} */
-  confirm({ title, text, ok = 'Lanjut', danger = false, icon = 'alert', stay = false }) {
+  confirm({ title, text, ok = 'Continue', danger = false, icon = 'alert', stay = false }) {
     return new Promise((resolve) => {
       let done = false;
       const fin = (v) => {
@@ -350,7 +350,7 @@ export const ui = {
           h('div', { class: 'cicon' + (danger ? ' danger' : '') }, ic(icon)),
           h('h2', {}, title),
           text ? h('p', {}, text) : null,
-          h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => this.closeSheet() }, 'Batal'), okBtn),
+          h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => this.closeSheet() }, 'Cancel'), okBtn),
         ),
       );
       this.onDismiss = cancel;
@@ -366,7 +366,7 @@ $('#sheetBackdrop').addEventListener('click', () => ui.closeSheet());
 document.addEventListener('keydown', (e) => e.key === 'Escape' && (drawer.open ? drawer.close() : ui.closeSheet()));
 
 const wide = matchMedia('(min-width: 720px)');
-// Tarik sheet ke bawah untuk menutup: dari handle, judul, atau isi yang sudah di paling atas.
+// Pull the sheet down to close: from the handle, the title, or content already scrolled to the top.
 (() => {
   const panel = $('#sheetPanel');
   const body = $('#sheetBody');
@@ -417,9 +417,9 @@ const wide = matchMedia('(min-width: 720px)');
   panel.addEventListener('touchcancel', end);
 })();
 
-// ---------- drawer samping (gaya aplikasi chat) ----------
-// Isi drawer dibuat ulang setiap dibuka (drawer.build, diisi sessions.js) dan dikosongkan saat
-// ditutup, jadi tidak ada elemen tersembunyi yang ikut terhitung di layar utama.
+// ---------- side drawer (chat-app style) ----------
+// Drawer content is rebuilt on every open (drawer.build, set by sessions.js) and cleared on close,
+// so no hidden elements count toward the main screen.
 export const drawer = {
   enabled: false,
   open: false,
@@ -450,7 +450,7 @@ export const drawer = {
   t: undefined,
 };
 $('#drawerScrim').addEventListener('click', () => drawer.close());
-// Geser dari tepi kiri untuk membuka, geser ke kiri untuk menutup.
+// Swipe from the left edge to open, swipe left to close.
 (() => {
   const panel = $('#drawerPanel');
   const scrim = $('#drawerScrim');
@@ -513,8 +513,8 @@ $('#drawerScrim').addEventListener('click', () => drawer.close());
   document.addEventListener('touchcancel', end);
 })();
 
-// ---------- gestur kecil ----------
-// Tarik ke bawah di paling atas daftar untuk memuat ulang (hanya layar sentuh).
+// ---------- small gestures ----------
+// Pull down at the top of a list to reload (touch screens only).
 /** @param {HTMLElement} scroller @param {() => *} onRefresh */
 export function pullToRefresh(scroller, onRefresh) {
   if (!coarse) return;
@@ -560,7 +560,7 @@ export function pullToRefresh(scroller, onRefresh) {
     pull = 0;
   });
 }
-// Tekan lama (±0,5 detik) memanggil fn; klik sesudahnya diabaikan.
+// Long press (~0.5 s) calls fn; the click that follows is ignored.
 /** @param {HTMLElement} el @param {() => void} fn */
 export function onLongPress(el, fn) {
   let t;
@@ -585,13 +585,13 @@ export function onLongPress(el, fn) {
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-// Isi elemen diganti hanya bila `key` berubah. Mencegah animasi masuk diputar ulang saat data yang
-// sama digambar lagi (mis. pil & banner beranda setelah hasil cek pembaruan tiba).
+// Replace an element's content only when `key` changes. Keeps entry animations from replaying when the
+// same data is drawn again (e.g. home pills & banners after the update check arrives).
 /** @param {HTMLElement} el @param {string} key @param {() => (Node | null | false)[]} build */
 export function renderIf(el, key, build) {
   if (el.dataset.key === key) return false;
   el.dataset.key = key;
-  // null/false dibuang oleh replaceChildren versi di atas.
+  // null/false are dropped by the replaceChildren override above.
   el.replaceChildren(.../** @type {Node[]} */ (build()));
   return true;
 }
@@ -607,8 +607,8 @@ export function menuItem({ icon, t1, t2, onclick, danger, chev = true }) {
     chev ? ic('right', 'chev') : null,
   );
 }
-// Baris menu dengan sakelar. onchange(nilaiBaru) mengembalikan nilai sebenarnya (atau melempar):
-// sakelar bergerak seketika lalu kembali bila gagal.
+// Menu row with a switch. onchange(newValue) returns the actual value (or throws):
+// the switch moves instantly and springs back on failure.
 /** @param {{ icon: string, t1: *, t2?: *, on: boolean, danger?: boolean, onchange: (on: boolean) => * }} item */
 export function toggleItem({ icon, t1, t2, on, danger, onchange }) {
   const sw = h('span', { class: 'switch' + (on ? ' on' : '') + (danger ? ' danger' : ''), role: 'switch', 'aria-checked': String(on) }, h('i'));
@@ -642,7 +642,7 @@ export function busyButton(btn, label) {
   };
 }
 
-// ---------- Markdown (aman: semua teks di-escape) ----------
+// ---------- Markdown (safe: all text is escaped) ----------
 export let copyIconHtml = null;
 export const md = (src) => mdRender(src, { copyIcon: (copyIconHtml ??= ic('copy').outerHTML) });
-export const isOldDaemon = (e) => /Metode tidak dikenal/.test(e?.message || '');
+export const isOldDaemon = (e) => /Metode tidak dikenal|Unknown method/.test(e?.message || '');

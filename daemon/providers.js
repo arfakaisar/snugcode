@@ -1,10 +1,10 @@
-// Koneksi model milik pengguna: deteksi jenis API key / endpoint, daftar model per koneksi,
-// dan uji cepat model. Katalog provider & format referensi model ada di shared/providers.js.
+// User-owned model connections: detect API key / endpoint type, list models per connection,
+// and quick model tests. The provider catalog & model reference format live in shared/providers.js.
 //
-// Disimpan di secrets.connections[id] (tertutup bagi agen, tidak pernah dikirim balik ke HP):
+// Stored in secrets.connections[id] (closed to the agent, never sent back to the phone):
 //   { kind, key, label, openai?, anthropic?, formats: { anthropic, openai, responses }, router?, addedAt }
-// Koneksi `router` = router lama (dulu satu-satunya: config.routerUrl + secrets.routerKey). Model-nya
-// dirujuk tanpa awalan ("cc/claude-opus-5-5"), jadi sesi & config lama tetap berlaku.
+// The `router` connection = the legacy router (once the only one: config.routerUrl + secrets.routerKey). Its models
+// are referenced without a prefix ("cc/claude-opus-5-5"), so old sessions & config still work.
 import { PROVIDERS, REJECTED_KEYS, keyCandidates, joinRef, splitRef, engineFor, connKind, maskKey, isClaudeId, isGptModel } from '../shared/providers.js';
 import { resolveModelEffort } from '../shared/models.js';
 
@@ -16,7 +16,7 @@ const TTL = 5 * 60 * 1000;
 const trimUrl = (/** @type {any} */ u) => String(u || '').trim().replace(/\/+$/, '');
 const strip = (/** @type {any} */ u, /** @type {RegExp} */ re) => trimUrl(u).replace(re, '');
 
-// Router lama: config.routerUrl + secrets.routerKey -> koneksi `router` (dipindahkan sekali).
+// Legacy router: config.routerUrl + secrets.routerKey -> the `router` connection (migrated once).
 export function migrateLegacy(cfg, sec) {
   sec.connections ??= {};
   if (sec.routerKey && !sec.connections.router && cfg.routerUrl) {
@@ -36,16 +36,16 @@ export function getConn(sec, id) {
   return c ? { ...c, id } : null;
 }
 
-// Simpan koneksi hasil deteksi; mengembalikan ID-nya. Satu koneksi per provider katalog (menimpa
-// yang lama); router & endpoint kustom bisa banyak (router, router2, …). Koneksi `router` = model
-// tanpa awalan, jadi router pertama tetap memakai referensi model lama.
+// Save a detected connection; returns its ID. One connection per catalog provider (replacing
+// the old one); routers & custom endpoints can be many (router, router2, …). The `router` connection = models
+// without a prefix, so the first router keeps using the old model references.
 /** @param {any} sec @param {any} conn @param {{ replace?: string }} [opts] */
 export function putConnection(sec, conn, { replace } = {}) {
   sec.connections ??= {};
   const kind = conn.kind === 'custom' ? 'router' : conn.kind;
   let id = replace && sec.connections[replace] ? replace : kind !== 'router' ? kind : null;
   if (!id) {
-    // Endpoint yang sama disambungkan lagi (mis. key baru): timpa, jangan menggandakan.
+    // The same endpoint connected again (e.g. a new key): replace it, don't duplicate.
     id = Object.entries(sec.connections).find(([, c]) => c.kind === 'router' && c.openai === conn.openai)?.[0] || 'router';
     for (let n = 2; sec.connections[id] && sec.connections[id].openai !== conn.openai; n++) id = 'router' + n;
   }
@@ -58,12 +58,12 @@ export function putConnection(sec, conn, { replace } = {}) {
 
 export const hasConnections = (sec) => Object.keys(sec.connections || {}).length > 0 || !!sec.routerKey;
 
-// Ringkasan untuk HP/TUI: tanpa key (hanya potongan untuk dikenali).
+// Summary for the phone/TUI: without the key (only a snippet to recognize it).
 export function connSummary(c) {
   return { id: c.id, kind: c.kind, label: c.label || PROVIDERS[c.kind]?.label || c.kind, url: c.openai || c.anthropic || null, key: c.key ? maskKey(c.key) : null, formats: c.formats, account: c.account || null, legacy: !!c.legacy };
 }
 
-// Router lama tetap tercermin di config.routerUrl / secrets.routerKey (daemon versi lama & `snugcode status`).
+// The legacy router is still mirrored in config.routerUrl / secrets.routerKey (old daemon versions & `snugcode status`).
 export function mirrorLegacy(cfg, sec) {
   const r = sec.connections?.router;
   if (r?.key) {
@@ -101,8 +101,8 @@ async function req(url, { method = 'GET', headers = {}, body, timeout = TIMEOUT,
   return { status: r.status, ok: r.ok, json, text };
 }
 
-// Header otentikasi per format. Anthropic official memakai x-api-key; endpoint format Anthropic
-// lain (DeepSeek, Kimi, GLM, OpenRouter, router) mengikuti ANTHROPIC_AUTH_TOKEN Claude Code (Bearer).
+// Auth headers per format. Official Anthropic uses x-api-key; Anthropic-format endpoints of
+// other providers (DeepSeek, Kimi, GLM, OpenRouter, router) follow Claude Code's ANTHROPIC_AUTH_TOKEN (Bearer).
 export function authHeaders(c, wire) {
   if (wire === 'gemini') return { 'x-goog-api-key': c.key };
   if (wire === 'anthropic') return c.kind === 'anthropic' ? { 'x-api-key': c.key, 'anthropic-version': '2023-06-01' } : { authorization: 'Bearer ' + c.key, 'anthropic-version': '2023-06-01' };
@@ -116,8 +116,8 @@ const errMsg = (r) => {
   return String(m || 'HTTP ' + r.status).replace(/\s+/g, ' ').trim().slice(0, 200);
 };
 
-// Endpoint "ada" = menjawab selain 404/405 untuk body kosong (400/422 = ada tapi body tidak valid).
-// Tidak memanggil model, jadi tidak memakan token.
+// An endpoint "exists" = answers anything other than 404/405 to an empty body (400/422 = exists but invalid body).
+// Doesn't call the model, so it costs no tokens.
 async function endpointExists(url, headers, fetchImpl) {
   try {
     const r = await req(url, { method: 'POST', headers, body: {}, timeout: 12_000, fetchImpl });
@@ -128,33 +128,33 @@ async function endpointExists(url, headers, fetchImpl) {
   }
 }
 
-// ---------- deteksi ----------
+// ---------- detection ----------
 /**
- * Kenali key/endpoint dan formatnya. Tidak menyimpan apa pun.
+ * Recognize a key/endpoint and its format. Saves nothing.
  * @param {{ key?: string, url?: string, kind?: string }} input
  * @returns {Promise<Conn & { models: ReturnType<typeof normalizeModels> }>}
  */
 export async function detectConnection({ key, url, kind } = {}, { fetchImpl = fetch } = {}) {
   key = String(key || '').trim().replace(/^Bearer\s+/i, '');
   url = trimUrl(url);
-  if (!key && !url) throw new Error('Tempel API key (dan URL bila memakai router/endpoint sendiri).');
+  if (!key && !url) throw new Error('Paste an API key (and the URL if you use a router/your own endpoint).');
   for (const r of REJECTED_KEYS) if (r.re.test(key)) throw new Error(r.why);
-  if (url && !/^https?:\/\/[^\s/]+/i.test(url)) throw new Error('URL harus diawali http:// atau https://');
+  if (url && !/^https?:\/\/[^\s/]+/i.test(url)) throw new Error('The URL must start with http:// or https://');
 
-  // URL milik provider di katalog -> perlakukan sebagai provider itu.
+  // A URL belonging to a catalog provider -> treat it as that provider.
   if (url && !kind) kind = Object.entries(PROVIDERS).find(([, p]) => [p.openai, p.anthropic].some((u) => u && trimUrl(u).startsWith(strip(url, /\/v1$/))))?.[0];
   if (url && (!kind || kind === 'router' || kind === 'custom')) return detectEndpoint(key, url, fetchImpl);
 
   const cands = kind ? [kind] : keyCandidates(key);
-  if (!cands.length) throw new Error('Jenis key tidak dikenali. Bila ini key router (9router, OmniRoute, LiteLLM, …) atau endpoint lain, isi juga URL-nya.');
-  // Semua kandidat diuji bersamaan; urutan katalog menentukan pemenang bila lebih dari satu menjawab.
+  if (!cands.length) throw new Error('Key type not recognized. If this is a router key (9router, OmniRoute, LiteLLM, …) or another endpoint, also fill in its URL.');
+  // All candidates are tested at once; catalog order decides the winner if more than one answers.
   /** @type {{ conn?: any, auth?: boolean, kind?: string, err?: string }[]} */
   const results = await Promise.all(cands.map((k) => tryProvider(k, key, fetchImpl).catch((e) => ({ err: e.message }))));
   const hit = results.find((r) => r.conn);
   if (hit) return hit.conn;
   const auth = results.find((r) => r.auth);
-  if (auth) throw new Error(`Key ditolak ${PROVIDERS[auth.kind].label} (401). Periksa lagi key-nya.`);
-  throw new Error(results.map((r) => r.err).filter(Boolean)[0] || 'Key tidak bisa diverifikasi.');
+  if (auth) throw new Error(`Key rejected by ${PROVIDERS[auth.kind].label} (401). Check the key again.`);
+  throw new Error(results.map((r) => r.err).filter(Boolean)[0] || 'The key could not be verified.');
 }
 
 async function tryProvider(kind, key, fetchImpl) {
@@ -168,8 +168,8 @@ async function tryProvider(kind, key, fetchImpl) {
     if (/\b40[13]\b/.test(e.message)) return { auth: true, kind };
     throw e;
   }
-  // Endpoint format Anthropic pihak ketiga diverifikasi (bisa berubah/ditutup): bila tidak ada,
-  // agen tetap jalan lewat penerjemah format OpenAI di proxy.
+  // Third-party Anthropic-format endpoints are verified (they may change/close): if missing,
+  // the agent still works through the proxy's OpenAI-format translator.
   if (c.anthropic && kind !== 'anthropic') {
     const ok = await endpointExists(c.anthropic + '/v1/messages', authHeaders(c, 'anthropic'), fetchImpl);
     c.formats.anthropic = ok === true;
@@ -178,7 +178,7 @@ async function tryProvider(kind, key, fetchImpl) {
 }
 
 async function detectEndpoint(key, url, fetchImpl) {
-  // Base OpenAI: URL apa adanya bila sudah berakhiran /v1 (atau versi lain), selain itu + /v1.
+  // OpenAI base: the URL as-is if it already ends with /v1 (or another version), otherwise + /v1.
   const base = strip(url, /\/(chat\/completions|messages|responses|models)$/);
   const openai = /\/v\d+(beta)?$|\/openai$/.test(base) ? base : base + '/v1';
   const root = strip(openai, /\/v1$/);
@@ -190,24 +190,24 @@ async function detectEndpoint(key, url, fetchImpl) {
     endpointExists(openai + '/chat/completions', h, fetchImpl),
     endpointExists(openai + '/responses', h, fetchImpl),
   ]);
-  if ([anth, chat, resp].includes('auth')) throw new Error(`Key ditolak ${c.label} (401). Periksa lagi key-nya.`);
+  if ([anth, chat, resp].includes('auth')) throw new Error(`Key rejected by ${c.label} (401). Check the key again.`);
   c.formats = { anthropic: anth === true, openai: chat === true, responses: resp === true };
-  if (!c.formats.anthropic && !c.formats.openai && !c.formats.responses) throw new Error(`${c.label} tidak bisa dihubungi atau bukan endpoint model (tidak ada /v1/messages, /chat/completions, atau /responses).`);
+  if (!c.formats.anthropic && !c.formats.openai && !c.formats.responses) throw new Error(`${c.label} can't be reached or isn't a model endpoint (no /v1/messages, /chat/completions, or /responses).`);
   let models = [];
   try {
     models = await fetchModels(c, fetchImpl);
   } catch (e) {
-    if (/\b40[13]\b/.test(e.message)) throw new Error(`Key ditolak ${c.label} (401). Periksa lagi key-nya.`);
+    if (/\b40[13]\b/.test(e.message)) throw new Error(`Key rejected by ${c.label} (401). Check the key again.`);
   }
-  if (!models.length) throw new Error(`${c.label} tidak mengembalikan daftar model yang mendukung tool calling.`);
+  if (!models.length) throw new Error(`${c.label} returned no models that support tool calling.`);
   return { ...c, models };
 }
 
-// ---------- daftar model ----------
+// ---------- model list ----------
 const cache = new Map(); // conn id -> { sig, at, list }
 const sig = (c) => [c.kind, c.key, c.openai, c.anthropic].join('|');
 
-// Effort native: Claude 4.5+/5 (Agent SDK), model GPT (Codex), Gemini (reasoning_effort lewat proxy).
+// Native effort: Claude 4.5+/5 (Agent SDK), GPT models (Codex), Gemini (reasoning_effort via the proxy).
 function effortsFor(c, id) {
   const kind = connKind(c.kind);
   if (kind === 'anthropic' && /claude-(opus|sonnet|fable)-([5-9]|4-[5-9])/.test(id)) return ['low', 'medium', 'high', 'max'];
@@ -219,13 +219,13 @@ function effortsFor(c, id) {
 const SKIP_OPENAI = /(embed|audio|realtime|tts|transcri|whisper|dall-e|image|moderation|search|instruct|davinci|babbage|-vision-preview)/i;
 const SKIP_GEMINI = /(embed|aqa|imagen|veo|tts|live|native-audio|image|learnlm|gemma)/i;
 
-/** Daftar mentah endpoint -> [{ id: ref, ctx?, vision?, reasoning?, efforts?, label, engine }] */
+/** Raw endpoint list -> [{ id: ref, ctx?, vision?, reasoning?, efforts?, label, engine }] */
 export function normalizeModels(c, data) {
   const kind = connKind(c.kind);
   let list = (Array.isArray(data) ? data : []).filter((m) => m && typeof m.id === 'string');
   if (kind === 'openai') list = list.filter((m) => isGptModel(m.id) && !SKIP_OPENAI.test(m.id));
   if (kind === 'gemini') list = list.map((m) => ({ ...m, id: m.id.replace(/^models\//, '') })).filter((m) => /^gemini-/.test(m.id) && !SKIP_GEMINI.test(m.id));
-  // Agen butuh tool calling: buang model yang menyatakan tidak mendukungnya.
+  // The agent needs tool calling: drop models that say they don't support it.
   list = list.filter((m) => m.capabilities?.tools !== false && !(Array.isArray(m.supported_parameters) && !m.supported_parameters.includes('tools')));
   const label = c.label || PROVIDERS[c.kind]?.short || c.kind;
   const seen = new Set();
@@ -249,7 +249,7 @@ export function normalizeModels(c, data) {
 }
 
 async function fetchModels(c, fetchImpl = fetch) {
-  if (c.kind === 'chatgpt') throw new Error('Model ChatGPT diambil lewat Codex');
+  if (c.kind === 'chatgpt') throw new Error('ChatGPT models are fetched via Codex');
   const p = PROVIDERS[c.kind] || PROVIDERS.custom;
   let r;
   if (p.models === 'anthropic') r = await req(c.anthropic + '/v1/models?limit=1000', { headers: authHeaders(c, 'anthropic'), fetchImpl });
@@ -259,7 +259,7 @@ async function fetchModels(c, fetchImpl = fetch) {
   return normalizeModels(c, data);
 }
 
-// `codexModels`: penyedia daftar model ChatGPT (lihat daemon/codex.js), disuntikkan server.js.
+// `codexModels`: provider of the ChatGPT model list (see daemon/codex.js), injected by server.js.
 /** @param {Conn} c @param {{ fresh?: boolean, fetchImpl?: typeof fetch, codexModels?: (c: Conn) => Promise<any[]> }} [o] @returns {Promise<any[]>} */
 export async function listConnModels(c, { fresh = false, fetchImpl = fetch, codexModels } = {}) {
   const hit = cache.get(c.id);
@@ -269,7 +269,7 @@ export async function listConnModels(c, { fresh = false, fetchImpl = fetch, code
   return list;
 }
 
-// Semua model dari semua koneksi; koneksi yang gagal dilaporkan, bukan menggagalkan semuanya.
+// All models from all connections; failing connections are reported instead of failing everything.
 /** @param {any} sec @param {{ fresh?: boolean, codexModels?: (c: Conn) => Promise<any[]> }} [opts] */
 export async function listAllModels(sec, opts = {}) {
   const conns = Object.values(allConnections(sec));
@@ -278,7 +278,7 @@ export async function listAllModels(sec, opts = {}) {
   return { models: res.flatMap((r) => r.list), errors: res.filter((r) => r.err).map((r) => ({ conn: r.c.id, err: r.err })) };
 }
 
-// ID model yang terakhir diketahui (boleh basi) tanpa menunggu jaringan; disegarkan di latar belakang.
+// Last known model IDs (may be stale) without waiting on the network; refreshed in the background.
 const refreshing = new Set();
 export function knownRefs(sec, connId, opts = {}) {
   const c = getConn(sec, connId);
@@ -296,7 +296,7 @@ export function forgetModels(connId) {
   cache.delete(connId);
 }
 
-// Root Gemini API (format asli, untuk Gemini CLI) dari base OpenAI-compatible koneksi Gemini.
+// Gemini API root (native format, for Gemini CLI) from the Gemini connection's OpenAI-compatible base.
 export const geminiRoot = (c) => String(c.openai || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '').replace(/\/v1(beta)?\/openai$/, '');
 
 /** @param {Conn} c @param {string} engine @returns {ReturnType<typeof engineFor>} */
@@ -309,24 +309,24 @@ function forcedEngine(c, engine) {
 }
 
 /**
- * Rute satu referensi model: koneksi, ID asli di endpoint, effort, dan engine/format yang dipakai.
+ * Route for one model reference: connection, real ID at the endpoint, effort, and the engine/format used.
  * @returns {{ conn: Conn, model: string, effort: string | null, engine: 'claude' | 'codex' | 'gemini', wire: string }}
  */
 export function resolveRoute(sec, ref) {
   const { actualModel, effort } = resolveModelEffort(ref);
   const { conn: connId, id } = splitRef(actualModel);
   const c = getConn(sec, connId);
-  if (!c) throw new Error(connId === 'router' ? 'Belum ada model yang tersambung. Buka Pengaturan PC → Model & API key di aplikasi, lalu tempel API key-mu.' : `Koneksi "${connId}" untuk model ${ref} sudah dihapus. Pilih model lain atau sambungkan lagi.`);
+  if (!c) throw new Error(connId === 'router' ? 'No model connected yet. Open PC settings → Models & API keys in the app, then paste your API key.' : `Connection "${connId}" for model ${ref} was removed. Pick another model or connect it again.`);
   let r = engineFor(c, id);
-  // SNUGCODE_ENGINE=claude|codex|gemini: paksa engine itu bila endpoint-nya mendukung (mis. Claude Agent SDK
-  // untuk model Gemini/GPT, atau perbandingan engine di `npm run bench`).
+  // SNUGCODE_ENGINE=claude|codex|gemini: force that engine if its endpoint supports it (e.g. the Claude Agent SDK
+  // for Gemini/GPT models, or comparing engines in `npm run bench`).
   const want = process.env.SNUGCODE_ENGINE;
   if (r && want && want !== r.engine) r = forcedEngine(c, want) || r;
-  if (!r) throw new Error(`${c.label || c.kind} tidak punya format API yang bisa dipakai agen.`);
+  if (!r) throw new Error(`${c.label || c.kind} has no API format the agent can use.`);
   return { conn: c, model: id, effort, ...r };
 }
 
-// ---------- uji model ----------
+// ---------- model test ----------
 const DEAD_RE = /\b(no longer available|is not available|has been (deprecated|discontinued|removed)|please switch to)\b/i;
 
 export async function probeRoute(route, { fetchImpl = fetch } = {}) {
@@ -338,7 +338,7 @@ export async function probeRoute(route, { fetchImpl = fetch } = {}) {
     else if (wire === 'responses') r = await req(trimUrl(c.openai) + '/responses', { method: 'POST', headers: authHeaders(c, 'openai'), body: { model, input: 'Reply with exactly: ok', max_output_tokens: 256 }, timeout: 45_000, fetchImpl });
     else r = await req(trimUrl(c.openai) + '/chat/completions', { method: 'POST', headers: authHeaders(c, 'openai'), body: { model: model.replace(/-(low|medium|high|minimal)$/, ''), max_tokens: 256, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }, timeout: 45_000, fetchImpl });
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, err: e.name === 'TimeoutError' ? 'timeout 45 detik' : e.message };
+    return { ok: false, ms: Date.now() - t0, err: e.name === 'TimeoutError' ? 'timeout after 45 seconds' : e.message };
   }
   const ms = Date.now() - t0;
   if (!r.ok) return { ok: false, ms, err: errMsg(r) };
@@ -346,7 +346,7 @@ export async function probeRoute(route, { fetchImpl = fetch } = {}) {
   const text = String(
     wire === 'anthropic' ? (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('') : wire === 'responses' ? j.output_text || (j.output || []).flatMap((o) => o.content || []).map((x) => x.text || '').join('') : j.choices?.[0]?.message?.content || '',
   ).trim();
-  if (DEAD_RE.test(text)) return { ok: false, ms, err: 'Model tidak tersedia lagi: ' + text.slice(0, 160) };
-  // Model reasoning bisa menghabiskan token untuk berpikir tanpa teks: jawaban 200 tetap dianggap sehat.
+  if (DEAD_RE.test(text)) return { ok: false, ms, err: 'Model no longer available: ' + text.slice(0, 160) };
+  // Reasoning models can spend tokens thinking without text: a 200 answer is still considered healthy.
   return { ok: true, ms, text: text.slice(0, 80) };
 }

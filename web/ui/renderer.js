@@ -1,11 +1,11 @@
-// Renderer event agen: teks markdown bertahap, tool, izin, rencana, pertanyaan, rewind.
+// Agent event renderer: streamed markdown text, tools, permissions, plans, questions, rewind.
 import { stableCut } from '../md.js';
 import { doneParts, todoItems, toolActivity } from '../../shared/events.js';
 import { app } from './state.js';
 import { anim, copyText, h, haptic, ic, md, mascot, toast, ui } from './dom.js';
 import { localNotify } from './push.js';
 
-// ---------- Renderer event agen ----------
+// ---------- Agent event renderer ----------
 export const TOOL_KIND = { Bash: ['bash', '$'], dev_start: ['bash', '▶'], dev_stop: ['bash', '■'], dev_logs: ['read', '≡'], dev_list: ['read', '≡'], preview_screenshot: ['web', '◐'], Read: ['read', '◱'], NotebookRead: ['read', '◱'], Edit: ['edit', '✎'], MultiEdit: ['edit', '✎'], NotebookEdit: ['edit', '✎'], Write: ['write', '+'], Grep: ['search', '⌕'], Glob: ['search', '⌕'], LS: ['search', '⌕'], WebFetch: ['web', '⊕'], WebSearch: ['web', '⊕'], Task: ['agent', '◈'], Agent: ['agent', '◈'], AskUserQuestion: ['agent', '?'], ExitPlanMode: ['agent', '☰'] };
 
 const lowerFirst = (t) => t.charAt(0).toLowerCase() + t.slice(1);
@@ -19,15 +19,15 @@ export class Renderer {
     this.el = col;
     this.dock = dock;
     this.tools = new Map();
-    this.users = new Map(); // seq prompt -> tombol rewind
-    /** @type {Set<string>} catatan (note) yang sudah tampil di layar ini */
+    this.users = new Map(); // prompt seq -> rewind button
+    /** @type {Set<string>} notes already shown on this screen */
     this.notes = new Set();
     this.permQueue = [];
     this.nextSteps = NEXT_OK;
     this.nextEl = null;
     this.textEl = null;
     /** @type {{ el: HTMLElement, src: string, done: number, pending: boolean } | null} */
-    this.textBlock = null; // blok teks agen yang sedang di-stream
+    this.textBlock = null; // agent text block being streamed
     this.outEl = null;
     this.lastTodo = null;
     this.stick = true;
@@ -36,7 +36,7 @@ export class Renderer {
     this.quiet = false;
     /** @type {(unread: number) => void} */
     this.onUnread = () => {};
-    /** Saran di layar sambutan sesi kosong (diisi session.js). */
+    /** Suggestions on an empty session's welcome screen (set by session.js). */
     /** @type {{ icon: string, t1: string, t2: string, text: string }[]} */
     this.suggest = [];
     /** @type {(text: string) => void} */
@@ -49,16 +49,16 @@ export class Renderer {
         this.onUnread(this.unread);
       }
     }, { passive: true });
-    // Tombol salin pada blok kode.
+    // Copy button on code blocks.
     term.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-copy]');
       if (!b) return;
       const code = b.closest('.code')?.querySelector('code')?.textContent || '';
       if (await copyText(code)) {
         b.classList.add('done');
-        b.lastChild.textContent = 'tersalin';
+        b.lastChild.textContent = 'copied';
         haptic(10);
-        setTimeout(() => (b.classList.remove('done'), (b.lastChild.textContent = 'salin')), 1500);
+        setTimeout(() => (b.classList.remove('done'), (b.lastChild.textContent = 'copy')), 1500);
       }
     });
   }
@@ -84,11 +84,11 @@ export class Renderer {
   append(node, animate = true) {
     if (animate && !this.quiet) node.classList.add('ev');
     this.el.append(node);
-    // Sesi sangat panjang: buang node terlama agar HP tetap ringan (hanya saat pengguna di bawah,
-    // supaya posisi baca tidak melompat).
+    // Very long session: drop the oldest nodes to keep the phone light (only when the user is at the
+    // bottom, so the reading position doesn't jump).
     if (this.el.childElementCount > DOM_MAX && this.stick && !this.quiet) {
       for (let i = 0; i < DOM_TRIM; i++) this.el.firstElementChild?.remove();
-      this.el.prepend(h('div', { class: 'meta' }, '… riwayat lama disembunyikan (buka ulang sesi untuk melihat lebih banyak)'));
+      this.el.prepend(h('div', { class: 'meta' }, '… older history hidden (reopen the session to see more)'));
     }
     if (!this.stick && !this.quiet) {
       this.unread++;
@@ -107,12 +107,12 @@ export class Renderer {
     this.append(
       h('div', { class: 'welcome' },
         mascot('draw xl tap'),
-        h('h2', { class: 'serif' }, 'Apa yang mau dikerjakan di ', h('span', { class: 'accent-text' }, name), '?'),
-        h('div', { class: 'tags', style: 'justify-content:center' }, h('span', { class: 'tag' }, ic('branch'), s.branch), s.base ? h('span', { class: 'tag' }, 'dari ' + s.base) : null),
+        h('h2', { class: 'serif' }, 'What should we work on in ', h('span', { class: 'accent-text' }, name), '?'),
+        h('div', { class: 'tags', style: 'justify-content:center' }, h('span', { class: 'tag' }, ic('branch'), s.branch), s.base ? h('span', { class: 'tag' }, 'from ' + s.base) : null),
         h('div', { class: 'sugs' },
           ...this.suggest.slice(0, 4).map((q, i) => h('button', { class: 'sug', style: `--i:${i}`, onclick: () => (haptic(8), this.onQuick(q.text)) }, h('span', { class: 'si' }, ic(q.icon)), h('span', {}, h('b', {}, q.t1), h('span', {}, q.t2)))),
         ),
-        h('div', { class: 'tips' }, 'Ketik ', h('span', { class: 'kbd' }, '!'), ' di awal pesan untuk perintah shell · tombol ', h('span', { class: 'kbd' }, '+'), ' untuk lampiran, mode & aksi cepat'),
+        h('div', { class: 'tips' }, 'Start a message with ', h('span', { class: 'kbd' }, '!'), ' for a shell command · the ', h('span', { class: 'kbd' }, '+'), ' button for attachments, modes & quick actions'),
       ),
     );
   }
@@ -123,16 +123,16 @@ export class Renderer {
         this.nextEl = null;
         this.textEl = null;
         this.outEl = null;
-        this.activity = 'berpikir…';
+        this.activity = 'thinking…';
         this.textBlock = null;
         this.el.querySelector('.welcome:not(.used)')?.classList.add('used');
-        const undo = h('button', { class: 'rw', 'aria-label': 'Kembalikan file ke sebelum prompt ini', hidden: true, onclick: () => rewindTo(e) }, ic('undo'), 'rewind');
-        const copy = h('button', { class: 'rw', 'aria-label': 'Salin pesan', onclick: (ev) => copyBtn(ev.currentTarget, String(e.d || '')) }, ic('copy'));
+        const undo = h('button', { class: 'rw', 'aria-label': 'Restore files to before this prompt', hidden: true, onclick: () => rewindTo(e) }, ic('undo'), 'rewind');
+        const copy = h('button', { class: 'rw', 'aria-label': 'Copy message', onclick: (ev) => copyBtn(ev.currentTarget, String(e.d || '')) }, ic('copy'));
         this.users.set(e.seq, undo);
         return this.append(h('div', { class: 'ln u' }, h('div', { class: 'bubble' }, e.d, e.img ? h('span', { class: 'tag' }, ic('image'), e.img) : null), h('div', { class: 'uact' }, copy, undo)));
       }
       case 'cp': {
-        // Checkpoint tersedia: tampilkan tombol rewind pada prompt terkait.
+        // Checkpoint available: show the rewind button on that prompt.
         const b = this.users.get(e.of);
         if (b?.hidden) (b.hidden = false), this.quiet || anim(b, [{ opacity: 0, transform: 'scale(.8)' }, { opacity: 1, transform: 'none' }], 240);
         return;
@@ -145,11 +145,11 @@ export class Renderer {
           this.textEl = this.append(h('div', { class: 'ln txt' }, h('div'), h('div')));
           this.textBlock = { el: this.textEl, src: '', done: 0, pending: false };
         }
-        // Status render melekat pada bloknya sendiri: blok yang sudah ditutup (tool/done tiba di
-        // frame yang sama dengan potongan teks terakhir) tetap dirender sampai potongan terakhir.
+        // Render state lives on the block itself: a block that's already closed (tool/done arrived in
+        // the same frame as the last text chunk) still renders through its last chunk.
         const t = this.textBlock;
         t.src += e.d;
-        this.activity = 'menulis…';
+        this.activity = 'writing…';
         if (!t.pending) {
           t.pending = true;
           const flush = () => {
@@ -162,10 +162,10 @@ export class Renderer {
         return;
       }
       case 'thinking':
-        this.activity = `berpikir… (${e.words} kata)`;
+        this.activity = `thinking… (${e.words} words)`;
         return;
       case 'toolStart':
-        this.activity = `menyiapkan ${e.name}…`;
+        this.activity = `preparing ${e.name}…`;
         return;
       case 'tool':
         return e.name === 'TodoWrite' ? this.todo(e) : this.tool(e);
@@ -176,21 +176,21 @@ export class Renderer {
       case 'permAnswer':
         return this.permAnswer(e);
       case 'retry':
-        return this.line('note', `↻ error model ${e.status ?? ''} — mencoba lagi${e.attempt ? ` (${e.attempt}/${e.max})` : ''}…`);
+        return this.line('note', `↻ model error ${e.status ?? ''} — retrying${e.attempt ? ` (${e.attempt}/${e.max})` : ''}…`);
       case 'done': {
         this.activity = '';
-        const txt = e.ok ? ['selesai', ...doneParts(e)].join(' · ') : `berhenti · ${e.err || 'error'}`;
-        if (e.ctx >= 80 && !this.quiet) toast(`Konteks ${e.ctx}% penuh — kirim /compact agar agen tetap fokus`, false, 6000);
+        const txt = e.ok ? ['done', ...doneParts(e)].join(' · ') : `stopped · ${e.err || 'error'}`;
+        if (e.ctx >= 80 && !this.quiet) toast(`Context ${e.ctx}% full — send /compact to keep the agent focused`, false, 6000);
         this.textEl = null;
         const ans = e.ok && this.textBlock?.src.trim();
         this.textBlock = null;
         const line = this.append(
           h('div', { class: 'donel' + (e.ok ? '' : ' bad') },
             h('span', { class: 'dt' }, (e.ok ? '✓ ' : '✗ ') + txt),
-            ans ? h('button', { class: 'rw', 'aria-label': 'Salin jawaban', onclick: (ev) => copyBtn(ev.currentTarget, ans) }, ic('copy')) : null,
+            ans ? h('button', { class: 'rw', 'aria-label': 'Copy answer', onclick: (ev) => copyBtn(ev.currentTarget, ans) }, ic('copy')) : null,
           ),
         );
-        // Langkah berikutnya yang umum, satu ketukan (mengetik di HP itu mahal). Hanya di bawah giliran terakhir.
+        // Common next steps, one tap away (typing on a phone is costly). Only under the last turn.
         this.nextEl?.remove();
         const next = this.onQuick && (e.ok ? this.nextSteps : NEXT_FAIL);
         this.nextEl = next?.length ? this.append(h('div', { class: 'nextsteps' }, ...next.map(([label, text]) => h('button', { class: 'chip', onclick: () => (haptic(6), this.onQuick(text)) }, label)))) : null;
@@ -211,8 +211,8 @@ export class Renderer {
         this.outEl = null;
         return this.append(h('div', { class: 'meta', style: 'margin-bottom:8px' }, e.code === 0 ? '✓ exit 0' : `✗ exit ${e.code}`));
       case 'note': {
-        // Teks dari daemon sudah diawali "◆" (ikon ditambahkan di sini). Peringatan yang sama (mis. sandbox
-        // OS, dikirim sekali per proses daemon) tampil sekali saja walau daemon sempat restart.
+        // Daemon text may start with "◆" (the icon is added here). The same warning (e.g. OS sandbox,
+        // sent once per daemon process) shows only once even if the daemon restarted.
         const text = String(e.d).replace(/^◆\s*/, '');
         if (this.notes.has(text)) return;
         this.notes.add(text);
@@ -222,9 +222,9 @@ export class Renderer {
         return this.line('e', '✗ ' + e.d);
     }
   }
-  // Markdown dirender bertahap: blok yang sudah selesai (dipisah baris kosong di luar blok kode)
-  // dibekukan, hanya blok terakhir yang dirender ulang per frame. Dulu seluruh teks dirender
-  // ulang setiap delta (O(n²) untuk jawaban panjang dan saat memutar ulang riwayat).
+  // Markdown renders incrementally: finished blocks (split by blank lines outside code blocks) are
+  // frozen, and only the last block re-renders per frame. Previously the whole text re-rendered on
+  // every delta (O(n²) for long answers and history replay).
   /** @param {{ el: HTMLElement, src: string, done: number }} t */
   renderText(t) {
     const [done, tail] = t.el.children;
@@ -250,7 +250,7 @@ export class Renderer {
     el.firstChild.onclick = () => {
       el.classList.toggle('open');
       el.firstChild.setAttribute('aria-expanded', el.classList.contains('open'));
-      if (el.classList.contains('open') && !body.childNodes.length) body.append(h('pre', { class: 'tout' }, e.s || '(tanpa detail)'));
+      if (el.classList.contains('open') && !body.childNodes.length) body.append(h('pre', { class: 'tout' }, e.s || '(no details)'));
     };
     let add = 0;
     let del = 0;
@@ -265,19 +265,19 @@ export class Renderer {
   result(e) {
     const t = this.tools.get(e.id);
     if (!t) return;
-    this.activity = 'berpikir…';
+    this.activity = 'thinking…';
     if (t.todo) return;
     t.el.classList.remove('live');
     const out = String(e.d || '').trim();
     const n = out ? out.split('\n').length : 0;
     t.stat.replaceChildren(
-      t.add || t.del ? h('span', { class: 'dstat' }, h('span', { class: 'a' }, '+' + t.add), ' ', h('span', { class: 'd' }, '−' + t.del)) : n > 1 ? `${n} baris` : '',
+      t.add || t.del ? h('span', { class: 'dstat' }, h('span', { class: 'a' }, '+' + t.add), ' ', h('span', { class: 'd' }, '−' + t.del)) : n > 1 ? `${n} lines` : '',
       ic(e.ok ? 'check' : 'x', e.ok ? 'ok-i' : 'bad-i'),
       ic('down', 'chev'),
     );
     if (!e.ok) t.el.classList.add('fail');
     if (!t.add && !t.del) {
-      t.body.replaceChildren(h('pre', { class: 'tout' + (e.ok ? '' : ' fail') }, out || '(tanpa output)'));
+      t.body.replaceChildren(h('pre', { class: 'tout' + (e.ok ? '' : ' fail') }, out || '(no output)'));
     } else if (!e.ok) t.body.append(h('pre', { class: 'tout fail' }, out));
     if (!e.ok && !this.quiet) t.el.classList.add('open');
   }
@@ -290,14 +290,14 @@ export class Renderer {
     if (doing) this.activity = '◐ ' + doing.t;
     this.lastTodo?.classList.add('stale');
     const card = h('div', { class: 'todo' },
-      h('div', { class: 'tt' }, ic('list'), h('span', {}, 'Rencana'), h('span', { class: 'bar' }, h('i', { style: `width:${items.length ? (done / items.length) * 100 : 0}%` })), h('span', {}, `${done}/${items.length}`)),
+      h('div', { class: 'tt' }, ic('list'), h('span', {}, 'Plan'), h('span', { class: 'bar' }, h('i', { style: `width:${items.length ? (done / items.length) * 100 : 0}%` })), h('span', {}, `${done}/${items.length}`)),
       ...items.map((i) => h('div', { class: 'it ' + i.st }, h('span', { class: 'ck' }, i.st === 'done' ? '✓' : i.st === 'doing' ? '◐' : '○'), h('span', {}, i.t))),
     );
     this.lastTodo = card;
     this.tools.set(e.id, { todo: true });
     this.append(card);
   }
-  // Permintaan izin ditampilkan di dok di atas composer (tidak perlu scroll).
+  // Permission requests show in a dock above the composer (no scrolling needed).
   perm(e) {
     if (this.permQueue.some((p) => p.pid === e.pid)) return;
     this.permQueue.push(e);
@@ -305,11 +305,11 @@ export class Renderer {
     if (app.permFromPush?.pid === e.pid) return this.answerFromPush();
     if (!this.quiet) {
       haptic([40, 60, 40]);
-      localNotify('snugcode — butuh izin', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
+      localNotify('snugcode — needs permission', `${e.tool}: ${String(e.s || '').slice(0, 120)}`);
     }
   }
-  // Jawaban dari tombol notifikasi (sw.js → app.js). Hanya untuk izin yang memang masih menunggu, dan
-  // hanya risiko rendah/sedang (daemon tidak menyertakan pid untuk risiko tinggi).
+  // Answer from a notification button (sw.js → app.js). Only for a permission that's still pending, and
+  // only low/medium risk (the daemon omits the pid for high risk).
   async answerFromPush() {
     const want = app.permFromPush;
     app.permFromPush = null;
@@ -317,7 +317,7 @@ export class Renderer {
     if (!e || e.push || e.risk?.level === 'high') return;
     try {
       await app.conn.call('perm', { id: app.current.session.id, pid: e.pid, decision: want.decision });
-      toast(want.decision === 'allow' ? `✓ ${e.tool} diizinkan dari notifikasi` : `✗ ${e.tool} ditolak dari notifikasi`);
+      toast(want.decision === 'allow' ? `✓ ${e.tool} allowed from the notification` : `✗ ${e.tool} denied from the notification`);
     } catch (x) {
       toast(x.message, true);
     }
@@ -325,7 +325,7 @@ export class Renderer {
   permAnswer(e) {
     this.permQueue = this.permQueue.filter((p) => p.pid !== e.pid);
     this.renderDock();
-    this.append(h('div', { class: 'meta', style: 'margin:6px 0' }, `${e.allow ? '✓ diizinkan' : '✗ ditolak'} · ${e.tool}${e.s ? ' · ' + String(e.s).split('\n')[0].slice(0, 70) : ''}`));
+    this.append(h('div', { class: 'meta', style: 'margin:6px 0' }, `${e.allow ? '✓ allowed' : '✗ denied'} · ${e.tool}${e.s ? ' · ' + String(e.s).split('\n')[0].slice(0, 70) : ''}`));
   }
   renderDock() {
     const e = this.permQueue[0];
@@ -341,27 +341,27 @@ export class Renderer {
         this.dock.querySelectorAll('button').forEach((b) => (b.disabled = false));
       }
     };
-    const more = this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} permintaan lagi`) : null;
+    const more = this.permQueue.length > 1 ? h('div', { class: 'more' }, `+${this.permQueue.length - 1} more request${this.permQueue.length === 2 ? '' : 's'}`) : null;
     if (e.ask) return this.dock.replaceChildren(askPanel(e, answer, more));
     if (e.plan) return this.dock.replaceChildren(planPanel(e, answer, more));
-    // Risiko tinggi tampil berbeda (merah, tanpa "Selalu"): melawan kebiasaan asal ketuk Izinkan.
+    // High risk looks different (red, no "Always"): to counter the habit of tapping Allow blindly.
     const high = e.push || e.risk?.level === 'high';
     buttons.append(
-      h('button', { class: 'btn ghost', onclick: () => answer('deny') }, 'Tolak'),
-      high || !e.always ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Selalu'),
-      h('button', { class: 'btn ' + (high ? 'dangerfill' : 'primary'), onclick: () => answer('allow') }, 'Izinkan'),
+      h('button', { class: 'btn ghost', onclick: () => answer('deny') }, 'Deny'),
+      high || !e.always ? null : h('button', { class: 'btn', onclick: () => answer('always') }, 'Always'),
+      h('button', { class: 'btn ' + (high ? 'dangerfill' : 'primary'), onclick: () => answer('allow') }, 'Allow'),
     );
     const [kind, glyph] = TOOL_KIND[e.tool] || ['other', '•'];
-    const RISK = { high: 'Risiko tinggi', medium: 'Risiko sedang', low: 'Risiko rendah' };
+    const RISK = { high: 'High risk', medium: 'Medium risk', low: 'Low risk' };
     this.dock.replaceChildren(
       h('div', { class: 'perm' + (high ? ' push' : '') + (e.risk ? ' r-' + e.risk.level : '') },
-        h('div', { class: 'q' }, h('span', { class: `pi t-${kind}` }, e.push ? ic('push') : glyph), h('span', { class: 'grow' }, e.push ? 'Agen ingin push ke GitHub' : `Izinkan ${e.tool}?`, e.title ? h('span', { class: 'pt' }, e.title) : null)),
+        h('div', { class: 'q' }, h('span', { class: `pi t-${kind}` }, e.push ? ic('push') : glyph), h('span', { class: 'grow' }, e.push ? 'The agent wants to push to GitHub' : `Allow ${e.tool}?`, e.title ? h('span', { class: 'pt' }, e.title) : null)),
         e.risk ? h('div', { class: 'risk' }, h('span', { class: 'rl' }, ic(e.risk.level === 'low' ? 'shield' : 'alert'), RISK[e.risk.level]), e.risk.why ? h('span', {}, e.risk.why) : null) : null,
         h('pre', {}, e.summary || e.s || ''),
         e.x ? miniDiff(e.x).el : null,
-        e.undo ? h('div', { class: 'undo' }, ic('undo'), e.undo === 'file' ? 'Bisa dibatalkan: rewind ke sebelum prompt ini.' : 'Perubahan file bisa di-rewind; efek di luar folder sesi (jaringan, paket global) tidak.') : null,
+        e.undo ? h('div', { class: 'undo' }, ic('undo'), e.undo === 'file' ? 'Can be undone: rewind to before this prompt.' : 'File changes can be rewound; effects outside the session folder (network, global packages) can’t.') : null,
         buttons,
-        !high && e.always ? h('div', { class: 'more' }, 'Selalu = izinkan otomatis di sesi ini: ' + e.always) : null,
+        !high && e.always ? h('div', { class: 'more' }, 'Always = auto-allow in this session: ' + e.always) : null,
         more,
       ),
     );
@@ -369,22 +369,22 @@ export class Renderer {
   }
 }
 
-// Chip lanjutan setelah giliran selesai / gagal (label, prompt). Sesi bisa menggantinya lewat renderer.nextSteps.
+// Follow-up chips after a turn finishes / fails (label, prompt). A session can replace them via renderer.nextSteps.
 export const NEXT_OK = [
-  ['Jalankan test', 'Jalankan test yang relevan dengan perubahan tadi dan perbaiki bila ada yang gagal.'],
-  ['Review perubahan', 'Review perubahan yang belum di-commit (git diff): cari bug atau risiko, lalu ringkas.'],
-  ['Commit', 'Lihat perubahan yang ada, tulis pesan commit yang jelas, lalu commit. Jangan push.'],
+  ['Run tests', 'Run the tests relevant to those changes and fix anything that fails.'],
+  ['Review changes', 'Review the uncommitted changes (git diff): look for bugs or risks, then summarize.'],
+  ['Commit', 'Look at the current changes, write a clear commit message, then commit. Don’t push.'],
 ];
 const NEXT_FAIL = [
-  ['Coba lagi', 'Lanjutkan tugas tadi dari titik terakhir.'],
-  ['Jelaskan error-nya', 'Jelaskan singkat kenapa tadi gagal dan apa pilihan perbaikannya.'],
+  ['Try again', 'Continue the previous task from where it left off.'],
+  ['Explain the error', 'Briefly explain why it failed and what the options to fix it are.'],
 ];
 
-// Pertanyaan pilihan dari agen (AskUserQuestion): 1–4 pertanyaan, opsi tap + jawaban bebas.
+// Multiple-choice questions from the agent (AskUserQuestion): 1–4 questions, tap options + free answer.
 export function askPanel(e, answer, more) {
   const picks = e.ask.map(() => new Set());
-  const others = e.ask.map(() => h('input', { class: 'field', placeholder: 'Jawaban lain (opsional)', autocapitalize: 'sentences' }));
-  const ok = h('button', { class: 'btn primary' }, 'Kirim jawaban');
+  const others = e.ask.map(() => h('input', { class: 'field', placeholder: 'Other answer (optional)', autocapitalize: 'sentences' }));
+  const ok = h('button', { class: 'btn primary' }, 'Send answer');
   const sync = () => (ok.disabled = !e.ask.every((_, i) => picks[i].size || others[i].value.trim()));
   const qs = e.ask.map((q, i) =>
     h('div', { class: 'askq' },
@@ -407,29 +407,29 @@ export function askPanel(e, answer, more) {
   sync();
   ok.onclick = () => answer('allow', { answers: Object.fromEntries(e.ask.map((q, i) => [q.question, [...picks[i], others[i].value.trim()].filter(Boolean).join(', ')])) });
   return h('div', { class: 'perm ask' },
-    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, '?'), h('span', { class: 'grow' }, 'Agen bertanya')),
+    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, '?'), h('span', { class: 'grow' }, 'The agent asks')),
     ...qs,
-    h('div', { class: 'btnrow' }, h('button', { class: 'btn ghost', onclick: () => answer('deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' }) }, 'Lewati'), ok),
+    h('div', { class: 'btnrow' }, h('button', { class: 'btn ghost', onclick: () => answer('deny', { message: 'The user skipped the question; decide yourself with the most sensible choice.' }) }, 'Skip'), ok),
     more,
   );
 }
 
-// Rencana dari mode rencana (ExitPlanMode): setujui lalu agen mulai mengerjakan, atau minta revisi.
+// Plan from plan mode (ExitPlanMode): approve and the agent starts working, or ask for a revision.
 export function planPanel(e, answer, more) {
-  const note = h('textarea', { class: 'field', rows: 2, placeholder: 'Catatan revisi (opsional)', autocapitalize: 'sentences' });
+  const note = h('textarea', { class: 'field', rows: 2, placeholder: 'Revision notes (optional)', autocapitalize: 'sentences' });
   return h('div', { class: 'perm ask' },
-    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, ic('list')), h('span', { class: 'grow' }, 'Rencana siap — setujui?')),
+    h('div', { class: 'q' }, h('span', { class: 'pi t-agent' }, ic('list')), h('span', { class: 'grow' }, 'Plan ready — approve?')),
     h('div', { class: 'plan txt', html: md(String(e.summary || e.s || '')) }),
     note,
     h('div', { class: 'btnrow' },
-      h('button', { class: 'btn', onclick: () => answer('deny', { message: note.value.trim() ? 'Revisi rencananya: ' + note.value.trim() : 'Pengguna ingin merevisi rencana. Berhenti sekarang dan tunggu arahan revisinya.' }) }, 'Revisi'),
-      h('button', { class: 'btn primary', onclick: () => answer('allow') }, 'Setujui & kerjakan'),
+      h('button', { class: 'btn', onclick: () => answer('deny', { message: note.value.trim() ? 'Revise the plan: ' + note.value.trim() : 'The user wants to revise the plan. Stop now and wait for revision instructions.' }) }, 'Revise'),
+      h('button', { class: 'btn primary', onclick: () => answer('allow') }, 'Approve & start'),
     ),
     more,
   );
 }
 
-// Tombol salin kecil: ikonnya menjadi centang sebentar.
+// Small copy button: its icon briefly turns into a check.
 async function copyBtn(b, text) {
   if (!(await copyText(text))) return;
   haptic(10);
@@ -439,18 +439,18 @@ async function copyBtn(b, text) {
 }
 
 export async function rewindTo(e) {
-  const label = String(e.d || 'gambar').slice(0, 60);
-  if (!(await ui.confirm({ title: 'Rewind ke sebelum prompt ini?', text: `Semua file worktree dikembalikan ke kondisi sebelum "${label}". Perubahan setelahnya (oleh agen maupun manual) akan hilang.`, ok: 'Rewind', danger: true, icon: 'undo' }))) return;
+  const label = String(e.d || 'image').slice(0, 60);
+  if (!(await ui.confirm({ title: 'Rewind to before this prompt?', text: `All worktree files go back to how they were before "${label}". Later changes (by the agent or by hand) will be lost.`, ok: 'Rewind', danger: true, icon: 'undo' }))) return;
   try {
     const n = await app.conn.call('rewind', { id: app.current.session.id, seq: e.seq });
     haptic(20);
-    toast(n ? `${n} file dikembalikan` : 'Tidak ada file yang berubah');
+    toast(n ? `${n} file${n === 1 ? '' : 's'} restored` : 'No files changed');
     app.current.refreshGit?.();
   } catch (x) {
     toast(x.message, true);
   }
 }
-// Cuplikan perubahan Edit/MultiEdit/Write ({ old?, new? } atau { edits: [...] }).
+// Snippet of Edit/MultiEdit/Write changes ({ old?, new? } or { edits: [...] }).
 export function miniDiff(x) {
   const el = h('div', { class: 'diffmini' });
   let add = 0;

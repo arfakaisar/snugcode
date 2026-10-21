@@ -86,7 +86,7 @@ ok(`soket setengah mati + koneksi tertahan: pulih ${((Date.now() - t0) / 1000).t
 //    macet di "Menghubungi relay" setelah jaringan pulih.
 mode = 'tarpit';
 await page.reload();
-await page.waitForSelector('text=Menghubungi relay', { timeout: 15000 });
+await page.waitForSelector('text=Contacting the relay', { timeout: 15000 });
 await sleep(4000);
 mode = 'pass';
 t0 = Date.now();
@@ -96,10 +96,10 @@ ok(`muat ulang saat koneksi tertahan: pulih ${((Date.now() - t0) / 1000).toFixed
 // 3) Tombol "Coba lagi" muncul bila menyambung terlalu lama (bukan spinner tanpa akhir).
 mode = 'tarpit';
 await page.reload();
-await page.waitForSelector('text=Coba sekarang', { timeout: 30000 }).catch(() => fail('tidak ada tombol coba lagi'));
+await page.waitForSelector('text=Try now', { timeout: 30000 }).catch(() => fail('tidak ada tombol coba lagi'));
 mode = 'pass';
 t0 = Date.now();
-await page.locator('text=Coba sekarang').click();
+await page.locator('text=Try now').click();
 if (!(await ready(10000))) await fail('"Coba sekarang" tidak menyambung');
 ok(`menyambung lama: tombol "Coba sekarang" tampil dan langsung menyambung (${((Date.now() - t0) / 1000).toFixed(1)} dtk)`);
 

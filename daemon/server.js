@@ -1,5 +1,5 @@
-// Daemon: tersambung ke relay (koneksi keluar saja), menangani pairing PIN,
-// kanal terenkripsi per HP, kanal lokal untuk terminal (TUI), dan RPC.
+// Daemon: connects to the relay (outbound only), handles PIN pairing,
+// an encrypted channel per phone, a local channel for the terminal (TUI), and RPC.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -19,12 +19,12 @@ import { idleMinutes, stopRunner, tickUsage, usageSummary } from './runner.js';
 import { Terminals } from './pty.js';
 import { RPC, defaultModel } from './rpc.js';
 
-// Dipakai cli.js & test (dulu didefinisikan di sini).
+// Used by cli.js & tests (formerly defined here).
 export { defaultModel };
 
-// Versi protokol daemon <-> klien. 2 = kanal biner + daftar `caps` di info.
+// Daemon <-> client protocol version. 2 = binary channel + a `caps` list in info.
 const PROTO = 2;
-// Heartbeat ke relay: ping tiap PING_MS; tanpa pesan apa pun selama DEAD_MS koneksi dianggap mati.
+// Relay heartbeat: ping every PING_MS; with no message at all for DEAD_MS the connection is considered dead.
 export const PING_MS = 25_000;
 export const DEAD_MS = 70_000;
 const PKG_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -34,13 +34,13 @@ export class Daemon {
     this.config = config;
     this.secrets = loadSecrets();
     this.log = log;
-    // Router lama (config.routerUrl + secrets.routerKey) menjadi koneksi `router`.
+    // The legacy router (config.routerUrl + secrets.routerKey) becomes the `router` connection.
     if (migrateLegacy(config, this.secrets)) saveSecrets(this.secrets);
     this.updaterMeta = getInstallInfo(config);
-    // Token GitHub di env (mis. GITHUB_TOKEN dari Codespaces) & env bootstrap runner tidak boleh
-    // terwariskan ke agen, Bash-nya, dev server, atau `!perintah`.
+    // GitHub tokens in env (e.g. GITHUB_TOKEN from Codespaces) & the runner's bootstrap env must not be
+    // inherited by the agent, its Bash, dev servers, or `!commands`.
     scrubSecretEnv();
-    // Runner cloud tidak punya "PC yang tertidur".
+    // Cloud runners have no "sleeping PC".
     this.keepAwake = isCloud(config) ? null : startKeepAwake({ log: (m) => this.log(m) });
     this.conns = new Map();
     this.sessions = new SessionManager({ config, secrets: this.secrets, log: (m) => (process.env.SNUGCODE_DEBUG || process.env.POCKETCODE_DEBUG) && log(m), notify: (s, msg, o) => this.notify(s, msg, o) });
@@ -50,7 +50,7 @@ export class Daemon {
     this.locals = new Set();
     this.github = new GithubAuth(this);
     this.terms = new Terminals({ log: (m) => this.log(m) });
-    // Kabari semua HP & terminal yang tersambung saat status login GitHub berubah.
+    // Notify every connected phone & terminal when the GitHub login status changes.
     this.github.on('change', (st) => {
       for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'github', ...st });
     });
@@ -60,7 +60,7 @@ export class Daemon {
     saveSecrets(this.secrets);
   }
 
-  // ---------- koneksi model ----------
+  // ---------- model connections ----------
   models({ fresh = false } = {}) {
     return listAllModels(this.secrets, { fresh, codexModels: (c) => chatgptModels(this.config, c.id) });
   }
@@ -73,8 +73,8 @@ export class Daemon {
     });
   }
 
-  // Simpan koneksi hasil deteksi. Satu koneksi per provider katalog (menimpa yang lama); router &
-  // endpoint kustom bisa banyak (router, router2, …). Koneksi `router` = model tanpa awalan.
+  // Save a detected connection. One connection per catalog provider (replacing the old one); routers &
+  // custom endpoints can be many (router, router2, …). The `router` connection = models without a prefix.
   /** @param {any} conn @param {{ replace?: string, models?: { id: string, isDefault?: boolean }[] }} [opts] */
   saveConnection(conn, { replace, models } = {}) {
     const sec = this.secrets;
@@ -82,14 +82,14 @@ export class Daemon {
     mirrorLegacy(this.config, sec);
     forgetModels(id);
     this.sessions.resetRouter(id);
-    // Model default: tetap bila masih bisa dipakai; selain itu pilih dari koneksi baru (di latar belakang).
+    // Default model: kept if still usable; otherwise pick one from the new connection (in the background).
     let ok = true;
     try {
       resolveRoute(sec, this.config.model);
     } catch {
       ok = false;
     }
-    // Daftar model hasil deteksi sudah ada: model default langsung dipilih (jawaban RPC memuatnya).
+    // The detected model list is already there: the default model is picked right away (the RPC reply includes it).
     if ((!ok || !this.config.model) && models?.length) {
       this.config.model = models.find((m) => m.isDefault)?.id || defaultModel(models.map((m) => m.id));
       ok = true;
@@ -111,13 +111,13 @@ export class Daemon {
       saveConfig(this.config);
       this.broadcast({ ev: 'info', info: { model: def } });
     } catch (e) {
-      this.log('! gagal memilih model default: ' + e.message);
+      this.log('! failed to pick a default model: ' + e.message);
     }
   }
 
   removeConnection(id) {
     const sec = this.secrets;
-    if (!sec.connections?.[id]) throw new Error('Koneksi tidak ditemukan');
+    if (!sec.connections?.[id]) throw new Error('Connection not found');
     delete sec.connections[id];
     mirrorLegacy(this.config, sec);
     forgetModels(id);
@@ -132,16 +132,16 @@ export class Daemon {
   }
 
   start() {
-    this.connect().catch((e) => this.log('! gagal menghubungi relay: ' + e.message));
+    this.connect().catch((e) => this.log('! failed to reach the relay: ' + e.message));
     this.listenLocal();
     this.github.startChecks();
     this.startUpdateChecks();
     if (isCloud(this.config)) this.startIdleWatch();
   }
 
-  // ---------- Runner cloud: berhenti sendiri saat menganggur ----------
-  // Menganggur = tidak ada agen/perintah/dev server/tunnel yang berjalan dan tidak ada HP yang sedang
-  // membuka aplikasi (atau terminal tersambung). Kuota Codespaces / biaya container tidak terbuang.
+  // ---------- Cloud runner: stops itself when idle ----------
+  // Idle = no agent/command/dev server/tunnel running and no phone currently
+  // has the app open (or a terminal connected). Codespaces quota / container costs aren't wasted.
   startIdleWatch() {
     this.lastActive = Date.now();
     clearInterval(this.idleTimer);
@@ -163,23 +163,23 @@ export class Daemon {
     if (now - this.lastActive < mins * 60_000 || this.idleStopping) return null;
     this.idleStopping = true;
     try {
-      // Dikirim sebelum berhenti: setelah codespace/container mati tidak ada lagi yang bisa mengabari HP.
-      await this.pushAll({ title: `snugcode · ${this.config.machineName || 'Runner'}`, body: `Runner dihentikan setelah ${mins} menit menganggur (hemat kuota). Buka aplikasi untuk menyalakannya lagi.`, tag: 'runner-idle:' + this.config.machineId });
+      // Sent before stopping: once the codespace/container is down nothing can notify the phone anymore.
+      await this.pushAll({ title: `snugcode · ${this.config.machineName || 'Runner'}`, body: `Runner stopped after ${mins} idle minutes (saving quota). Open the app to start it again.`, tag: 'runner-idle:' + this.config.machineId });
       const how = await stopRunner(this.config, this.secrets);
-      if (how) this.log(`◆ Runner menganggur ${mins} menit: dihentikan (${how === 'exit' ? 'daemon keluar' : 'Codespaces'}). Buka aplikasi untuk menyalakannya lagi.`);
+      if (how) this.log(`◆ Runner idle for ${mins} minutes: stopped (${how === 'exit' ? 'daemon exited' : 'Codespaces'}). Open the app to start it again.`);
       if (how === 'exit') setTimeout(() => Promise.resolve(this.stop()).finally(() => process.exit(0)), 50);
       return how;
     } catch (e) {
-      this.log('! gagal menghentikan runner: ' + e.message);
+      this.log('! failed to stop the runner: ' + e.message);
       this.saveSecrets();
       return null;
     } finally {
-      this.lastActive = now; // gagal / tanpa cara berhenti: coba lagi satu periode kemudian
+      this.lastActive = now; // failed / no way to stop: try again one period later
       this.idleStopping = false;
     }
   }
 
-  // Menunggu (singkat) dev server & tunnel milik sesi benar-benar mati.
+  // Wait (briefly) until the sessions' dev servers & tunnels are really dead.
   stop() {
     this.stopped = true;
     this.keepAwake?.stop();
@@ -213,8 +213,8 @@ export class Daemon {
     } catch {}
   }
 
-  // Kanal lokal untuk `snugcode` di terminal. Hanya bisa diakses user yang sama
-  // (izin file/pipe) dan tetap wajib token lokal dari secrets.json.
+  // Local channel for `snugcode` in the terminal. Only accessible to the same user
+  // (file/pipe permissions) and still requires the local token from secrets.json.
   listenLocal() {
     if (!this.secrets.localToken) {
       this.secrets.localToken = randomBytes(24).toString('hex');
@@ -225,20 +225,20 @@ export class Daemon {
       const c = new LocalConn(this, sock);
       this.locals.add(c);
     });
-    this.ipc.on('error', (e) => this.log('! kanal lokal gagal: ' + e.message));
+    this.ipc.on('error', (e) => this.log('! local channel failed: ' + e.message));
     this.ipc.listen(IPC_PATH, () => {
       if (process.platform !== 'win32') fs.chmodSync(IPC_PATH, 0o600);
     });
   }
 
-  // Relay baru menerima token lewat subprotocol (tidak tercatat di log URL); relay lama hanya `?token=`.
+  // Newer relays accept the token via subprotocol (not recorded in URL logs); old relays only `?token=`.
   async relaySupportsProto() {
     if (this.wsProto !== undefined) return this.wsProto;
     try {
       const r = await fetch(this.config.relayUrl.replace(/\/+$/, '') + '/api/health', { signal: AbortSignal.timeout(5000) });
       this.wsProto = !!(await r.json()).wsProto;
     } catch {
-      return false; // dicoba lagi saat sambung ulang berikutnya
+      return false; // retried on the next reconnect
     }
     return this.wsProto;
   }
@@ -250,17 +250,17 @@ export class Daemon {
     const ws = proto ? new WebSocket(base, ['snugcode', 't.' + this.secrets.machineToken]) : new WebSocket(base + '?token=' + encodeURIComponent(this.secrets.machineToken));
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
-    this.relayBin = false; // relay lama hanya meneruskan frame teks; relay baru mengirim hello { bin }
+    this.relayBin = false; // old relays only forward text frames; newer relays send hello { bin }
     ws.onopen = () => {
       this.backoff = 1000;
       this.lastRx = Date.now();
-      this.log(`✓ Terhubung ke relay sebagai "${this.config.machineName}". Buka aplikasi di HP untuk mulai.`);
+      this.log(`✓ Connected to the relay as "${this.config.machineName}". Open the app on your phone to start.`);
       clearInterval(this.ping);
-      // Heartbeat: relay menjawab setiap `ping`. Tanpa jawaban selama DEAD_MS (Wi-Fi ganti, PC bangun dari
-      // tidur, NAT membuang koneksi), soket dianggap mati walau belum `close`, lalu disambung ulang.
+      // Heartbeat: the relay answers every `ping`. With no answer for DEAD_MS (Wi-Fi change, PC waking from
+      // sleep, NAT dropping the connection), the socket is considered dead even without `close`, and reconnected.
       this.ping = setInterval(() => {
         if (ws.readyState !== 1) return;
-        if (Date.now() - this.lastRx > DEAD_MS) return this.dropRelay(ws, 'tidak ada jawaban relay');
+        if (Date.now() - this.lastRx > DEAD_MS) return this.dropRelay(ws, 'no answer from the relay');
         ws.send('ping');
       }, PING_MS);
     };
@@ -288,26 +288,26 @@ export class Daemon {
       }
     };
     ws.onclose = (ev) => {
-      if (this.ws !== ws) return; // soket lama yang sudah diganti dropRelay
+      if (this.ws !== ws) return; // an old socket already replaced by dropRelay
       clearInterval(this.ping);
       for (const c of this.conns.values()) c.closed();
       this.conns.clear();
       if (this.stopped) return;
       if (ev.code === 4003) {
-        this.log('✗ PC ini sudah dihapus dari akun. Jalankan `snugcode setup` lagi.');
+        this.log('✗ This PC was removed from the account. Run `snugcode setup` again.');
         return;
       }
-      if (ev.code === 4000) this.log('! Ada daemon lain dengan PC yang sama yang mengambil alih koneksi.');
+      if (ev.code === 4000) this.log('! Another daemon with the same PC took over the connection.');
       const wait = ev.code === 4000 ? 60000 : this.backoff;
       this.backoff = Math.min(this.backoff * 2, 30000);
-      setTimeout(() => this.connect().catch((e) => this.log('! gagal menghubungi relay: ' + e.message)), wait);
+      setTimeout(() => this.connect().catch((e) => this.log('! failed to reach the relay: ' + e.message)), wait);
     };
     ws.onerror = () => {};
   }
 
-  // Soket setengah mati: lepaskan (close-nya bisa tertahan lama) dan sambung ulang sekarang.
+  // Half-dead socket: let it go (its close may hang for a long time) and reconnect now.
   dropRelay(ws, why) {
-    this.log(`! Koneksi relay macet (${why}): menyambung ulang…`);
+    this.log(`! Relay connection stuck (${why}): reconnecting…`);
     clearInterval(this.ping);
     this.ws = null;
     for (const c of this.conns.values()) c.closed();
@@ -315,7 +315,7 @@ export class Daemon {
     try {
       ws.close();
     } catch {}
-    if (!this.stopped) this.connect().catch((e) => this.log('! gagal menghubungi relay: ' + e.message));
+    if (!this.stopped) this.connect().catch((e) => this.log('! failed to reach the relay: ' + e.message));
   }
 
   sendRaw(cid, obj) {
@@ -328,21 +328,21 @@ export class Daemon {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'x', cid, reason }));
   }
 
-  // Web Push ke semua HP terpasang (bukan tentang satu sesi), ditunggu paling lama `ms`.
+  // Web Push to every installed phone (not about a single session), waited for at most `ms`.
   pushAll(payload, ms = 5000) {
     const sends = Object.values(this.secrets.devices || {})
       .filter((dev) => dev.push)
-      .map((dev) => sendPush(dev.push, { mid: this.config.machineId, ...payload }).catch((e) => this.log('! push gagal: ' + e.message)));
+      .map((dev) => sendPush(dev.push, { mid: this.config.machineId, ...payload }).catch((e) => this.log('! push failed: ' + e.message)));
     return Promise.race([Promise.allSettled(sends), new Promise((r) => setTimeout(r, ms).unref?.())]);
   }
 
-  // perm: kartu izin (tag notifikasi terpisah; pid + risk → tombol Izinkan/Tolak di notifikasi).
-  // minor: kabar sampingan (mis. dev server berhenti) yang dilewati HP dengan mode "penting saja".
+  // perm: permission card (separate notification tag; pid + risk → Allow/Deny buttons in the notification).
+  // minor: side news (e.g. a dev server stopped) skipped by phones in "important only" mode.
   /** @param {any} session @param {string} msg @param {{ perm?: boolean, pid?: string, risk?: string, minor?: boolean }} [o] */
   notify(session, msg, { perm = false, pid, risk, minor = false } = {}) {
     const title = session.meta.title || session.meta.repo;
     for (const c of [...this.conns.values(), ...this.locals]) if (c.ready) c.push({ ev: 'notice', sid: session.id, msg, title });
-    // HP yang sedang membuka sesi ini sudah melihatnya langsung; sisanya dapat Web Push.
+    // Phones currently viewing this session already see it live; the rest get Web Push.
     const watching = new Set([...this.conns.values()].filter((c) => c.ready && c.visible && c.sub?.session === session).map((c) => c.deviceId));
     for (const [id, dev] of Object.entries(this.secrets.devices)) {
       if (!dev.push || watching.has(id) || (minor && dev.pushLevel === 'important')) continue;
@@ -352,30 +352,30 @@ export class Daemon {
           delete dev.push;
           this.saveSecrets();
         })
-        .catch((e) => this.log('! push gagal: ' + e.message));
+        .catch((e) => this.log('! push failed: ' + e.message));
     }
   }
 }
 
-// RPC bersama untuk HP (lewat relay) dan terminal (lokal).
+// Shared RPC for phones (via the relay) and terminals (local).
 class RpcConn {
   constructor(daemon) {
     this.d = daemon;
-    /** @type {import('./sessions.js').Session | null} sesi milik jembatan MCP (hanya tool dev) */
+    /** @type {import('./sessions.js').Session | null} the MCP bridge's session (dev tools only) */
     this.bridge = null;
     this.ready = false;
     this.sub = null; // { session, listener }
     this.queue = [];
     this.queueSid = null;
-    this.visible = true; // HP mengabarkan saat PWA ke latar belakang (untuk Web Push)
+    this.visible = true; // the phone reports when the PWA goes to the background (for Web Push)
   }
 
-  /** Kirim pesan ke klien (diimplementasikan LocalConn/PhoneConn). @param {object} msg */
+  /** Send a message to the client (implemented by LocalConn/PhoneConn). @param {object} msg */
   push(msg) {
     throw new Error('not implemented');
   }
 
-  // Koneksi sudah putus: sisa antrean event tidak perlu dikirim.
+  // The connection is gone: the remaining event queue doesn't need sending.
   closed() {
     this.queue = [];
     this.unsubscribe();
@@ -384,9 +384,9 @@ class RpcConn {
 
   async handleRpc({ id, m, p }) {
     try {
-      if (this.bridge && m !== 'devTools' && m !== 'devTool') throw new Error('Tidak diizinkan untuk jembatan MCP');
+      if (this.bridge && m !== 'devTools' && m !== 'devTool') throw new Error('Not allowed for the MCP bridge');
       const fn = Object.hasOwn(RPC, m) ? RPC[m] : null;
-      if (!fn) throw new Error('Metode tidak dikenal: ' + m);
+      if (!fn) throw new Error('Unknown method: ' + m);
       const r = await fn(this, p && typeof p === 'object' ? p : {});
       this.push({ id, r: r ?? null });
     } catch (e) {
@@ -406,25 +406,25 @@ class RpcConn {
       name: c.machineName,
       model: c.model,
       engine,
-      // Model ringan subagen untuk model default (tiap sesi menghitungnya dari model sesinya).
+      // The subagent light model for the default model (each session computes it from its own model).
       lightModel: c.model ? lightModel(c.model, knownRefs(sec, splitRef(c.model).conn)).id : null,
       router: getConn(sec, 'router')?.openai || c.routerUrl,
       connections: this.d.connList(),
       github: c.githubLogin || null,
       githubState: this.d.github.state,
       platform: process.platform,
-      // PWA memakai ini untuk mengenali daemon lama (sebelum ganti nama) dan menawarkan migrasi.
+      // The PWA uses this to recognize old daemons (before the rename) and offer migration.
       brand: 'snugcode',
       version: this.d.updaterMeta?.version || PKG_VERSION,
       commit: this.d.updaterMeta?.commit || 'main',
       preventSleep: this.d.keepAwake?.active?.() ?? false,
-      // 'pc' | 'cloud' (Codespaces / container). PWA menyembunyikan fitur khusus PC & menampilkan setelan runner.
+      // 'pc' | 'cloud' (Codespaces / container). The PWA hides PC-only features & shows runner settings.
       runtime: c.runtime || 'pc',
       machineId: c.machineId,
-      // Ada koneksi model (dulu: key 9router). Nama lama dipertahankan untuk aplikasi versi lama.
+      // A model connection exists (formerly: a 9router key). Old name kept for old app versions.
       routerConfigured: Object.keys(sec.connections || {}).length > 0,
       runner: isCloud(c) ? { ...(c.runner || {}), idleStopMinutes: idleMinutes(c), autoStop: !!this.d.secrets.runnerToken || !!c.runner?.idleExit, ...(c.runner?.provider === 'codespace' ? { usage: usageSummary() } : {}) } : null,
-      // Fitur protokol yang didukung daemon ini: klien memeriksa ini, bukan menebak dari pesan error.
+      // Protocol features this daemon supports: clients check this instead of guessing from error messages.
       proto: PROTO,
       caps: Object.keys(RPC),
     };
@@ -443,8 +443,8 @@ class RpcConn {
     this.flushEvents();
   }
 
-  // Event digabung tiap ~60ms jadi satu frame. Antrean hanya berisi event dari satu sesi:
-  // pindah sesi mengirim sisa antrean lama lebih dulu (dulu event sesi baru bisa berlabel sesi lama).
+  // Events are batched every ~60ms into one frame. The queue only holds events from one session:
+  // switching sessions sends the old queue first (formerly new-session events could carry the old session's label).
   queueEvent(sid, e) {
     if (this.queueSid !== sid) this.flushEvents();
     this.queueSid = sid;
@@ -461,7 +461,7 @@ class RpcConn {
   }
 }
 
-// Terminal di PC yang sama: JSON per baris lewat named pipe / unix socket.
+// Terminal on the same PC: line-delimited JSON over a named pipe / unix socket.
 class LocalConn extends RpcConn {
   constructor(daemon, sock) {
     super(daemon);
@@ -499,7 +499,7 @@ class LocalConn extends RpcConn {
       return;
     }
     if (!this.ready) {
-      // Jembatan MCP engine Codex: token per sesi, hanya untuk tool dev sesi itu.
+      // Codex engine MCP bridge: a per-session token, only for that session's dev tools.
       if (m.t === 'hello' && m.bridge) {
         const s = this.d.sessions.bridgeSession(m.bridge);
         if (!s) {
@@ -541,7 +541,7 @@ class PhoneConn extends RpcConn {
     this.d.sendRaw(this.cid, obj);
   }
 
-  // Kanal biner bila HP & relay sama-sama mendukungnya (disepakati saat auth); selain itu frame teks.
+  // Binary channel if both the phone & relay support it (agreed during auth); otherwise text frames.
   push(msg) {
     if (!this.channel) return;
     if (this.bin) for (const f of this.channel.sealBin(msg)) this.d.sendBin(this.cid, f);
@@ -558,7 +558,7 @@ class PhoneConn extends RpcConn {
       const msg = this.channel.openBin(payload);
       if (msg) this.onRpc(msg);
     } catch (e) {
-      this.d.log('! pesan ditolak: ' + e.message);
+      this.d.log('! message rejected: ' + e.message);
       this.d.kick(this.cid, 'protocol');
     }
   }
@@ -577,7 +577,7 @@ class PhoneConn extends RpcConn {
       if (m.t === 'auth1') return this.auth1(m);
       if (m.t === 'auth3') return this.auth3(m);
     } catch (e) {
-      this.d.log('! pesan ditolak: ' + e.message);
+      this.d.log('! message rejected: ' + e.message);
       this.d.kick(this.cid, 'protocol');
     }
   }
@@ -587,13 +587,13 @@ class PhoneConn extends RpcConn {
     const s = this.d.secrets;
     if (!s.prs) return this.send({ t: 'pair_err', reason: 'nopin' });
     if (Date.now() - this.d.lastPairAttempt < 3000 && !(s.pinLockUntil > Date.now())) return this.send({ t: 'pair_err', reason: 'slow' });
-    // Dihitung sebelum hasilnya diketahui: penebak cukup melihat pair2 untuk menguji satu tebakan.
+    // Counted before the result is known: a guesser only needs to see pair2 to test one guess.
     const att = pinAttempt(s);
     if ('until' in att) return this.send({ t: 'pair_err', reason: 'locked', until: att.until });
     this.d.lastPairAttempt = Date.now();
     this.d.saveSecrets();
     const r = C.pairRespondMachine(C.hexToBytes(s.prs), m);
-    this.pairState = { ...r.state, name: String(m.name || 'HP').slice(0, 60) };
+    this.pairState = { ...r.state, name: String(m.name || 'Phone').slice(0, 60) };
     this.send({ t: 'pair2', ...r.msg, left: att.left });
   }
 
@@ -608,11 +608,11 @@ class PhoneConn extends RpcConn {
     const deviceId = randomBytes(8).toString('hex');
     s.devices[deviceId] = { name, secret: C.bytesToHex(secret), pairedAt: Date.now(), lastSeen: Date.now() };
     this.d.saveSecrets();
-    this.d.log(`✓ Perangkat baru dipasangkan: ${name} (${deviceId})`);
+    this.d.log(`✓ New device paired: ${name} (${deviceId})`);
     this.send({ t: 'pair_ok', deviceId });
   }
 
-  // ---------- Autentikasi perangkat terpasang ----------
+  // ---------- Paired device authentication ----------
   auth1(m) {
     const dev = this.d.secrets.devices[m.deviceId];
     if (!dev) return this.send({ t: 'auth_err', reason: 'unknown_device' });
@@ -638,7 +638,7 @@ class PhoneConn extends RpcConn {
     if (this.d.lastUpdateStatus?.updateAvailable) this.push({ ev: 'update', ...this.d.lastUpdateStatus });
   }
 
-  // Revoke berlaku langsung.
+  // Revoke applies immediately.
   onRpc(msg) {
     if (!this.d.secrets.devices[this.deviceId]) return this.d.kick(this.cid, 'revoked');
     return this.handleRpc(msg);

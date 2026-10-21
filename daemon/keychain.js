@@ -1,10 +1,10 @@
-// secrets.json terenkripsi dengan kunci di keychain OS (opt-in: `snugcode keychain on`).
-// Isinya (token relay, token GitHub, API key, secret perangkat HP) dienkripsi XChaCha20-Poly1305;
-// kuncinya hanya tersimpan di keychain OS: macOS Keychain (`security`), Secret Service di Linux
-// (`secret-tool`: GNOME Keyring / KWallet), atau DPAPI di Windows (dibungkus per user Windows).
-// Salinan folder data (backup, sinkronisasi cloud, disk yang dicuri/dipinjam) tidak membuka isinya.
-// Proses lain milik user yang sama yang boleh membuka keychain tetap bisa: ini perlindungan saat
-// diam (at rest), bukan sandbox. Agen tetap dibatasi kebijakan izin & sandbox OS.
+// secrets.json encrypted with a key in the OS keychain (opt-in: `snugcode keychain on`).
+// Its contents (relay token, GitHub token, API keys, phone device secrets) are encrypted with XChaCha20-Poly1305;
+// the key lives only in the OS keychain: macOS Keychain (`security`), Secret Service on Linux
+// (`secret-tool`: GNOME Keyring / KWallet), or DPAPI on Windows (wrapped per Windows user).
+// Copies of the data folder (backups, cloud sync, a stolen/borrowed disk) don't reveal the contents.
+// Other processes of the same user that may open the keychain still can: this is protection at
+// rest, not a sandbox. The agent is still limited by the permission policy & OS sandbox.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -15,11 +15,11 @@ const SERVICE = 'snugcode';
 const AAD = new TextEncoder().encode('snugcode-secrets-v1');
 const TIMEOUT = 15_000;
 
-// Satu item per folder data (beberapa instalasi / SNUGCODE_HOME tidak saling menimpa).
+// One item per data folder (multiple installs / SNUGCODE_HOME don't overwrite each other).
 export const accountFor = (home) => 'data-' + createHash('sha256').update(path.resolve(home)).digest('hex').slice(0, 16);
 
 const run = (file, args, input) => execFileSync(file, args, { input, encoding: 'utf8', timeout: TIMEOUT, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }).trim();
-const missing = (e) => e?.status === 44 || e?.status === 1; // security: 44 = tidak ada; secret-tool: 1
+const missing = (e) => e?.status === 44 || e?.status === 1; // security: 44 = not found; secret-tool: 1
 
 const PS_PROTECT = `Add-Type -AssemblyName System.Security; $b=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,[Text.Encoding]::UTF8.GetBytes('${SERVICE}'),'CurrentUser'))`;
 const PS_UNPROTECT = PS_PROTECT.replace('::Protect(', '::Unprotect(');
@@ -32,7 +32,7 @@ const BACKENDS = {
   darwin: {
     name: 'macos',
     label: 'macOS Keychain',
-    available: () => (fs.existsSync('/usr/bin/security') ? null : '/usr/bin/security tidak ada'),
+    available: () => (fs.existsSync('/usr/bin/security') ? null : '/usr/bin/security not found'),
     get(home) {
       try {
         return run('/usr/bin/security', ['find-generic-password', '-s', SERVICE, '-a', accountFor(home), '-w']);
@@ -41,7 +41,7 @@ const BACKENDS = {
         throw e;
       }
     },
-    // Lewat `security -i` (stdin) agar kunci tidak terlihat di daftar proses.
+    // Via `security -i` (stdin) so the key isn't visible in the process list.
     set: (home, hex) => void run('/usr/bin/security', ['-i'], `add-generic-password -U -s ${SERVICE} -a ${accountFor(home)} -l "snugcode secrets" -w ${hex}\n`),
     del(home) {
       try {
@@ -54,9 +54,9 @@ const BACKENDS = {
     label: 'Secret Service (GNOME Keyring / KWallet)',
     available() {
       const onPath = (process.env.PATH || '').split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, 'secret-tool')));
-      if (!onPath) return 'secret-tool tidak terpasang (Debian/Ubuntu: sudo apt install libsecret-tools)';
+      if (!onPath) return 'secret-tool is not installed (Debian/Ubuntu: sudo apt install libsecret-tools)';
       const uid = process.getuid?.();
-      if (!process.env.DBUS_SESSION_BUS_ADDRESS && !(uid != null && fs.existsSync(`/run/user/${uid}/bus`))) return 'tidak ada sesi D-Bus (jalankan dari sesi desktop)';
+      if (!process.env.DBUS_SESSION_BUS_ADDRESS && !(uid != null && fs.existsSync(`/run/user/${uid}/bus`))) return 'no D-Bus session (run from a desktop session)';
       return null;
     },
     get(home) {
@@ -74,8 +74,8 @@ const BACKENDS = {
       } catch {}
     },
   },
-  // DPAPI tidak punya tempat simpan: kunci yang sudah dibungkus (hanya bisa dibuka user Windows ini
-  // di PC ini) disimpan di secrets.key, di samping secrets.json.
+  // DPAPI has no store: the wrapped key (only this Windows user on this PC can unwrap it)
+  // is kept in secrets.key, next to secrets.json.
   win32: {
     name: 'dpapi',
     label: 'Windows DPAPI',
@@ -90,10 +90,10 @@ const BACKENDS = {
   },
 };
 
-// Hanya untuk test: keychain palsu berupa folder (SNUGCODE_KEYCHAIN_FAKE=<folder>).
+// Tests only: a fake keychain backed by a folder (SNUGCODE_KEYCHAIN_FAKE=<folder>).
 const fakeBackend = (dir) => ({
   name: 'fake',
-  label: 'keychain uji',
+  label: 'test keychain',
   available: () => null,
   get: (home) => (fs.existsSync(path.join(dir, accountFor(home))) ? fs.readFileSync(path.join(dir, accountFor(home)), 'utf8') : null),
   set: (home, hex) => (fs.mkdirSync(dir, { recursive: true }), fs.writeFileSync(path.join(dir, accountFor(home)), hex)),
@@ -108,26 +108,26 @@ export function backend() {
 
 export const isSealed = (obj) => !!obj && typeof obj === 'object' && obj.snugcodeKeychain === 1;
 
-const keys = new Map(); // kunci yang sudah dibuka di proses ini (satu panggilan keychain per proses)
+const keys = new Map(); // keys already unlocked in this process (one keychain call per process)
 function keyFor(home, kc) {
   const cached = keys.get(home);
   if (cached) return cached;
   const b = backend();
-  const why = !b ? 'OS ini tidak didukung' : b.name !== kc ? `dibuat dengan ${kc}, sekarang ${b.name}` : b.available();
+  const why = !b ? 'this OS is not supported' : b.name !== kc ? `created with ${kc}, now ${b.name}` : b.available();
   let hex = null;
   let err = why;
   if (!why) {
     try {
       hex = b.get(home);
-      if (!hex) err = 'kuncinya tidak ada di keychain';
+      if (!hex) err = 'the key is not in the keychain';
     } catch (e) {
-      err = String(e?.stderr || e?.message || e).trim().split('\n')[0] || 'keychain menolak';
+      err = String(e?.stderr || e?.message || e).trim().split('\n')[0] || 'keychain refused';
     }
   }
   if (!hex || !/^[0-9a-f]{64}$/i.test(hex))
     throw new Error(
-      `secrets.json terenkripsi dengan kunci di keychain OS, tapi kuncinya tidak bisa dibuka (${err || 'format kunci salah'}). ` +
-        'Buka kunci keychain (login ke sesi desktop) lalu coba lagi. Bila kuncinya hilang permanen: hapus secrets.json di folder data snugcode, lalu `snugcode setup` dan pasangkan HP lagi.',
+      `secrets.json is encrypted with a key in the OS keychain, but the key can't be unlocked (${err || 'bad key format'}). ` +
+        'Unlock the keychain (sign in to a desktop session) and try again. If the key is permanently lost: delete secrets.json in the snugcode data folder, then run `snugcode setup` and pair your phone again.',
     );
   const key = Buffer.from(hex, 'hex');
   keys.set(home, key);
@@ -141,7 +141,7 @@ export function openSealed(file, home) {
     const pt = xchacha20poly1305(key, Buffer.from(file.n, 'hex'), AAD).decrypt(Buffer.from(file.c, 'base64'));
     return JSON.parse(new TextDecoder().decode(pt));
   } catch {
-    throw new Error('secrets.json terenkripsi tidak bisa dibuka dengan kunci di keychain (kunci berbeda atau file rusak).');
+    throw new Error('The encrypted secrets.json can\'t be opened with the keychain key (different key or corrupted file).');
   }
 }
 
@@ -153,16 +153,16 @@ export function seal(sec, home, kc) {
   return { snugcodeKeychain: 1, kc, n: n.toString('hex'), c: Buffer.from(c).toString('base64') };
 }
 
-// `snugcode keychain on`: kunci baru di keychain, diverifikasi bisa dibaca kembali sebelum dipakai.
+// `snugcode keychain on`: a new key in the keychain, verified to read back before use.
 /** @param {string} home */
 export function enableKeychain(home) {
   const b = backend();
-  if (!b) throw new Error('Keychain OS belum didukung di ' + process.platform);
+  if (!b) throw new Error('OS keychain is not supported on ' + process.platform);
   const why = b.available();
-  if (why) throw new Error(`${b.label} tidak tersedia: ${why}`);
+  if (why) throw new Error(`${b.label} is unavailable: ${why}`);
   const hex = randomBytes(32).toString('hex');
   b.set(home, hex);
-  if (b.get(home) !== hex) throw new Error(`${b.label} tidak mengembalikan kunci yang sama; keychain tidak dipakai.`);
+  if (b.get(home) !== hex) throw new Error(`${b.label} didn't return the same key; keychain not used.`);
   keys.set(home, Buffer.from(hex, 'hex'));
   return b;
 }

@@ -1,30 +1,31 @@
-# Berkontribusi ke snugcode
+# Contributing to snugcode
 
-## Alur kerja
-- Kerjakan di branch, buka Pull Request ke `main`. CI (sintaks, typecheck, unit test di 3 OS, e2e) harus lulus;
-  workflow Deploy baru berjalan setelah CI lulus di `main`.
-- Pesan commit menjelaskan perubahan, mis. `fix(relay): konfirmasi penautan PC setelah login` — bukan `aaa`.
-  Riwayat commit dibaca orang yang memakai kanal `main` dan saat menelusuri regresi.
-- Perubahan perilaku dicatat di `CHANGELOG.md`; arsitektur/endpoint/RPC baru di `master.md`.
+## Workflow
+- Work on a branch and open a Pull Request to `main`. CI (syntax, typecheck, unit tests on 3 OSes, e2e) must pass;
+  the Deploy workflow only runs after CI passes on `main`.
+- Commit messages describe the change, e.g. `fix(relay): confirm PC linking after sign-in` — not `aaa`.
+  The commit history is read by people on the `main` channel and when tracking down regressions.
+- Behavior changes go in `CHANGELOG.md`; new architecture/endpoints/RPCs go in `master.md`.
+- All user-facing text (PWA, CLI/TUI, relay pages, landing page) and docs are in English.
 
-## Menjalankan test
+## Running tests
 ```bash
 npm ci && npm ci --prefix relay
-printf 'TOKEN_SECRET=dev\n' > relay/.dev.vars   # sekali saja; tanpa ini login dev gagal "TOKEN_SECRET belum di-set"
-npm test                      # unit test
+printf 'TOKEN_SECRET=dev\n' > relay/.dev.vars   # once; without it dev sign-in fails with "TOKEN_SECRET is not set"
+npm test                      # unit tests
 npm run typecheck
-npm run dev:relay             # terminal lain: relay lokal (DEV_AUTH)
-npm run test:e2e:relay && npm run test:e2e && npm run test:ui   # CHROME=/path/chrome bila perlu
+npm run dev:relay             # in another terminal: local relay (DEV_AUTH)
+npm run test:e2e:relay && npm run test:e2e && npm run test:ui   # CHROME=/path/chrome if needed
 ```
 
-## Rilis (kanal "stable")
-Daemon kanal stable hanya memasang rilis bertag. Tanpa tag, semua pengguna mendapat setiap commit `main`.
+## Releases ("stable" channel)
+Daemons on the stable channel only install tagged releases. Without a tag, every user gets every `main` commit.
 ```bash
-npm version minor     # naikkan versi + commit + tag vX.Y.Z (samakan dengan CHANGELOG)
+npm version minor     # bump the version + commit + tag vX.Y.Z (keep it in line with the CHANGELOG)
 git push --follow-tags
 ```
-Workflow Release menjalankan test, melampirkan `build.json` (hash PWA, lihat `docs/keamanan.md`), dan menerbitkan ke
-npm bila secret `NPM_TOKEN` ada.
+The Release workflow runs the tests, attaches `build.json` (PWA hashes, see `docs/security.md`), and publishes to
+npm if the `NPM_TOKEN` secret is set.
 
-## Keamanan
-Celah keamanan dilaporkan secara privat (lihat `docs/keamanan.md`), bukan lewat issue publik.
+## Security
+Vulnerabilities are reported privately (see `docs/security.md`), not through public issues.

@@ -1,5 +1,5 @@
-// Koneksi terenkripsi HP <-> PC lewat relay: pairing PIN, autentikasi perangkat, kanal E2EE
-// (frame teks lama atau biner v2), dan RPC berbasis id. Tanpa DOM, hanya WebSocket + localStorage.
+// Encrypted phone <-> PC connection via the relay: PIN pairing, device auth, E2EE channel
+// (legacy text frames or binary v2), and id-based RPC. No DOM, just WebSocket + localStorage.
 import * as C from '../shared/crypto.js';
 
 export const store = {
@@ -23,26 +23,26 @@ function deviceName() {
   const ua = navigator.userAgent;
   const m = ua.match(/\(([^)]+)\)/);
   const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? (m?.[1].split(';').map((s) => s.trim()).find((s) => /^(SM-|Pixel|Redmi|M\d|V\d|CPH|RMX|2\d{3})/.test(s)) || 'Android') : 'Browser';
-  return os + ' · ' + new Date().toLocaleDateString('id-ID');
+  return os + ' · ' + new Date().toLocaleDateString('en-US');
 }
 
-// Heartbeat: relay menjawab `ping`. Tanpa pesan apa pun selama DEAD_MS (Wi-Fi ↔ seluler, HP tidur),
-// soket dianggap setengah mati walau belum `close`, lalu disambung ulang.
+// Heartbeat: the relay answers `ping`. With no message at all for DEAD_MS (Wi-Fi ↔ cellular, phone asleep)
+// the socket is treated as half-dead even without `close`, and reconnected.
 const PING_MS = 20000;
 const DEAD_MS = 50000;
-// Batas waktu menyambung: soket bisa tertahan di CONNECTING tanpa batas (HP baru bangun, jaringan seluler
-// yang menelan paket) dan browser baru menyerah setelah beberapa menit. Tanpa `status` dari relay dalam
-// waktu ini, soket dilepas dan dicoba lagi (makin lama tiap percobaan, untuk jaringan yang memang lambat).
+// Connect timeout: a socket can hang in CONNECTING indefinitely (phone just woke up, cellular network
+// swallowing packets) and the browser only gives up after minutes. Without a relay `status` within this
+// time the socket is dropped and retried (longer each attempt, for genuinely slow networks).
 const CONNECT_MS = 10000;
 const CONNECT_MAX_MS = 30000;
-// Relay sudah menjawab tapi PC tidak membalas auth (soket PC ke relay setengah mati): coba kanal baru.
+// Relay answered but the PC doesn't reply to auth (PC↔relay socket half-dead): try a new channel.
 const AUTH_MS = 20000;
-// Batas waktu RPC: tanpa ini tombol & spinner bisa menunggu selamanya saat koneksi macet.
+// RPC timeout: without it buttons & spinners could wait forever on a stuck connection.
 const RPC_MS = 30000;
 const RPC_SLOW_MS = 180000;
 const RPC_SLOW = new Set(['create', 'update', 'rollback', 'connAdd', 'configure', 'chatgptLogin', 'probeModel', 'modelsAll', 'modelsInfo', 'models', 'repos', 'branches', 'attach', 'preview', 'screenshot', 'runDev', 'cleanup', 'push', 'pr', 'commit', 'revert', 'diff', 'status', 'delete', 'send', 'termOpen', 'procStart']);
 
-// ---------- Koneksi terenkripsi ke PC ----------
+// ---------- Encrypted connection to the PC ----------
 export class Conn {
   constructor(machine) {
     this.m = machine;
@@ -62,7 +62,7 @@ export class Conn {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     clearTimeout(this.reconnectTimer);
     clearTimeout(this.connectT);
-    // Token login lewat subprotocol, bukan URL (tidak tercatat di log); relay menjawab subprotocol `snugcode`.
+    // Login token via subprotocol, not the URL (stays out of logs); the relay answers with subprotocol `snugcode`.
     const ws = new WebSocket(`${proto}//${location.host}/ws/phone?mid=${encodeURIComponent(this.m.id)}`, ['snugcode', 't.' + token()]);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
@@ -97,7 +97,7 @@ export class Conn {
         return this.emit('state', 'revoked');
       }
       if (ev.code === 4003) return this.emit('state', 'removed');
-      // "Keluar dari semua perangkat": token login dicabut relay, jadi login ulang.
+      // "Sign out everywhere": the relay revoked the login token, so sign in again.
       if (ev.code === 4005) {
         store.set('token', null);
         return location.reload();
@@ -106,18 +106,18 @@ export class Conn {
       this.backoff = Math.min(this.backoff * 2, 15000);
     };
   }
-  // Koneksi hilang: semua RPC yang menunggu gagal dengan pesan jelas, UI menampilkan "menyambung ulang".
+  // Connection lost: all pending RPCs fail with a clear message, the UI shows "reconnecting".
   lost() {
     clearInterval(this.ping);
     clearTimeout(this.probeT);
     clearTimeout(this.connectT);
     clearTimeout(this.authT);
     this.channel = null;
-    for (const p of this.pending.values()) p.reject(new Error('Koneksi terputus'));
+    for (const p of this.pending.values()) p.reject(new Error('Connection lost'));
     this.pending.clear();
     this.emit('state', 'reconnecting');
   }
-  // Soket setengah mati: lepaskan tanpa menunggu `close` (bisa tertahan puluhan detik) dan sambung ulang.
+  // Half-dead socket: drop it without waiting for `close` (can take tens of seconds) and reconnect.
   drop() {
     const ws = this.ws;
     this.ws = null;
@@ -127,9 +127,9 @@ export class Conn {
     this.lost();
     if (!this.closedByUser) this.connect();
   }
-  // Aplikasi dibuka lagi / jaringan kembali: soket yang tertutup disambung ulang tanpa menunggu jeda
-  // backoff, soket yang masih CONNECTING dari sebelum jaringan pulih diganti baru, dan yang tampak
-  // terbuka diuji dengan ping (relay menjawab dalam hitungan milidetik; tanpa jawaban 4 detik → sambung ulang).
+  // App reopened / network back: a closed socket reconnects without the backoff delay, a socket still
+  // CONNECTING from before the network recovered is replaced, and one that looks open is probed with a
+  // ping (the relay answers within milliseconds; no answer in 4 seconds → reconnect).
   wake() {
     if (this.closedByUser) return;
     this.backoff = 1000;
@@ -141,7 +141,7 @@ export class Conn {
     this.ws.send('ping');
     this.probeT = setTimeout(() => this.lastRx < since && this.drop(), 4000);
   }
-  // Tombol "Coba sekarang": lepaskan percobaan yang sedang berjalan dan sambung ulang segera.
+  // "Try now" button: drop the attempt in progress and reconnect immediately.
   retry() {
     if (this.closedByUser) return;
     this.backoff = 1000;
@@ -164,7 +164,7 @@ export class Conn {
   sendRaw(obj) {
     if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));
   }
-  // Kanal biner (relay & daemon baru): pesan besar dipecah, tanpa base64 & JSON berlapis.
+  // Binary channel (new relay & daemon): large messages are chunked, no base64 & nested JSON.
   onBinary(buf) {
     if (!this.channel) return;
     const msg = this.channel.openBin(buf);
@@ -251,7 +251,7 @@ export class Conn {
     });
   }
   call(m, p = {}) {
-    if (!this.channel) return Promise.reject(new Error('Belum terhubung ke PC'));
+    if (!this.channel) return Promise.reject(new Error('Not connected to the PC yet'));
     const id = ++this.rpcId;
     if (this.bin) for (const f of this.channel.sealBin({ id, m, p })) this.ws.send(f);
     else this.ws.send(JSON.stringify(this.channel.seal({ id, m, p })));
@@ -259,8 +259,8 @@ export class Conn {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         if (!this.pending.delete(id)) return;
-        reject(new Error(`PC tidak menjawab dalam ${ms / 1000} detik. Periksa koneksi lalu coba lagi.`));
-        this.wake(); // mungkin koneksinya yang macet
+        reject(new Error(`The PC didn’t answer within ${ms / 1000} seconds. Check the connection and try again.`));
+        this.wake(); // maybe the connection is stuck
       }, ms);
       this.pending.set(id, {
         resolve: (v) => (clearTimeout(t), resolve(v)),

@@ -1,18 +1,18 @@
-// Service worker: membuat PWA bisa di-install, membuka shell aplikasi saat offline,
-// dan menampilkan Web Push dari PC saat aplikasi ditutup. API & WebSocket tidak pernah di-cache.
-// CACHE diganti hash aset oleh scripts/build-web.mjs saat build. File ini disajikan di root (/sw.js, scope `/`)
-// walau aplikasinya di /agent/: registrasi & langganan push HP yang memasang PWA saat masih di `/` tetap berlaku.
+// Service worker: makes the PWA installable, opens the app shell offline, and shows Web Push from
+// the PC while the app is closed. The API & WebSocket are never cached.
+// CACHE is replaced with an asset hash by scripts/build-web.mjs. Served at the root (/sw.js, scope `/`)
+// even though the app lives in /agent/: registrations & push subscriptions from phones that installed the PWA at `/` keep working.
 const CACHE = 'snugcode-dev';
-// index.html tidak ikut: relay mengalihkannya (307) ke 'agent/'.
+// index.html is left out: the relay redirects it (307) to 'agent/'.
 const SHELL = ['agent/', 'agent/theme.js', 'agent/style.css', 'agent/app.js', 'agent/manifest.webmanifest', 'agent/icon.svg', 'agent/icon-192.png'];
-// cache: 'reload' = selalu dari jaringan, bukan dari HTTP cache browser yang mungkin masih versi lama.
+// cache: 'reload' = always from the network, not the browser HTTP cache that may hold an old version.
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin || /^\/(api|auth|ws)\//.test(url.pathname)) return;
-  // Stale-while-revalidate: aset dari cache langsung dipakai (PWA terbuka instan walau sinyal
-  // lemah), versi terbaru diunduh di latar belakang untuk pembukaan berikutnya.
+  // Stale-while-revalidate: cached assets are used right away (the PWA opens instantly even on a weak
+  // signal), and the latest version downloads in the background for next time.
   e.respondWith(
     caches.open(CACHE).then(async (c) => {
       const hit = await c.match(e.request, { ignoreSearch: url.pathname === '/agent/' });
@@ -38,11 +38,11 @@ self.addEventListener('push', (e) => {
   } catch {}
   e.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((wins) => {
-      // Aplikasi sedang dilihat: notifikasi in-app sudah cukup.
+      // The app is being viewed: the in-app notice is enough.
       if (wins.some((w) => w.visibilityState === 'visible')) return;
-      // Izin berisiko rendah/sedang bisa dijawab dari notifikasi (aplikasi terbuka & menjawab lewat kanal E2EE);
-      // risiko tinggi tidak membawa pid, jadi selalu dibuka dan diputuskan di aplikasi.
-      const actions = d.pid ? [{ action: 'allow', title: 'Izinkan' }, { action: 'deny', title: 'Tolak' }] : [];
+      // Low/medium-risk permissions can be answered from the notification (the app opens & answers over E2EE);
+      // high risk carries no pid, so it always opens and is decided in the app.
+      const actions = d.pid ? [{ action: 'allow', title: 'Allow' }, { action: 'deny', title: 'Deny' }] : [];
       return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'agent/icon-192.png', badge: 'agent/icon-192.png', actions, data: { sid: d.sid, mid: d.mid, pid: d.pid } });
     }),
   );
@@ -56,7 +56,7 @@ self.addEventListener('notificationclick', (e) => {
   if (mid) url.hash = `open=${mid}${sid ? ':' + sid : ''}` + (decision ? `&perm=${pid}:${decision}` : '');
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      // Jendela snugcode agent saja: tab landing page tidak menangani pesan ini.
+      // snugcode agent windows only: landing page tabs don't handle this message.
       const w = wins.find((x) => new URL(x.url).pathname.startsWith('/agent/'));
       if (!w) return self.clients.openWindow(url.href);
       w.postMessage({ open: { mid, sid }, perm: decision ? { pid, decision } : null });

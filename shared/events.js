@@ -1,54 +1,54 @@
-// Model event sesi agen yang dipakai bersama daemon (pembuat), PWA, dan TUI (penampil).
+// Agent session event model shared by the daemon (producer), the PWA, and the TUI (viewers).
 //
-// Daemon mengirim event ringkas, bukan pesan mentah Agent SDK. Ada tiga golongan:
-//   - riwayat  : punya `seq`, disimpan di sessions/<id>.jsonl, diputar ulang saat attach
-//   - sesaat   : punya `seq` tapi tidak disimpan (status, thinking, toolStart)
-//   - langsung : tanpa `seq`, hanya ke klien yang sedang terhubung (LIVE_KINDS)
+// The daemon sends compact events, not raw Agent SDK messages. There are three groups:
+//   - history  : has a `seq`, stored in sessions/<id>.jsonl, replayed on attach
+//   - transient: has a `seq` but isn't stored (status, thinking, toolStart)
+//   - live     : no `seq`, only sent to currently connected clients (LIVE_KINDS)
 
 /**
  * @typedef {'todo' | 'doing' | 'done'} TodoState
  * @typedef {{ st: TodoState, t: string }} TodoItem
  *
  * @typedef {object} AgentEvent
- * @property {string} k    jenis event: user | text | thinking | toolStart | tool | result | perm | permAnswer
+ * @property {string} k    event kind: user | text | thinking | toolStart | tool | result | perm | permAnswer
  *                         | retry | done | sh | out | shDone | note | error | status | cp | mode | proc | procOut
  *                         | preview | shot
- * @property {number} [seq] nomor urut per sesi (tidak ada pada event langsung)
- * @property {number} [ts]  waktu dibuat (ms)
- * @property {string} [d]   teks (user/text/out/note/error/sh/result)
- * @property {string} [s]   ringkasan input tool, atau status sesi ('running' | 'idle') untuk k='status'
- * @property {string} [name] nama tool (tanpa prefiks mcp__snugcode__) / nama proses
+ * @property {number} [seq] per-session sequence number (absent on live events)
+ * @property {number} [ts]  creation time (ms)
+ * @property {string} [d]   text (user/text/out/note/error/sh/result)
+ * @property {string} [s]   tool input summary, or the session status ('running' | 'idle') for k='status'
+ * @property {string} [name] tool name (without the mcp__snugcode__ prefix) / process name
  * @property {string} [id]  id tool_use (tool/result)
- * @property {boolean} [ok] hasil tool / prompt berhasil
- * @property {TodoItem[]} [todos] daftar rencana (k='tool', name='TodoWrite'); daemon lama hanya mengirim `s`
- * @property {number} [words] jumlah kata thinking
- * @property {number} [turns] jumlah langkah (k='done')
- * @property {number} [ms]  durasi (k='done')
- * @property {{ in: number, out: number, cr?: number, cw?: number }} [usage] token (k='done'); `in` termasuk cache,
- *                         cr = dibaca dari prompt cache, cw = ditulis ke cache (daemon lama tidak mengirimnya)
- * @property {number} [ctx]  isi konteks dalam persen (k='done')
- * @property {number} [cost] biaya USD giliran ini (k='done')
- * @property {number} [spent] total biaya USD sesi sejauh ini (k='done')
- * @property {string} [err]  alasan berhenti (k='done')
- * @property {*} [x]     detail tambahan (mis. cuplikan diff Edit/Write)
+ * @property {boolean} [ok] tool / prompt succeeded
+ * @property {TodoItem[]} [todos] plan list (k='tool', name='TodoWrite'); old daemons only send `s`
+ * @property {number} [words] thinking word count
+ * @property {number} [turns] number of steps (k='done')
+ * @property {number} [ms]  duration (k='done')
+ * @property {{ in: number, out: number, cr?: number, cw?: number }} [usage] token (k='done'); `in` includes cache,
+ *                         cr = read from the prompt cache, cw = written to the cache (old daemons don't send it)
+ * @property {number} [ctx]  context usage in percent (k='done')
+ * @property {number} [cost] USD cost of this turn (k='done')
+ * @property {number} [spent] total USD cost of the session so far (k='done')
+ * @property {string} [err]  stop reason (k='done')
+ * @property {*} [x]     extra detail (e.g. an Edit/Write diff snippet)
  */
 
-// Event yang tidak punya seq dan tidak pernah disimpan di riwayat.
+// Events with no seq that are never stored in history.
 export const LIVE_KINDS = new Set(['perm', 'mode', 'proc', 'procOut', 'preview', 'shot']);
 
-// ---------- rencana (TodoWrite) ----------
+// ---------- plan (TodoWrite) ----------
 export const TODO_GLYPH = { done: '☑', doing: '◐', todo: '☐' };
 const GLYPH_STATE = { '☑': 'done', '◐': 'doing', '☐': 'todo' };
 
-/** Dari input TodoWrite Agent SDK (`{ content, status }[]`). @returns {TodoItem[]} */
+/** From the Agent SDK's TodoWrite input (`{ content, status }[]`). @returns {TodoItem[]} */
 export function todosFromInput(todos) {
   return (Array.isArray(todos) ? todos : []).map((t) => ({ st: t?.status === 'completed' ? 'done' : t?.status === 'in_progress' ? 'doing' : 'todo', t: String(t?.content ?? '') }));
 }
 
-/** Teks ringkas berglyph (dipakai sebagai `s`, juga untuk klien lama). @param {TodoItem[]} items */
+/** Compact glyph text (used as `s`, also for old clients). @param {TodoItem[]} items */
 export const todoText = (items) => items.map((i) => `${TODO_GLYPH[i.st]} ${i.t}`).join('\n');
 
-/** Daftar rencana dari event tool TodoWrite: field `todos` (daemon baru) atau parse `s` (daemon lama). @param {AgentEvent} e @returns {TodoItem[]} */
+/** Plan list from a TodoWrite tool event: the `todos` field (new daemons) or parsing `s` (old daemons). @param {AgentEvent} e @returns {TodoItem[]} */
 export function todoItems(e) {
   if (Array.isArray(e?.todos)) return e.todos;
   return String(e?.s || '')
@@ -57,33 +57,33 @@ export function todoItems(e) {
     .map((l) => ({ st: GLYPH_STATE[l[0]] || 'todo', t: GLYPH_STATE[l[0]] ? l.slice(2) : l }));
 }
 
-// ---------- aktivitas ("sedang apa") ----------
+// ---------- activity ("what it's doing") ----------
 export const TOOL_ACTIVITY = {
-  Bash: 'Menjalankan',
-  dev_start: 'Menyalakan',
-  dev_stop: 'Menghentikan',
-  dev_logs: 'Membaca log',
-  dev_list: 'Melihat proses',
-  preview_screenshot: 'Melihat halaman',
-  Read: 'Membaca',
-  NotebookRead: 'Membaca',
-  Edit: 'Mengedit',
-  MultiEdit: 'Mengedit',
-  NotebookEdit: 'Mengedit',
-  Write: 'Menulis',
-  Grep: 'Mencari',
-  Glob: 'Mencari',
-  LS: 'Melihat',
-  WebFetch: 'Membuka',
-  WebSearch: 'Mencari di web',
-  Task: 'Subagen',
-  Agent: 'Subagen',
-  TodoWrite: 'Merencanakan',
-  AskUserQuestion: 'Bertanya',
-  ExitPlanMode: 'Menyusun rencana',
+  Bash: 'Running',
+  dev_start: 'Starting',
+  dev_stop: 'Stopping',
+  dev_logs: 'Reading logs',
+  dev_list: 'Listing processes',
+  preview_screenshot: 'Viewing page',
+  Read: 'Reading',
+  NotebookRead: 'Reading',
+  Edit: 'Editing',
+  MultiEdit: 'Editing',
+  NotebookEdit: 'Editing',
+  Write: 'Writing',
+  Grep: 'Searching',
+  Glob: 'Searching',
+  LS: 'Listing',
+  WebFetch: 'Opening',
+  WebSearch: 'Searching the web',
+  Task: 'Subagent',
+  Agent: 'Subagent',
+  TodoWrite: 'Planning',
+  AskUserQuestion: 'Asking',
+  ExitPlanMode: 'Drafting a plan',
 };
 
-/** Kalimat aktivitas untuk event tool, mis. "Menjalankan npm test" atau langkah rencana yang sedang dikerjakan. @param {AgentEvent} e */
+/** Activity sentence for a tool event, e.g. "Running npm test" or the plan step in progress. @param {AgentEvent} e */
 export function toolActivity(e) {
   if (e.name === 'TodoWrite') {
     const doing = todoItems(e).find((i) => i.st === 'doing');
@@ -93,23 +93,23 @@ export function toolActivity(e) {
   return `${TOOL_ACTIVITY[e.name] || e.name} ${first}`.trim();
 }
 
-// ---------- angka ----------
+// ---------- numbers ----------
 export const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 export const fmtDuration = (ms) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? (ms < 10_000 ? (ms / 1000).toFixed(1) : s) + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
 };
 
-/** Potongan ringkasan prompt selesai: ["3 langkah", "4.2s", "12k→800 tok", "konteks 40%", "$0.012"]. @param {AgentEvent} e */
+/** Pieces of the prompt-finished summary: ["3 steps", "4.2s", "12k→800 tok", "context 40%", "$0.012"]. @param {AgentEvent} e */
 export function doneParts(e) {
-  const out = [`${e.turns ?? 0} langkah`, fmtDuration(e.ms || 0)];
+  const out = [`${e.turns ?? 0} ${e.turns === 1 ? 'step' : 'steps'}`, fmtDuration(e.ms || 0)];
   if (e.usage) out.push(`${fmtTok(e.usage.in)}→${fmtTok(e.usage.out)} tok`);
-  // Porsi input yang dibaca dari prompt cache (murah & cepat). 0% terus-menerus = router tidak meng-cache.
+  // Share of input read from the prompt cache (cheap & fast). A constant 0% = the router doesn't cache.
   const pct = cachePct(e.usage);
   if (pct != null) out.push(`cache ${pct}%`);
-  if (e.ctx != null) out.push(`konteks ${e.ctx}%`);
+  if (e.ctx != null) out.push(`context ${e.ctx}%`);
   if (e.cost) out.push(`$${e.cost.toFixed(e.cost < 1 ? 3 : 2)}`);
-  if (e.spent && e.spent !== e.cost) out.push(`sesi $${e.spent.toFixed(e.spent < 1 ? 3 : 2)}`);
+  if (e.spent && e.spent !== e.cost) out.push(`session $${e.spent.toFixed(e.spent < 1 ? 3 : 2)}`);
   return out;
 }
 
@@ -119,10 +119,10 @@ export function cachePct(u) {
   return Math.round((u.cr / u.in) * 100);
 }
 
-// Potongan teks streaming (satu event per ~80ms) digabung sebelum riwayat dikirim saat attach:
-// ribuan event kecil jadi beberapa event utuh (payload & render di HP jauh lebih ringan).
-// Aman untuk penyaring seq: event gabungan memakai seq potongan terakhir, dan semua potongannya
-// berada di rentang yang sama-sama baru bagi klien.
+// Streaming text chunks (one event per ~80ms) are merged before history is sent on attach:
+// thousands of small events become a few whole ones (much lighter payload & rendering on the phone).
+// Safe for the seq filter: a merged event uses the seq of its last chunk, and all its chunks
+// are in a range that's equally new to the client.
 /** @param {AgentEvent[]} events @returns {AgentEvent[]} */
 export function mergeText(events) {
   const out = [];
@@ -134,14 +134,14 @@ export function mergeText(events) {
   return out;
 }
 
-// ---------- urutan event ----------
-// Event dengan seq yang sudah pernah diterima (mis. dari attach setelah reconnect, atau frame
-// yang terkirim dua kali) diabaikan. Event langsung (tanpa seq) selalu diterima.
+// ---------- event order ----------
+// Events with a seq already received (e.g. from an attach after reconnect, or a frame
+// sent twice) are ignored. Live events (no seq) are always accepted.
 export class EventCursor {
   constructor(lastSeq = 0) {
     this.lastSeq = lastSeq;
   }
-  /** @param {AgentEvent} e @returns {boolean} true bila event baru */
+  /** @param {AgentEvent} e @returns {boolean} true if the event is new */
   accept(e) {
     if (!e.seq) return true;
     if (e.seq <= this.lastSeq) return false;

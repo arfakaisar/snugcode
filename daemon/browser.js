@@ -1,5 +1,5 @@
-// Screenshot + log konsol halaman lewat Chrome/Edge headless (Chrome DevTools Protocol),
-// tanpa Playwright: cukup browser Chromium yang sudah terpasang di PC dan WebSocket bawaan Node.
+// Page screenshot + console log via headless Chrome/Edge (Chrome DevTools Protocol),
+// without Playwright: just a Chromium browser already installed on the PC and Node's built-in WebSocket.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,12 +23,12 @@ export function findBrowser(cfg = {}) {
   return (CANDIDATES[process.platform] || []).find((p) => p && fs.existsSync(p)) || null;
 }
 
-// Klien CDP minimal: satu WebSocket, perintah berbasis id, event lewat callback.
+// Minimal CDP client: one WebSocket, id-based commands, events via callback.
 async function connectCdp(url) {
   const ws = new WebSocket(url);
   await new Promise((res, rej) => {
     ws.onopen = res;
-    ws.onerror = () => rej(new Error('Gagal tersambung ke browser headless'));
+    ws.onerror = () => rej(new Error('Failed to connect to the headless browser'));
   });
   let id = 0;
   const pending = new Map();
@@ -37,7 +37,7 @@ async function connectCdp(url) {
     closed: false,
     send: (method, params = {}, sessionId) =>
       new Promise((resolve, reject) => {
-        if (cdp.closed) return reject(new Error('Browser headless tertutup'));
+        if (cdp.closed) return reject(new Error('Headless browser closed'));
         pending.set(++id, { resolve, reject });
         ws.send(JSON.stringify({ id, method, params, sessionId }));
       }),
@@ -54,7 +54,7 @@ async function connectCdp(url) {
   };
   ws.onclose = () => {
     cdp.closed = true;
-    for (const { reject } of pending.values()) reject(new Error('Browser headless tertutup'));
+    for (const { reject } of pending.values()) reject(new Error('Headless browser closed'));
     pending.clear();
   };
   return cdp;
@@ -69,13 +69,13 @@ async function waitFile(file, ms) {
       if (wsPath) return `ws://127.0.0.1:${port}${wsPath.trim()}`;
     } catch {}
   }
-  throw new Error('Browser headless tidak merespons');
+  throw new Error('The headless browser is not responding');
 }
 
-// Satu browser headless dipakai ulang antar screenshot (agen biasanya mengambil beberapa
-// berturut-turut saat memverifikasi UI): start Chrome 1–2 detik hanya dibayar sekali. Tiap
-// screenshot memakai browser context baru (seperti jendela incognito), jadi cookie/storage
-// tidak terbawa. Browser ditutup setelah menganggur IDLE_MS.
+// One headless browser is reused across screenshots (the agent usually takes several
+// in a row when verifying UI): Chrome's 1–2 second startup is paid only once. Each
+// screenshot uses a new browser context (like an incognito window), so cookies/storage
+// don't carry over. The browser is closed after IDLE_MS of inactivity.
 const IDLE_MS = 3 * 60 * 1000;
 let shared = null; // Promise<{ proc, cdp, profile }>
 let idleTimer = null;
@@ -84,13 +84,13 @@ let inUse = 0;
 function launch(exe) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'snugcode-cdp-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-gpu', '--hide-scrollbars', '--mute-audio'];
-  // Chrome menolak berjalan sebagai root tanpa --no-sandbox (Linux server/WSL/container).
-  // Container (runner cloud, Docker) umumnya juga tanpa user namespace untuk sandbox Chrome; /dev/shm-nya kecil.
+  // Chrome refuses to run as root without --no-sandbox (Linux servers/WSL/containers).
+  // Containers (cloud runner, Docker) usually also lack user namespaces for Chrome's sandbox; their /dev/shm is small.
   if (process.getuid?.() === 0 || process.env.SNUGCODE_SUPERVISED === '1') args.push('--no-sandbox', '--disable-dev-shm-usage');
   const proc = spawn(exe, [...args, 'about:blank'], { stdio: 'ignore', windowsHide: true });
   const kill = () => {
     proc.kill();
-    // Profil sementara dipegang browser beberapa saat setelah ditutup (Windows).
+    // The temporary profile is held by the browser for a while after closing (Windows).
     setTimeout(() => fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }, () => {}), 1500).unref?.();
   };
   const p = (async () => {
@@ -146,14 +146,14 @@ export async function closeBrowser() {
   } catch {}
 }
 
-// Buka `url`, tunggu load (+ jeda agar framework selesai render), lalu ambil screenshot JPEG
-// dan log konsol/error. Request yang tidak pernah selesai (HMR, SSE) tidak membuatnya macet.
-// `scale`: device pixel ratio. 2 = tajam di layar HP; 1 untuk agen (gambar 4× lebih sedikit piksel,
-// jadi jauh lebih sedikit token gambar yang menetap di konteks model).
+// Open `url`, wait for load (+ a pause so frameworks finish rendering), then take a JPEG screenshot
+// and the console/error log. Requests that never finish (HMR, SSE) don't make it hang.
+// `scale`: device pixel ratio. 2 = sharp on phone screens; 1 for the agent (4× fewer pixels,
+// so far fewer image tokens staying in the model's context).
 /** @param {string} url @param {{ width?: number, height?: number, scale?: number, wait?: number, timeout?: number, fullPage?: boolean, cfg?: { browserExecutable?: string } }} [opts] */
 export async function capture(url, { width = 390, height = 844, scale = 2, wait = 1500, timeout = 20000, fullPage = false, cfg } = {}) {
   const exe = findBrowser(cfg);
-  if (!exe) throw new Error('Chrome/Edge/Chromium tidak ditemukan di PC. Pasang salah satunya, atau isi "browserExecutable" di ~/.snugcode/config.json.');
+  if (!exe) throw new Error('Chrome/Edge/Chromium not found on this PC. Install one, or set "browserExecutable" in ~/.snugcode/config.json.');
   const { cdp } = await acquire(exe);
   const logs = [];
   let contextId;
@@ -179,7 +179,7 @@ export async function capture(url, { width = 390, height = 844, scale = 2, wait 
     await Promise.all([S('Page.enable'), S('Runtime.enable'), S('Log.enable')]);
     await S('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: width < 768 });
     const nav = await S('Page.navigate', { url });
-    if (nav.errorText) throw new Error(`Gagal membuka ${url}: ${nav.errorText}`);
+    if (nav.errorText) throw new Error(`Failed to open ${url}: ${nav.errorText}`);
     await Promise.race([onLoad, sleep(timeout)]);
     await sleep(wait);
     const shot = await S('Page.captureScreenshot', { format: 'jpeg', quality: 70, captureBeyondViewport: fullPage });

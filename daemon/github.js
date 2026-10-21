@@ -1,4 +1,4 @@
-// GitHub: login (device flow / kredensial git yang ada), API repo, dan git.
+// GitHub: login (device flow / existing git credentials), repo API, and git.
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { WORKSPACES } from './config.js';
 import { safeRm } from './cleaner.js';
 
 const API = 'https://api.github.com';
-export const TOKEN_INVALID = 'Login GitHub di PC ini sudah tidak berlaku (token dicabut). Login ulang: tombol "Login GitHub" di aplikasi HP, /login di terminal, atau `snugcode login`.';
+export const TOKEN_INVALID = 'The GitHub login on this PC is no longer valid (token revoked). Sign in again: the "Sign in to GitHub" button in the phone app, /login in the terminal, or `snugcode login`.';
 
 export async function gh(token, method, url, body) {
   const res = await fetch(url.startsWith('http') ? url : API + url, {
@@ -28,11 +28,11 @@ export async function gh(token, method, url, body) {
 const postJson = (url, body) =>
   fetch(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
 
-// Device flow dipecah dua: mulai (dapat kode untuk pengguna) dan tunggu (token).
-// Token OAuth App tidak kedaluwarsa; hanya berhenti bila dicabut.
+// The device flow is split in two: start (get a code for the user) and wait (token).
+// OAuth App tokens don't expire; they only stop working when revoked.
 export async function deviceFlowStart(clientId) {
   const start = await postJson('https://github.com/login/device/code', { client_id: clientId, scope: 'repo read:user workflow' });
-  if (!start.device_code) throw new Error(start.error_description || 'Device flow gagal dimulai');
+  if (!start.device_code) throw new Error(start.error_description || 'Device flow failed to start');
   return start;
 }
 
@@ -42,7 +42,7 @@ export async function deviceFlowWait(clientId, start, { signal } = {}) {
   const deadline = Date.now() + (start.expires_in || 900) * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, interval));
-    if (signal?.aborted) throw new Error('dibatalkan');
+    if (signal?.aborted) throw new Error('cancelled');
     const t = await postJson('https://github.com/login/oauth/access_token', {
       client_id: clientId,
       device_code: start.device_code,
@@ -53,7 +53,7 @@ export async function deviceFlowWait(clientId, start, { signal } = {}) {
     else if (t.error === 'expired_token') break;
     else if (t.error !== 'authorization_pending') throw new Error(t.error_description || t.error);
   }
-  throw new Error('Kode login kedaluwarsa. Mulai login lagi.');
+  throw new Error('The login code expired. Start signing in again.');
 }
 
 export async function deviceFlowLogin(clientId, onCode) {
@@ -62,7 +62,7 @@ export async function deviceFlowLogin(clientId, onCode) {
   return deviceFlowWait(clientId, start);
 }
 
-// Ambil token GitHub dari credential helper git yang sudah login (mis. Git Credential Manager).
+// Get a GitHub token from git's credential helper if already signed in (e.g. Git Credential Manager).
 export function gitCredentialToken() {
   return new Promise((resolve) => {
     const p = spawn('git', ['credential', 'fill'], { env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
@@ -77,7 +77,7 @@ export function gitCredentialToken() {
   });
 }
 
-// `login` (dari config) menghemat satu panggilan /user; tiga request lainnya berjalan paralel.
+// `login` (from config) saves one /user call; the other three requests run in parallel.
 export async function listRepos(token, q, login) {
   if (!token) return [];
   if (q) {
@@ -97,11 +97,11 @@ export async function listRepos(token, q, login) {
 const slim = (r) => ({ full: r.full_name, private: r.private, branch: r.default_branch, pushed: r.pushed_at, desc: r.description });
 
 // ---------- git ----------
-// Token disuntikkan lewat env hanya untuk perintah git milik daemon,
-// tidak pernah ditulis ke .git/config dan tidak terlihat oleh agen.
+// The token is injected via env only for the daemon's own git commands,
+// never written to .git/config and never visible to the agent.
 export function gitEnv(token) {
-  // Jangan pernah memunculkan dialog login (Git Credential Manager) di desktop:
-  // daemon sering dipakai dari jauh dan dialog itu akan menggantung proses.
+  // Never pop up a login dialog (Git Credential Manager) on the desktop:
+  // the daemon is often used remotely and that dialog would hang the process.
   /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
   if (token) {
@@ -125,14 +125,14 @@ export function git(cwd, args, token, opts = {}) {
 
 const safe = (s) => s.replace(/[^A-Za-z0-9._-]/g, '_');
 
-// Nama folder clone di ~/.snugcode/workspaces untuk "owner/nama" (dipakai juga oleh pembersih).
+// Clone folder name in ~/.snugcode/workspaces for "owner/name" (also used by the cleaner).
 export const repoDirName = (full) => {
   const [owner = '', name = ''] = String(full).split('/');
   return safe(owner) + '__' + safe(name);
 };
 
-// Penanda kapan clone dasar terakhir dipakai: clone yang tidak dipakai sesi mana pun tetap
-// disimpan beberapa hari (sesi baru tidak perlu clone ulang), baru kemudian dibersihkan.
+// Marker for when a base clone was last used: clones not used by any session are still
+// kept for a few days (new sessions don't need a fresh clone), then cleaned up.
 export const LAST_USED = '.last-used';
 export function touchRepo(repoDir) {
   try {
@@ -143,8 +143,8 @@ export function touchRepo(repoDir) {
   } catch {}
 }
 
-// Clone dasar per repo (tanpa checkout) + git worktree per sesi,
-// supaya beberapa sesi di repo yang sama tidak saling bertabrakan.
+// One base clone per repo (no checkout) + a git worktree per session,
+// so several sessions on the same repo don't collide.
 export async function prepareWorktree(token, full, { base, branch, sessionId }) {
   const repoDir = path.join(WORKSPACES, repoDirName(full));
   const baseDir = path.join(repoDir, '_base');
@@ -152,9 +152,9 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
     fs.mkdirSync(repoDir, { recursive: true });
     await git(repoDir, ['clone', '--no-checkout', '--filter=blob:none', `https://github.com/${full}.git`, '_base'], token);
   }
-  // Clone tetap "memegang" branch default (mis. main) walau tanpa checkout,
-  // sehingga branch itu tidak bisa dibuka di worktree sesi. Lepaskan HEAD-nya
-  // (detached) tanpa menyentuh file. Aman diulang untuk clone lama.
+  // The clone still "holds" the default branch (e.g. main) even without a checkout,
+  // so that branch couldn't be opened in a session worktree. Detach its HEAD
+  // without touching files. Safe to repeat for old clones.
   if (await git(baseDir, ['symbolic-ref', '-q', 'HEAD']).then(() => true, () => false)) {
     const head = (await git(baseDir, ['rev-parse', 'HEAD'])).trim();
     await git(baseDir, ['update-ref', '--no-deref', 'HEAD', head]);
@@ -170,7 +170,7 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
   await Promise.all([git(baseDir, ['worktree', 'prune']).catch(() => {}), git(baseDir, ['fetch', '--prune', 'origin'], token)]);
   if (!base) base = (await git(baseDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], token).catch(() => 'origin/main')).trim().replace(/^origin\//, '');
 
-  // Branch yang sedang dibuka sesi lain tidak bisa dibuka dua kali.
+  // A branch open in another session can't be opened twice.
   const list = await git(baseDir, ['worktree', 'list', '--porcelain']);
   const holder = list
     .split(/\n\n+/)
@@ -178,19 +178,19 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
     .find((w) => w.ref === 'refs/heads/' + branch);
   if (holder) {
     const sid = path.basename(holder.dir || '').replace(/^s-/, '');
-    throw new Error(`Branch "${branch}" sedang dibuka di sesi lain (${sid}). Buka sesi itu, atau hapus sesinya dulu.`);
+    throw new Error(`Branch "${branch}" is open in another session (${sid}). Open that session, or delete it first.`);
   }
 
   const wt = path.join(repoDir, 's-' + sessionId);
-  // Ref remote baru saja disegarkan oleh `fetch --prune`: cukup cek lokal, tanpa ls-remote ke jaringan.
+  // Remote refs were just refreshed by `fetch --prune`: a local check is enough, no ls-remote over the network.
   const hasRef = (ref) => git(baseDir, ['show-ref', '--verify', '--quiet', ref]).then(() => true, () => false);
   const [hasRemote, hasLocal] = await Promise.all([hasRef('refs/remotes/origin/' + branch), hasRef('refs/heads/' + branch)]);
   if (hasLocal) {
-    // Branch lokal (mis. dari sesi lama yang belum di-push): jangan ditimpa.
+    // Local branch (e.g. from an old unpushed session): don't overwrite it.
     await git(baseDir, ['worktree', 'add', wt, branch], token);
     if (hasRemote) {
       await git(wt, ['branch', '--set-upstream-to=origin/' + branch]);
-      await git(wt, ['merge', '--ff-only', 'origin/' + branch]).catch(() => {}); // bercabang → biarkan, terlihat di status git
+      await git(wt, ['merge', '--ff-only', 'origin/' + branch]).catch(() => {}); // diverged → leave it, visible in git status
     }
   } else if (hasRemote) {
     await git(baseDir, ['worktree', 'add', '--track', '-b', branch, wt, 'origin/' + branch], token);
@@ -200,20 +200,20 @@ export async function prepareWorktree(token, full, { base, branch, sessionId }) 
   return { cwd: wt, base, branch };
 }
 
-// Folder repo lokal yang dibuka langsung dari terminal (seperti `claude`):
-// tanpa clone/worktree, agen bekerja di folder itu sendiri.
+// A local repo folder opened straight from the terminal (like `claude`):
+// no clone/worktree, the agent works in that folder itself.
 export async function inspectLocalRepo(dir) {
   const top = (await git(dir, ['rev-parse', '--show-toplevel']).catch(() => '')).trim();
-  if (!top) throw new Error('Folder ini bukan repo git: ' + dir);
+  if (!top) throw new Error('This folder is not a git repo: ' + dir);
   const url = (await git(top, ['remote', 'get-url', 'origin']).catch(() => '')).trim();
   const m = url.match(/github\.com[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/);
-  const repo = m ? `${m[1]}/${m[2]}` : 'lokal/' + path.basename(top);
+  const repo = m ? `${m[1]}/${m[2]}` : 'local/' + path.basename(top);
   const branch = (await git(top, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => 'HEAD')).trim();
   const base = (await git(top, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim().replace(/^origin\//, '') || branch;
   return { cwd: path.resolve(top), repo, branch, base, github: !!m };
 }
 
-// Branch aktif tanpa menjalankan git (dibaca dari HEAD; worktree punya file .git).
+// Current branch without running git (read from HEAD; worktrees have a .git file).
 export function currentBranch(cwd) {
   try {
     let gitDir = path.join(cwd, '.git');
@@ -237,8 +237,8 @@ export async function removeWorktree(cwd) {
   safeRm(cwd);
 }
 
-// Satu `git status --porcelain=v2 --branch` memberi branch, upstream, ahead/behind, dan daftar
-// file sekaligus (dulu 4 proses berurutan); log diambil paralel.
+// One `git status --porcelain=v2 --branch` gives the branch, upstream, ahead/behind, and the file
+// list at once (formerly 4 sequential processes); the log is fetched in parallel.
 export function parseStatusV2(out) {
   let branch = 'HEAD';
   let ahead = null;
@@ -275,7 +275,7 @@ export async function gitStatus(cwd) {
   ]);
   let { ahead, behind } = st;
   if (!st.upstream || ahead === null) {
-    // Belum ada upstream: hitung commit yang belum ada di remote mana pun.
+    // No upstream yet: count commits not on any remote.
     ahead = +(await git(cwd, ['rev-list', '--count', 'HEAD', '--not', '--remotes']).catch(() => '0')).trim();
     behind = null;
   }
@@ -283,7 +283,7 @@ export async function gitStatus(cwd) {
 }
 
 export async function gitDiff(cwd, { limit = 400 * 1024 } = {}) {
-  // intent-to-add agar file baru ikut muncul di diff.
+  // intent-to-add so new files show up in the diff.
   await git(cwd, ['add', '-A', '-N']).catch(() => {});
   let diff = await git(cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff']);
   const LIMIT = limit;

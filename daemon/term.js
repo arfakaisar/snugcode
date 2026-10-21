@@ -1,8 +1,8 @@
-// Teks terminal untuk TUI: warna (truecolor/256), lebar tampilan sadar ANSI & karakter lebar,
-// pembungkus baris, dan markdown ke ANSI. Tanpa state, terpisah dari logika TUI.
+// Terminal text for the TUI: colors (truecolor/256), ANSI- and wide-char-aware display width,
+// line wrapping, and markdown to ANSI. Stateless, separate from the TUI logic.
 const out = process.stdout;
 
-// ---------- warna ----------
+// ---------- colors ----------
 export const NO_COLOR = !!process.env.NO_COLOR;
 export const TRUECOLOR = /truecolor|24bit/i.test(process.env.COLORTERM || '') || !!process.env.WT_SESSION || process.env.TERM_PROGRAM === 'vscode' || process.platform === 'win32';
 export const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -30,7 +30,7 @@ export function gradient(text, from = PAL.green, to = PAL.cyan) {
   }).join('') + '\x1b[39m';
 }
 
-// ---------- lebar tampilan & pembungkus baris (sadar ANSI) ----------
+// ---------- display width & line wrapping (ANSI-aware) ----------
 export const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
 export const strip = (s) => String(s).replace(ANSI_RE, '');
 export const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{1F300}-\u{1FAFF}]/u;
@@ -39,7 +39,7 @@ export const width = (s) => [...strip(s)].reduce((n, ch) => n + cw(ch), 0);
 export const cols = () => Math.max(40, out.columns || 80);
 export const rowsN = () => Math.max(12, out.rows || 24);
 
-// Potong per baris tampilan; warna dibuka ulang di baris lanjutan.
+// Cut per display line; colors are reopened on continuation lines.
 export function hardWrap(line, w) {
   const res = [];
   let cur = '';
@@ -65,7 +65,7 @@ export function hardWrap(line, w) {
   res.push(cur);
   return res;
 }
-// Bungkus per kata dengan indentasi gantung (untuk prosa).
+// Word wrap with a hanging indent (for prose).
 export function wrapWords(text, w, first = '', rest = first) {
   const lines = [];
   for (const para of String(text).split('\n')) {

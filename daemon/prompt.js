@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Tambahan system prompt snugcode, ditanam lewat
+// snugcode's system prompt addition, injected via
 // { type: 'preset', preset: 'claude_code', append: SNUGCODE_SYSTEM_PROMPT }.
-// Dikirim ulang di SETIAP request model (setiap langkah agen), jadi hanya berisi aturan yang
-// mengubah perilaku agen. Penjelasan arsitektur snugcode sengaja tidak dimasukkan: tidak
-// relevan untuk mengerjakan repo pengguna dan hanya menambah token.
+// Resent with EVERY model request (every agent step), so it only contains rules that
+// change the agent's behavior. snugcode's architecture is deliberately left out: it's
+// irrelevant to working on the user's repo and only adds tokens.
 
 export const SNUGCODE_SYSTEM_PROMPT = `
 # snugcode
@@ -57,9 +57,9 @@ export function snugcodePrompt({ computer = false, project = '' } = {}) {
   return (computer ? SNUGCODE_COMPUTER_PROMPT : SNUGCODE_SYSTEM_PROMPT) + project;
 }
 
-// Instruksi proyek (CLAUDE.md) dimuat sendiri: setelan proyek Claude Code (.claude/settings.json) tidak
-// dimuat sama sekali karena bisa berisi hook, aturan izin, env, dan apiKeyHelper yang lolos dari
-// kebijakan snugcode (repo yang diklon bisa milik siapa saja). Dibaca saat proses agen dimulai.
+// Project instructions (CLAUDE.md) are loaded by us: Claude Code project settings (.claude/settings.json) are
+// never loaded because they can contain hooks, permission rules, env, and apiKeyHelper that bypass
+// snugcode's policy (a cloned repo can belong to anyone). Read when the agent process starts.
 const PROJECT_FILES = ['CLAUDE.md', path.join('.claude', 'CLAUDE.md')];
 const PROJECT_MAX = 40 * 1024;
 export function projectInstructions(cwd) {
@@ -73,8 +73,8 @@ export function projectInstructions(cwd) {
   return parts.length ? '\n\n# Project instructions\n' + parts.join('\n\n') : '';
 }
 
-// Engine Codex (developer instructions): aturan yang sama, disesuaikan dengan tool Codex
-// (shell, apply_patch, request_user_input) dan tool MCP snugcode (dev_start, preview_screenshot, …).
+// Codex engine (developer instructions): the same rules, adapted to Codex tools
+// (shell, apply_patch, request_user_input) and snugcode's MCP tools (dev_start, preview_screenshot, …).
 export function codexPrompt({ computer = false } = {}) {
   return `
 # snugcode${computer ? ' (Computer Mode)' : ''}
@@ -92,9 +92,9 @@ ${computer ? '' : '\n## Git\n- Never run `git push` or `gh pr create`: the user 
 `.trim();
 }
 
-// Engine Gemini CLI: aturan yang sama sebagai GEMINI.md global (folder GEMINI_CLI_HOME milik snugcode),
-// disesuaikan dengan tool Gemini CLI (run_shell_command, read_file, replace, grep_search). Tanpa tool MCP
-// snugcode: Gemini CLI tidak menjalankan server MCP di folder yang tidak tepercaya (lihat gemini.js).
+// Gemini CLI engine: the same rules as a global GEMINI.md (snugcode's own GEMINI_CLI_HOME folder),
+// adapted to Gemini CLI tools (run_shell_command, read_file, replace, grep_search). No snugcode MCP
+// tools: Gemini CLI doesn't run MCP servers in untrusted folders (see gemini.js).
 export function geminiPrompt({ computer = false } = {}) {
   return `
 # snugcode${computer ? ' (Computer Mode)' : ''}

@@ -1,5 +1,5 @@
-// Tombol modifier terminal HP (tanpa DOM, diuji di test/features.test.js).
-// Ctrl+huruf → karakter kontrol (Ctrl+C = \x03); Ctrl+[ = Esc, Ctrl+spasi = NUL, Ctrl+? = DEL.
+// Phone terminal modifier keys (no DOM, tested in test/features.test.js).
+// Ctrl+letter → control character (Ctrl+C = \x03); Ctrl+[ = Esc, Ctrl+space = NUL, Ctrl+? = DEL.
 export function ctrlKey(d) {
   if (d.length !== 1) return d;
   const c = d.toUpperCase().charCodeAt(0);
@@ -9,10 +9,10 @@ export function ctrlKey(d) {
   return d;
 }
 
-// Keyboard HP (Gboard, Samsung, SwiftKey, suara, ketik geser) mengubah isi textarea lewat komposisi
-// IME & koreksi otomatis, bukan per tombol. Selisih isi sebelum → sesudah diubah jadi input terminal:
-// DEL untuk setiap karakter yang hilang dari ujung, lalu karakter barunya (baris baru = Enter).
-// Dihitung per code point: emoji/karakter non-Latin dihapus shell dengan satu DEL.
+// Phone keyboards (Gboard, Samsung, SwiftKey, voice, swipe typing) change the textarea through IME
+// composition & autocorrect, not per key. The before → after diff becomes terminal input:
+// DEL for each character removed from the end, then the new characters (newline = Enter).
+// Counted per code point: emoji/non-Latin characters are erased by the shell with a single DEL.
 export function imeDelta(prev, next) {
   const a = [...prev];
   const b = [...next];
