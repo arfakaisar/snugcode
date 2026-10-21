@@ -98,7 +98,7 @@ if (exe) {
     const errors = [];
     page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
     page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push('console: ' + m.text()));
-    await page.goto(RELAY + '/');
+    await page.goto(RELAY + '/agent/');
     await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, ls);
     await page.reload();
     return { page, errors, shot: (n) => SHOTS && page.screenshot({ path: path.join(SHOTS, 'cloud-' + n + '.png') }) };

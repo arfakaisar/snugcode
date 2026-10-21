@@ -60,7 +60,7 @@ git checkout vX.Y.Z && npm ci && npm run build:web && jq -r .digest relay/public
 ```
 
 Digest yang berbeda berarti PWA yang disajikan bukan hasil build kode itu. Cek satu file langsung:
-`curl -s https://snugcode.dev/app.js | sha256sum` dibandingkan dengan `files["app.js"]`.
+`curl -s https://snugcode.dev/agent/app.js | sha256sum` dibandingkan dengan `files["agent/app.js"]`.
 
 ## Self-host relay
 

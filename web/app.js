@@ -36,7 +36,7 @@ async function offerMove() {
     const k = localStorage.key(i);
     if (k?.startsWith('pc.') && k !== 'pc.vapid') data[k] = localStorage.getItem(k);
   }
-  location.href = h.publicUrl + '/#import=' + encodeURIComponent(pack(data));
+  location.href = h.publicUrl + '/agent/#import=' + encodeURIComponent(pack(data));
 }
 
 // ---------- start ----------
@@ -59,7 +59,8 @@ function boot() {
   showMachines({ resume: true }).catch((e) => toast(e.message, true));
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Service worker di root (lihat web/sw.js), bukan di /agent/.
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
   // Versi baru aktif (service worker baru mengambil alih): muat ulang agar tampilan baru langsung
   // dipakai. Bila pengguna sedang mengetik, tawarkan lewat toast agar draf tidak hilang.
   const hadController = !!navigator.serviceWorker.controller;

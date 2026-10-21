@@ -40,7 +40,7 @@ const closeSheet = async () => {
 };
 
 // Halaman login tampil tanpa error, lalu masuk dengan token + perangkat yang sudah dipasangkan
-await page.goto(RELAY + '/');
+await page.goto(RELAY + '/agent/');
 await page.waitForSelector('text=Login dengan GitHub');
 await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);
 await page.reload();

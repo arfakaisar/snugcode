@@ -52,6 +52,11 @@ async function verifyToken(env, token) {
   }
 }
 
+// Tujuan setelah login user: landing page (`/`) atau snugcode agent (`/agent/`, bawaan). Hanya path dari daftar ini
+// agar link login tidak bisa dipakai mengalihkan token ke tempat lain (open redirect).
+const NEXT = ['/', '/agent/'];
+const nextPath = (v) => (NEXT.includes(v) ? v : '/agent/');
+
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
@@ -67,7 +72,7 @@ function page(title, body, status = 200) {
   );
 }
 
-// Aset PWA lewat env.ASSETS: security header ditambahkan (aset langsung dari worker alias memakai _headers).
+// Aset (landing page di `/`, snugcode agent di `/agent/`) lewat env.ASSETS: security header ditambahkan (aset langsung dari worker alias memakai _headers).
 async function asset(env, request) {
   const res = await env.ASSETS.fetch(request);
   const headers = new Headers(res.headers);
@@ -194,6 +199,7 @@ export default {
       const kind = k === 'machine' || k === 'gh' ? k : 'user';
       if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Mode dev', '<p>Runner Codespaces butuh OAuth App GitHub (GITHUB_CLIENT_ID).</p>');
       const pc = url.searchParams.get('pc') || '';
+      const next = nextPath(url.searchParams.get('next'));
       // Kode PC harus masih menunggu. Konfirmasi penautan ditampilkan SETELAH login GitHub (lihat linkPage):
       // konfirmasi sebelum login bisa dilewati cukup dengan menambahkan parameter ke link.
       if (kind === 'machine') {
@@ -201,31 +207,33 @@ export default {
         if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
       }
       if (devAuth && !env.GITHUB_CLIENT_ID) {
-        return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
+        return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input type="hidden" name="next" value="${esc(next)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
       }
       // Jenis 'state' terpisah: token state terlihat di URL dan tidak boleh lolos sebagai token user.
-      const state = await signToken(env, { kind: 'state', for: kind, pc, n: randomId(), exp: Date.now() + 10 * 60 * 1000 });
+      const state = await signToken(env, { kind: 'state', for: kind, pc, next, n: randomId(), exp: Date.now() + 10 * 60 * 1000 });
       const gh = new URL('https://github.com/login/oauth/authorize');
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', url.origin + '/auth/callback');
       gh.searchParams.set('state', state);
       gh.searchParams.set('scope', kind === 'gh' ? 'codespace' : '');
-      gh.searchParams.set('allow_signup', 'false');
+      // Tombol "Daftar" di landing page: orang tanpa akun GitHub bisa membuatnya di tengah alur login.
+      gh.searchParams.set('allow_signup', url.searchParams.get('signup') === '1' ? 'true' : 'false');
       return Response.redirect(gh.toString(), 302);
     }
 
     if (path === '/auth/callback' || (devAuth && path === '/auth/dev/login')) {
-      let kind, pc, user;
+      let kind, pc, next, user;
       try {
         if (path === '/auth/callback') {
           const st = await verifyToken(env, url.searchParams.get('state'));
           if (!st || st.kind !== 'state') return page('Login kedaluwarsa', '<p>Silakan ulangi dari awal.</p>');
-          ({ for: kind, pc } = st);
+          ({ for: kind, pc, next } = st);
           user = await githubUser(env, url.searchParams.get('code'), url.origin + '/auth/callback');
         } else {
           kind = url.searchParams.get('kind');
           if (kind === 'gh') return page('Mode dev', '<p>Runner Codespaces butuh login GitHub asli.</p>');
           pc = url.searchParams.get('pc') || '';
+          next = url.searchParams.get('next');
           const login = (url.searchParams.get('login') || '').trim();
           if (!login) return page('Login dev', '<p>Username kosong.</p>');
           user = { id: 'dev:' + login, login };
@@ -236,11 +244,11 @@ export default {
       if (kind === 'gh') {
         // Token tidak disimpan relay: diteruskan ke PWA lewat fragmen URL (tidak pernah dikirim ke server).
         // Login tetap diperiksa PWA terhadap akun relay-nya sebelum dipakai.
-        return Response.redirect(url.origin + '/#gh=' + encodeURIComponent(user.token) + '&ghlogin=' + encodeURIComponent(user.login), 302);
+        return Response.redirect(url.origin + '/agent/#gh=' + encodeURIComponent(user.token) + '&ghlogin=' + encodeURIComponent(user.login), 302);
       }
       if (kind === 'machine') return linkPage(env, pc, user);
       const token = await signToken(env, { kind: 'user', sub: user.id, login: user.login, iat: Date.now(), exp: Date.now() + USER_TTL });
-      return Response.redirect(url.origin + '/#login=' + encodeURIComponent(token), 302);
+      return Response.redirect(url.origin + nextPath(next) + '#login=' + encodeURIComponent(token), 302);
     }
 
     // ---------- Login daemon (kode menunggu) ----------

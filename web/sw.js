@@ -1,9 +1,10 @@
 // Service worker: membuat PWA bisa di-install, membuka shell aplikasi saat offline,
 // dan menampilkan Web Push dari PC saat aplikasi ditutup. API & WebSocket tidak pernah di-cache.
-// CACHE diganti hash aset oleh scripts/build-web.mjs saat build.
+// CACHE diganti hash aset oleh scripts/build-web.mjs saat build. File ini disajikan di root (/sw.js, scope `/`)
+// walau aplikasinya di /agent/: registrasi & langganan push HP yang memasang PWA saat masih di `/` tetap berlaku.
 const CACHE = 'snugcode-dev';
-// index.html tidak ikut: relay mengalihkannya (307) ke './'.
-const SHELL = ['./', 'theme.js', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
+// index.html tidak ikut: relay mengalihkannya (307) ke 'agent/'.
+const SHELL = ['agent/', 'agent/theme.js', 'agent/style.css', 'agent/app.js', 'agent/manifest.webmanifest', 'agent/icon.svg', 'agent/icon-192.png'];
 // cache: 'reload' = selalu dari jaringan, bukan dari HTTP cache browser yang mungkin masih versi lama.
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
@@ -14,7 +15,7 @@ self.addEventListener('fetch', (e) => {
   // lemah), versi terbaru diunduh di latar belakang untuk pembukaan berikutnya.
   e.respondWith(
     caches.open(CACHE).then(async (c) => {
-      const hit = await c.match(e.request, { ignoreSearch: url.pathname === '/' });
+      const hit = await c.match(e.request, { ignoreSearch: url.pathname === '/agent/' });
       const fresh = fetch(e.request)
         .then((r) => {
           if (r.ok) c.put(e.request, r.clone());
@@ -42,7 +43,7 @@ self.addEventListener('push', (e) => {
       // Izin berisiko rendah/sedang bisa dijawab dari notifikasi (aplikasi terbuka & menjawab lewat kanal E2EE);
       // risiko tinggi tidak membawa pid, jadi selalu dibuka dan diputuskan di aplikasi.
       const actions = d.pid ? [{ action: 'allow', title: 'Izinkan' }, { action: 'deny', title: 'Tolak' }] : [];
-      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'icon-192.png', badge: 'icon-192.png', actions, data: { sid: d.sid, mid: d.mid, pid: d.pid } });
+      return self.registration.showNotification(d.title || 'snugcode', { body: d.body || '', tag: d.tag, renotify: true, icon: 'agent/icon-192.png', badge: 'agent/icon-192.png', actions, data: { sid: d.sid, mid: d.mid, pid: d.pid } });
     }),
   );
 });
@@ -51,11 +52,12 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const { sid, mid, pid } = e.notification.data || {};
   const decision = pid && (e.action === 'allow' || e.action === 'deny') ? e.action : null;
-  const url = new URL('./', self.registration.scope);
+  const url = new URL('agent/', self.registration.scope);
   if (mid) url.hash = `open=${mid}${sid ? ':' + sid : ''}` + (decision ? `&perm=${pid}:${decision}` : '');
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      const w = wins[0];
+      // Jendela snugcode agent saja: tab landing page tidak menangani pesan ini.
+      const w = wins.find((x) => new URL(x.url).pathname.startsWith('/agent/'));
       if (!w) return self.clients.openWindow(url.href);
       w.postMessage({ open: { mid, sid }, perm: decision ? { pid, decision } : null });
       return w.focus();

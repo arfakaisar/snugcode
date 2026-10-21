@@ -99,9 +99,19 @@ const wsStatus = (token) =>
   ok('mesin ke-21 ditolak (maks 20 per akun)');
 }
 
-// 5. Security header PWA.
+// 5. Tujuan setelah login: landing page atau snugcode agent saja (bukan host/path lain).
 {
-  const r = await fetch(RELAY + '/');
+  const loc = async (next) => (await fetch(`${RELAY}/auth/dev/login?kind=user&login=${user}&next=${encodeURIComponent(next)}`, { redirect: 'manual' })).headers.get('location') || '';
+  assert.match(await loc('/'), /^http[^#]+\/#login=/);
+  assert.match(await loc('/agent/'), /\/agent\/#login=/);
+  for (const bad of ['https://jahat.example/', '//jahat.example/', '/api/me']) assert.match(await loc(bad), new RegExp('^' + RELAY + '/agent/#login='));
+  ok('login: kembali ke landing atau agent, tanpa open redirect');
+}
+
+// 6. Security header landing page & PWA (/agent/).
+for (const p of ['/', '/agent/']) {
+  const r = await fetch(RELAY + p);
+  assert.equal(r.status, 200, p);
   const csp = r.headers.get('content-security-policy') || '';
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.match(csp, /frame-ancestors 'none'/);
@@ -110,8 +120,11 @@ const wsStatus = (token) =>
   const html = await r.text();
   assert.ok(!/<script>/.test(html), 'tanpa skrip inline');
   assert.ok(!/fonts\.googleapis/.test(html), 'font di-host sendiri');
-  assert.equal((await fetch(RELAY + '/fonts/jetbrains-mono-400.woff2')).status, 200);
-  ok('PWA: CSP ketat, tanpa skrip inline & font pihak ketiga');
+  ok(p + ': CSP ketat, tanpa skrip inline & font pihak ketiga');
+}
+{
+  for (const f of ['/fonts/jetbrains-mono-400.woff2', '/sw.js', '/install.sh', '/agent/app.js', '/agent/manifest.webmanifest']) assert.equal((await fetch(RELAY + f)).status, 200, f);
+  ok('aset bersama di root: font, service worker, pemasang');
 }
 // 6. Mesin yang mati tanpa menutup soket (codespace dihentikan, PC dicabut) tidak tampak online terus.
 // Butuh relay kedua dengan MACHINE_STALE_MS kecil (CI: RELAY_STALE), agar uji tidak menunggu 80 detik.

@@ -444,14 +444,14 @@ snugcode autostart on
 
 ```mermaid
 flowchart LR
-    A["Buka<br/>snugcode.dev"] --> B["Login<br/>dengan GitHub"]
+    A["Buka<br/>snugcode.dev/agent"] --> B["Login<br/>dengan GitHub"]
     B --> C["Pilih PC"]
     C --> D["Masukkan PIN<br/><i>(sekali saja)</i>"]
     D --> E["Sesi baru<br/>pilih repo & branch"]
     E --> F["Ketik permintaan"]
 ```
 
-1. Buka **https://snugcode.dev** di browser HP, lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
+1. Buka **https://snugcode.dev/agent/** di browser HP (atau tombol **Buka snugcode agent** di landing page snugcode.dev), lalu **Login dengan GitHub** (akun yang sama dengan setup PC).
 2. Pilih PC, lalu masukkan PIN.
 3. Menu browser → **Add to Home screen**, supaya terbuka layar penuh seperti aplikasi dan notifikasi push berjalan (wajib di iOS).
 4. Akun → **Izinkan notifikasi**. Izin berisiko rendah/sedang bisa langsung dijawab dari tombol *Izinkan / Tolak* di notifikasi (Android & desktop); pilih *Kabar yang dikirim → Penting saja* bila hanya ingin diberi tahu soal izin, pertanyaan, dan tugas selesai.
@@ -693,7 +693,7 @@ npm run docs:images                        # buat ulang gambar & GIF README (but
 <details>
 <summary><b>Untuk pemilik: deploy relay</b></summary>
 
-Relay terdiri dari dua worker: `pocketcode-relay` (relay + Durable Objects; nama lama dipertahankan agar data akun & PC tetap) dan alias `snugcode` yang menyajikan PWA di `snugcode.dev` dan meneruskan sisanya lewat service binding. OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
+Relay terdiri dari dua worker: `pocketcode-relay` (relay + Durable Objects; nama lama dipertahankan agar data akun & PC tetap) dan alias `snugcode` yang menyajikan landing page di `snugcode.dev` dan PWA snugcode agent di `snugcode.dev/agent/`, dan meneruskan sisanya lewat service binding. OAuth App GitHub sudah disiapkan. Untuk deploy ulang setelah mengubah `relay/` atau `web/`:
 
 ```bash
 npm install && (cd relay && npm install)
