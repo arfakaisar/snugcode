@@ -31,7 +31,7 @@ export async function showSessions() {
   app.current.renderer = null;
   clearInterval(app.current.workTimer);
   drawer.build = buildDrawer;
-  ui.set(app.current.m.name, { menu: true, dot: 'on', onTitle: showMachineMenu, titleLabel: 'PC settings', actions: [{ icon: 'compose', label: 'New session', onclick: () => (haptic(), showNewSession()) }] });
+  ui.set(app.current.m.name, { menu: true, dot: 'on', onTitle: showMachineMenu, titleLabel: 'Machine settings', actions: [{ icon: 'compose', label: 'New session', onclick: () => (haptic(), showNewSession()) }] });
   const list = h('div', {}, skeletons(3));
   const sc = scrollCol(
     h('div', { id: 'updateBanner' }),
@@ -47,7 +47,7 @@ export async function showSessions() {
         h('button', { class: 'starterbtn', onclick: () => (haptic(), showNewSession()) },
           h('span', { class: 'si' }, ic('plus')),
           h('span', { class: 'grow' }, 'Start a new session…'),
-          h('span', { class: 'sk' }, ic('monitor'), 'repo / PC'),
+          h('span', { class: 'sk' }, ic('monitor'), 'repo / computer'),
         ),
       ),
     ),
@@ -70,7 +70,7 @@ export async function showSessions() {
         h('div', { class: 'empty' },
           h('div', { class: 'emptyart' }, ic('term')),
           h('b', {}, 'No sessions yet'),
-          'Pick a GitHub repo for isolated coding, or use Computer mode to control the whole PC like Claude Code.',
+          'Pick a GitHub repo for isolated coding, or start a computer session to control the whole machine like Claude Code.',
           h('button', { class: 'btn primary', style: 'margin-top:16px', onclick: () => showNewSession() }, ic('plus'), 'Start your first session'),
         ),
       );
@@ -93,7 +93,7 @@ export function sessionCard(s, i) {
     h('span', { class: 'avatar t' + (isComp ? '1' : tint(name)) }, isComp ? ic('monitor') : name[0].toUpperCase(), run ? h('i', { class: 'live' }) : null),
     h('span', { class: 'grow' },
       h('div', { class: 'row' }, h('div', { class: 'name' }, s.title || (isComp ? 'Computer session' : '(no prompt yet)')), h('span', { class: 'when' }, ago(s.updatedAt))),
-      h('div', { class: 'sub' }, isComp ? `Computer · ${s.cwd ? tildify(s.cwd) : 'whole PC'}` : s.repo),
+      h('div', { class: 'sub' }, isComp ? `Computer · ${s.cwd ? tildify(s.cwd) : 'whole machine'}` : s.repo),
       h('div', { class: 'tags' },
         run ? h('span', { class: 'tag run' }, 'running') : null,
         isComp ? h('span', { class: 'tag' }, ic('monitor'), 'computer') : null,
@@ -115,7 +115,7 @@ export function sessionActions(s) {
     ui.head(s.title || (isComp ? 'Computer session' : repoName(s)), { sub: sessionSub(s) }),
     h('div', { class: 'group' },
       h('button', { class: 'menuitem', onclick: () => (ui.closeSheet(), showSession(s)) }, h('span', { class: 'mi' }, ic('term')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Open session'))),
-      h('button', { class: 'menuitem danger', onclick: () => deleteSession(s) }, h('span', { class: 'mi' }, ic('trash')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Delete session'), h('div', { class: 't2' }, isComp ? 'removes the session history on the PC' : 'also removes its worktree on the PC'))),
+      h('button', { class: 'menuitem danger', onclick: () => deleteSession(s) }, h('span', { class: 'mi' }, ic('trash')), h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Delete session'), h('div', { class: 't2' }, isComp ? 'removes the session history on the machine' : 'also removes its worktree on the machine'))),
     ),
   );
 }
@@ -123,8 +123,8 @@ export function sessionActions(s) {
 export async function deleteSession(s) {
   const isComp = !!s.computer;
   const text = isComp
-    ? 'This computer session’s history will be deleted. Files & the system on the PC stay safe and untouched.'
-    : 'Its worktree on the PC is deleted too. Unpushed changes will be lost.';
+    ? 'This computer session’s history will be deleted. Files & the system on the machine stay safe and untouched.'
+    : 'Its worktree on the machine is deleted too. Unpushed changes will be lost.';
   if (!(await ui.confirm({ title: 'Delete this session?', text, ok: 'Delete', danger: true, icon: 'trash' }))) return;
   try {
     await app.conn.call('delete', { id: s.id });
@@ -181,7 +181,7 @@ function buildDrawer() {
     h('button', { class: 'dnew', onclick: go(showNewSession) }, h('span', { class: 'si' }, ic('plus')), 'New session'),
     h('div', { class: 'dnav' },
       h('button', { class: 'ditem' + (cur.session ? '' : ' on'), onclick: go(() => ((ui.dir = -1), showSessions())) }, ic('home'), 'Home'),
-      h('button', { class: 'ditem', onclick: go(goMachines) }, ic('monitor'), 'Switch PC'),
+      h('button', { class: 'ditem', onclick: go(goMachines) }, ic('monitor'), 'Switch machine'),
     ),
     h('div', { class: 'dlabel' }, 'Recent sessions'),
     list,
@@ -190,14 +190,14 @@ function buildDrawer() {
         h('span', { class: 'meav' }, login ? login[0].toUpperCase() : '?'),
         h('span', { class: 'grow' }, h('b', {}, login ? '@' + login : 'Account'), h('span', {}, h('i', { class: 'odot' }), cur.m.name)),
       ),
-      h('button', { class: 'iconbtn', 'aria-label': 'PC settings', onclick: showMachineMenu }, ic('gear')),
+      h('button', { class: 'iconbtn', 'aria-label': 'Machine settings', onclick: showMachineMenu }, ic('gear')),
     ),
   ];
 }
 
 // ---------- Screen: new session ----------
 export function showNewSession(initialTab = 'repo') {
-  ui.set('New session', { sub: initialTab === 'repo' ? 'pick a GitHub repo' : 'control the whole PC', back: showSessions, dot: 'on' });
+  ui.set('New session', { sub: initialTab === 'repo' ? 'pick a GitHub repo' : 'control the whole machine', back: showSessions, dot: 'on' });
   let tab = initialTab;
 
   const segRepo = h('button', { class: tab === 'repo' ? 'on' : '', onclick: () => (haptic(6), switchTab('repo')) }, ic('branch'), 'Repository');
@@ -236,13 +236,13 @@ export function showNewSession(initialTab = 'repo') {
     h('div', { class: 'card', style: 'cursor:default;margin-bottom:14px;padding:14px 16px' },
       h('span', { class: 'avatar t1' }, ic('monitor')),
       h('span', { class: 'grow' },
-        h('div', { class: 'name', style: 'font-size:15px;font-weight:600' }, 'Control the whole PC'),
+        h('div', { class: 'name', style: 'font-size:15px;font-weight:600' }, 'Control the whole machine'),
         h('div', { class: 'sub', style: 'margin-top:4px;line-height:1.4' }, 'Run Claude Code with full access to your computer. The agent can open & edit files anywhere, run terminal commands, and manage the system.'),
       ),
     ),
     h('div', { class: 'label' }, 'Starting folder (CWD)'),
     cwdIn,
-    h('div', { class: 'dim small', style: 'margin-top:6px;margin-bottom:14px' }, 'Default: your home folder (~). The agent can still reach other directories on the PC.'),
+    h('div', { class: 'dim small', style: 'margin-top:6px;margin-bottom:14px' }, 'Default: your home folder (~). The agent can still reach other directories on the machine.'),
     h('div', { class: 'label' }, 'Model'),
     compModelSlot,
     compErr,
@@ -256,7 +256,7 @@ export function showNewSession(initialTab = 'repo') {
     segPc.classList.toggle('on', t === 'computer');
     repoView.hidden = t !== 'repo';
     compView.hidden = t !== 'computer';
-    ui.sub(t === 'repo' ? 'pick a GitHub repo' : 'control the whole PC');
+    ui.sub(t === 'repo' ? 'pick a GitHub repo' : 'control the whole machine');
   };
 
   ui.view(scrollCol(seg, repoView, compView));

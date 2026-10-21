@@ -298,7 +298,7 @@ export async function showTerminal() {
       list.push({ tid: r.tid, title: r.title });
       show(r);
     } catch (e) {
-      toast(isOldDaemon(e) ? 'Update snugcode on the PC for the interactive terminal.' : e.message, true);
+      toast(isOldDaemon(e) ? 'Update snugcode on the machine for the interactive terminal.' : e.message, true);
       renderTabs();
     }
   };
@@ -338,7 +338,7 @@ export async function showTerminal() {
   try {
     list = (await app.conn.call('termList', { id: s.id })).map((t) => ({ tid: t.tid, title: t.title }));
   } catch (e) {
-    if (isOldDaemon(e)) return close(), toast('Update snugcode on the PC for the interactive terminal.', true);
+    if (isOldDaemon(e)) return close(), toast('Update snugcode on the machine for the interactive terminal.', true);
   }
   if (list.length) await attach(list.at(-1).tid);
   else await openNew();

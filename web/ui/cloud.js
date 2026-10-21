@@ -273,7 +273,7 @@ const SILENT_MS = 6 * 60_000;
 export async function wakeRunner(m, onState, onFail) {
   if (!client()) return false;
   const c = await codespaceOf(m);
-  if (!c) throw new Error('The runner codespace wasn’t found (it may have been deleted or expired). Recreate it from Add PC → Cloud runner.');
+  if (!c) throw new Error('The runner codespace wasn’t found (it may have been deleted or expired). Recreate it from the machine list.');
   onState?.(stateText(c.state), c.state === 'Available' ? 'start' : 'boot');
   if (!['Available', 'Starting', 'Provisioning', 'Queued', 'Rebuilding', 'Updating', 'Created'].includes(c.state)) await client().start(c.name);
   // The daemon connects by itself; the codespace state is shown until the relay sees it online.

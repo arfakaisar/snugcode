@@ -251,7 +251,7 @@ export class Conn {
     });
   }
   call(m, p = {}) {
-    if (!this.channel) return Promise.reject(new Error('Not connected to the PC yet'));
+    if (!this.channel) return Promise.reject(new Error('Not connected to the machine yet'));
     const id = ++this.rpcId;
     if (this.bin) for (const f of this.channel.sealBin({ id, m, p })) this.ws.send(f);
     else this.ws.send(JSON.stringify(this.channel.seal({ id, m, p })));
@@ -259,7 +259,7 @@ export class Conn {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         if (!this.pending.delete(id)) return;
-        reject(new Error(`The PC didn’t answer within ${ms / 1000} seconds. Check the connection and try again.`));
+        reject(new Error(`The machine didn’t answer within ${ms / 1000} seconds. Check the connection and try again.`));
         this.wake(); // maybe the connection is stuck
       }, ms);
       this.pending.set(id, {
