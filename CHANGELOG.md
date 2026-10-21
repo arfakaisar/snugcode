@@ -5,6 +5,12 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 ## Belum dirilis
 
 ### Perbaikan
+- **Runner/PC yang mati mendadak tidak lagi tampak online.** Codespace yang dihentikan langsung (atau PC yang
+  dicabut listriknya / kehilangan jaringan) tidak sempat menutup soketnya ke relay, dan Cloudflare menahan soket itu,
+  jadi mesin tampil online terus dan HP mencoba tersambung tanpa hasil. Relay kini memakai ping daemon (tiap 25
+  detik, dijawab otomatis): soket mesin tanpa ping selama 80 detik ditutup (kode 4006) dan mesin dicatat offline,
+  dicek saat daftar mesin dibuka, saat HP tersambung/mengirim pesan, dan berkala (alarm) selama ada HP yang tersambung.
+  Runner Codespaces yang dihentikan kini langsung dinyalakan lagi saat dibuka dari aplikasi.
 - **Ikon PWA di iPhone tidak lagi tampil sebagai huruf "S".** iOS membuat ikon huruf bila `apple-touch-icon` gagal
   diambil saat "Add to Home Screen"; di iOS 27 pemuat lembar itu gagal mengambil ikon dari URL jaringan. Ikon 180×180
   kini disisipkan sebagai `data:` URI di `index.html` saat build (`sizes="180x180"`), dan
