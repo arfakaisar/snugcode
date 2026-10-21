@@ -8,7 +8,8 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 - **Ikon PWA di iPhone tidak lagi tampil sebagai huruf "S".** iOS membuat ikon huruf bila `apple-touch-icon` gagal
   diambil saat "Add to Home Screen", lalu menyimpan kegagalan itu per URL. Tautan ikon kini `apple-touch-icon.png?v=2`
   dengan `sizes="180x180"` (iOS terpaksa mengunduh ulang), dan `apple-touch-icon-precomposed.png` ikut disajikan di
-  root untuk iOS yang mencarinya langsung.
+  root untuk iOS yang mencarinya langsung. Ikon SVG dihapus dari `manifest.webmanifest` (iOS hanya bisa memakai ikon
+  PNG untuk layar utama) dan diganti PNG 180×180.
 - **PWA di iPhone (iOS 26) kini menempel ke tepi bawah dan header tidak lagi buram.** Bug WebKit 301108: dengan
   `viewport-fit=cover` + status bar `black-translucent`, viewport aplikasi terpasang dibuat lebih pendek dari layar,
   jadi composer melayang dengan pita kosong di bawahnya. Kini `html` setinggi layar dalam mode standalone. Efek
