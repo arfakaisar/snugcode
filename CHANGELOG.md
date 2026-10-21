@@ -5,6 +5,13 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 ## Belum dirilis
 
 ### Perbaikan
+- **PWA di iPhone (iOS 26) kini menempel ke tepi bawah dan header tidak lagi buram.** Bug WebKit 301108: dengan
+  `viewport-fit=cover` + status bar `black-translucent`, viewport aplikasi terpasang dibuat lebih pendek dari layar,
+  jadi composer melayang dengan pita kosong di bawahnya. Kini `html` setinggi layar dalam mode standalone. Efek
+  scroll-edge "Liquid Glass" iOS 26 yang memburamkan pita di bawah status bar (tidak bisa dimatikan) dihindari dengan
+  jarak atas tambahan berwarna latar solid untuk header, drawer, sheet, toast, dan terminal (hanya iOS terpasang).
+- Catatan sistem (mis. "Sandbox OS tidak tersedia") tidak lagi tampil dengan ikon ganda "◆ ◆", dan peringatan yang
+  sama tampil sekali per sesi walau daemon sempat restart.
 - **Mengetik di terminal dari HP Android kini langsung tampil.** Keyboard HP (Gboard, Samsung, SwiftKey) mengetik
   lewat komposisi IME; xterm.js baru meneruskan kata setelah spasi/Enter (layar tampak diam saat mengetik), dan huruf
   dengan keydown 229 di luar komposisi bisa hilang sama sekali. Di layar sentuh, perubahan isi textarea xterm kini

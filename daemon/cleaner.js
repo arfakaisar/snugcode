@@ -141,10 +141,13 @@ export async function cleanupWorkspaces(sessions, options = {}) {
       lastUsed = Math.max(lastUsed, fs.statSync(path.join(repoPath, LAST_USED)).mtimeMs);
     } catch {}
     const idleFor = now - lastUsed;
+    // TTL 0 = hapus sekarang. Tanpa pengecualian ini, mtime presisi nanodetik (APFS) dari folder yang baru
+    // disentuh bisa sedikit melewati Date.now() yang dibulatkan ke milidetik, jadi idleFor negatif.
+    const ttl = Math.max(repoTtlMs, minAgeMs);
 
     // Tidak ada sesi aktif lagi di repo ini dan clone-nya sudah lama tidak dipakai.
     // `busy` dicek ulang tepat sebelum menghapus: pembuatan sesi bisa dimulai saat `await` di atas.
-    if (!isRepoActive && idleFor >= Math.max(repoTtlMs, minAgeMs) && !busy(entry)) {
+    if (!isRepoActive && (ttl <= 0 || idleFor >= ttl) && !busy(entry)) {
       safeRm(repoPath);
       result.removedRepos.push(repoPath);
     } else if (fs.existsSync(baseDir)) {
