@@ -33,6 +33,13 @@ await build({
 fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(out, 'xterm.css'));
 const shell = ['index.html', 'install.sh', 'install.ps1', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
+// iOS 27: lembar "Add to Home Screen" memakai pemuat gambarnya sendiri yang gagal mengambil ikon dari URL jaringan
+// (hasilnya ikon huruf "S"), sedangkan data: URI didukung sejak Safari 27. File PNG tetap disajikan untuk iOS lama.
+const indexHtml = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
+const touchIcon = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'web', 'apple-touch-icon.png')).toString('base64');
+const inlined = indexHtml.replace('rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png"', `rel="apple-touch-icon" sizes="180x180" href="${touchIcon}"`);
+if (inlined === indexHtml) throw new Error('index.html: <link rel="apple-touch-icon"> tidak ditemukan');
+fs.writeFileSync(path.join(out, 'index.html'), inlined);
 // Security header untuk aset yang disajikan langsung (worker alias); relay menambahkannya sendiri.
 // Host WebSocket yang diizinkan CSP: alamat publik & lama dari relay/wrangler.jsonc (relay self-host
 // memakai varsnya sendiri), atau SNUGCODE_WS_HOSTS="a.example,b.example".
