@@ -91,10 +91,13 @@ test('sandbox: mode, opsi SDK (kredensial tertutup, worktree & cache bisa dituli
     assert.ok(o.filesystem.allowWrite.includes(path.join(home, '.npm')) && fs.existsSync(path.join(home, '.npm')));
     assert.ok(!o.filesystem.allowWrite.includes(home), 'home pengguna tidak bisa ditulis di sesi repo');
     const gitDir = path.join(base, '.git');
-    // realpath: di macOS folder sementara (/var/…) adalah symlink ke /private/var/….
-    const denied = o.filesystem.denyWrite.map((p) => fs.realpathSync(p));
-    assert.ok(denied.includes(fs.realpathSync(path.join(gitDir, 'hooks'))));
-    assert.ok(denied.includes(fs.realpathSync(path.join(gitDir, 'config'))));
+    // realpath: di macOS folder sementara (/var/…) adalah symlink ke /private/var/…; di Windows os.tmpdir()
+    // memakai nama pendek 8.3 (RUNNER~1) sedangkan git mengembalikan nama panjang — hanya versi native
+    // yang menerjemahkannya.
+    const real = (/** @type {string} */ p) => fs.realpathSync.native(p);
+    const denied = o.filesystem.denyWrite.map(real);
+    assert.ok(denied.includes(real(path.join(gitDir, 'hooks'))), JSON.stringify({ denied, gitDir }));
+    assert.ok(denied.includes(real(path.join(gitDir, 'config'))));
     // Mode Komputer: home boleh ditulis, folder data tidak.
     const oc = sandboxOptions({ cwd: home, computer: true, home });
     assert.ok(oc.filesystem.allowWrite.includes(home));
