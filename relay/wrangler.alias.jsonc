@@ -1,16 +1,16 @@
 {
   // Alamat publik singkat: https://snugcode.dev
-  // Deploy SETELAH worker relay (wrangler.jsonc) karena memakai service binding ke sana:
-  //   npx wrangler deploy -c wrangler.alias.jsonc   (sudah termasuk di `npm run deploy` di root)
+  // Deploy AFTER the relay worker (wrangler.jsonc) since it uses a service binding to it:
+  //   npx wrangler deploy -c wrangler.alias.jsonc   (already part of `npm run deploy` at the root)
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "snugcode",
   "main": "src/alias.js",
   "compatibility_date": "2026-09-01",
-  // Log & metrik Workers (dashboard Cloudflare → Observability): error relay terlihat tanpa wrangler tail.
+  // Workers logs & metrics (Cloudflare dashboard → Observability): relay errors visible without wrangler tail.
   "observability": { "enabled": true },
-  // Custom domain (zona snugcode.dev di akun Cloudflare yang sama): wrangler deploy membuat record DNS
-  // & sertifikatnya. Token deploy butuh izin zona Workers Routes: Edit, DNS: Edit, Zone: Read.
-  // snugcode.arfak.workers.dev tetap aktif sebagai host lama (LEGACY_HOSTS di wrangler.jsonc).
+  // Custom domain (the snugcode.dev zone in the same Cloudflare account): wrangler deploy creates the DNS record
+  // & certificate. The deploy token needs zone permissions Workers Routes: Edit, DNS: Edit, Zone: Read.
+  // snugcode.arfak.workers.dev stays active as a legacy host (LEGACY_HOSTS in wrangler.jsonc).
   "routes": [{ "pattern": "snugcode.dev", "custom_domain": true }],
   "workers_dev": true,
   "assets": {

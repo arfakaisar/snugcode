@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="id" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>snugcode Cloud — Server untuk agen coding-mu & semua deploy-mu</title>
-<meta name="description" content="Server cloud siap pakai untuk menjalankan snugcode 24/7 dan men-deploy frontend, backend, maupun database. Dikendalikan dari HP, terenkripsi end-to-end.">
+<title>snugcode Cloud — Servers for your coding agent and everything you ship</title>
+<meta name="description" content="Ready-to-go cloud servers that run your snugcode agent 24/7 and host your frontend, backend and databases. Controlled from your phone, end-to-end encrypted.">
 <meta name="theme-color" content="#262624">
 <meta property="og:title" content="snugcode Cloud">
-<meta property="og:description" content="Agen coding yang tidak pernah tidur, di server yang juga menjalankan aplikasimu.">
+<meta property="og:description" content="The coding agent that never sleeps, on a server that also runs your apps.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -47,27 +47,31 @@
 
 <header class="nav" id="nav">
   <div class="nav-in">
-    <a href="#top" class="brand" aria-label="snugcode beranda">
+    <a href="#top" class="brand" aria-label="snugcode home">
       <span class="brand-ic"><svg><use href="#mascot"/></svg></span>
       <span class="brand-tx">snugcode<em>cloud</em></span>
     </a>
-    <nav class="nav-links" id="navLinks">
-      <a href="#fitur">Fitur</a>
-      <a href="#cara-kerja">Cara kerja</a>
+    <nav class="nav-links" id="navLinks" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How it works</a>
       <a href="#deploy">Deploy</a>
-      <a href="#harga">Harga</a>
+      <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
-      <a href="/auth/login?kind=user&amp;next=/" class="only-sm guest-only">Masuk</a>
+      <div class="menu-cta">
+        <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-primary btn-lg btn-block guest-only">Get started</a>
+        <a href="/auth/login?kind=user&amp;next=/" class="btn btn-ghost btn-lg btn-block guest-only">Sign in</a>
+        <a href="/agent/" class="btn btn-primary btn-lg btn-block authed-only" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Open snugcode agent</a>
+      </div>
     </nav>
     <div class="nav-act">
-      <button class="icon-btn" id="themeBtn" aria-label="Ganti tema">
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">
         <svg class="ic-moon"><use href="#i-moon"/></svg><svg class="ic-sun"><use href="#i-sun"/></svg>
       </button>
-      <a href="/auth/login?kind=user&amp;next=/" class="btn btn-ghost btn-sm hide-sm guest-only">Masuk</a>
-      <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-primary btn-sm mag guest-only">Daftar</a>
-      <a href="/agent/" class="me-chip authed-only hide-sm" title="snugcode agent"><span class="me-av" id="meAv">·</span><span id="meLogin">akun</span></a>
-      <a href="/agent/" class="btn btn-primary btn-sm mag authed-only" data-agent><svg><use href="#i-agent"/></svg><span class="hide-sm">Buka&nbsp;</span>Agent</a>
-      <button class="icon-btn burger" id="burger" aria-label="Menu" aria-expanded="false"><span></span><span></span></button>
+      <a href="/auth/login?kind=user&amp;next=/" class="btn btn-ghost btn-sm hide-sm guest-only">Sign in</a>
+      <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-primary btn-sm mag guest-only hide-sm">Get started</a>
+      <a href="/agent/" class="me-chip authed-only hide-sm" title="snugcode agent"><span class="me-av" id="meAv">·</span><span id="meLogin">account</span></a>
+      <a href="/agent/" class="btn btn-primary btn-sm mag authed-only" data-agent><svg><use href="#i-agent"/></svg><span class="hide-sm">Open&nbsp;</span>Agent</a>
+      <button class="icon-btn burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="navLinks"><span></span><span></span></button>
     </div>
   </div>
 </header>
@@ -82,66 +86,66 @@
     </div>
     <div class="wrap hero-in">
       <div class="hero-copy">
-        <a href="#harga" class="pill-new" data-reveal>
-          <span class="dot-live"></span> Baru · snugcode Cloud sudah bisa dicoba
+        <a href="#pricing" class="pill-new" data-reveal>
+          <span class="dot-live"></span> New · snugcode Cloud is here
           <svg><use href="#i-arrow"/></svg>
         </a>
         <h1 class="h-hero" data-split>
-          Agen coding yang <span class="accent">tidak pernah tidur,</span> di server yang juga menjalankan aplikasimu.
+          The coding agent that <span class="accent">never sleeps,</span> on a server that runs your apps too.
         </h1>
         <p class="lead" data-reveal style="--d:.5s">
-          Sewa server siap pakai untuk snugcode. Agen bekerja 24/7 walau laptopmu mati — lalu
-          deploy <span class="rotator" id="rotator"><span>frontend</span></span> di mesin yang sama, langsung dari HP.
+          Rent a ready-made server for snugcode. Your agent keeps working 24/7, even with your laptop shut. Then
+          ship your <span class="rotator" id="rotator"><span>frontend</span></span> from the same machine, straight from your phone.
         </p>
         <div class="hero-cta" data-reveal style="--d:.65s">
-          <a href="#harga" class="btn btn-primary btn-lg mag">Pilih server <svg><use href="#i-arrow"/></svg></a>
-          <a href="/agent/" class="btn btn-ghost btn-lg mag" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Buka snugcode agent</a>
+          <a href="#pricing" class="btn btn-primary btn-lg mag">Pick a server <svg><use href="#i-arrow"/></svg></a>
+          <a href="/agent/" class="btn btn-ghost btn-lg mag" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Open snugcode agent</a>
         </div>
         <ul class="hero-trust" data-reveal style="--d:.8s">
-          <li><svg><use href="#i-check"/></svg> Siap dalam &lt; 60 detik</li>
+          <li><svg><use href="#i-check"/></svg> Ready in &lt; 60 s</li>
           <li><svg><use href="#i-check"/></svg> End-to-end encrypted</li>
-          <li><svg><use href="#i-check"/></svg> Bawa API key sendiri</li>
+          <li><svg><use href="#i-check"/></svg> Bring your own API key</li>
         </ul>
       </div>
 
       <div class="hero-visual" data-reveal style="--d:.3s">
         <div class="orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div class="phone" data-tilt>
+        <div class="phone" data-tilt aria-hidden="true">
           <div class="ph-notch"></div>
           <div class="ph-top">
             <span class="ph-menu"></span>
-            <div class="ph-title"><b><i class="dot-live"></i> toko-kopi</b><small>snug-sg-1 · fitur/menu</small></div>
+            <div class="ph-title"><b><i class="dot-live"></i> coffee-shop</b><small>snug-sg-1 · feat/menu</small></div>
             <span class="ph-play">▶</span>
           </div>
           <div class="ph-feed" id="feed"></div>
           <div class="ph-composer">
-            <span class="ph-input" id="phInput"><span class="ph-ph">Minta sesuatu ke agen…</span></span>
+            <span class="ph-input" id="phInput"><span class="ph-ph">Ask the agent anything…</span></span>
             <div class="ph-row"><span class="ph-chip">claude-opus-5-5 ▾</span><span class="ph-send" id="phSend">↑</span></div>
           </div>
         </div>
 
-        <div class="float f-server" data-parallax="-0.06">
-          <div class="fs-head"><span class="dot-live"></span><b>snug-sg-1</b><small>Singapura</small></div>
+        <div class="float f-server" data-parallax="-0.06" aria-hidden="true">
+          <div class="fs-head"><span class="dot-live"></span><b>snug-sg-1</b><small>Singapore</small></div>
           <div class="fs-row"><span>CPU</span><b id="cpuVal">23%</b></div>
           <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none"><defs><linearGradient id="sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".45"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><path id="sparkFill" fill="url(#sg)"/><path id="sparkLine" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>
-          <div class="fs-row"><span>RAM</span><b>1,8 / 4 GB</b></div>
+          <div class="fs-row"><span>RAM</span><b>1.8 / 4 GB</b></div>
           <div class="bar"><i style="width:45%"></i></div>
         </div>
-        <div class="float f-deploy" data-parallax="0.08">
+        <div class="float f-deploy" data-parallax="0.08" aria-hidden="true">
           <span class="ok-ic"><svg><use href="#i-check"/></svg></span>
-          <div><b>Deploy berhasil</b><small>toko-kopi.snug.run · 38 dtk</small></div>
+          <div><b>Deployed</b><small>coffee-shop.snug.run · 38 s</small></div>
         </div>
-        <div class="float f-lock" data-parallax="0.04">
+        <div class="float f-lock" data-parallax="0.04" aria-hidden="true">
           <svg><use href="#i-lock"/></svg> E2E · X25519
         </div>
       </div>
     </div>
-    <a href="#stack" class="scroll-hint" aria-label="Gulir"><span></span></a>
+    <a href="#stack" class="scroll-hint" aria-label="Scroll down"><span></span></a>
   </section>
 
   <!-- ============ STACK MARQUEE ============ -->
   <section class="stack" id="stack">
-    <p class="eyebrow center" data-reveal>Jalankan agen & deploy stack apa pun</p>
+    <p class="eyebrow center" data-reveal>Run any agent · ship any stack</p>
     <div class="marquee" data-reveal>
       <div class="mq-track">
         <span>Claude Code</span><span>Codex</span><span>Gemini CLI</span><span>Next.js</span><span>React</span><span>Vue</span><span>Svelte</span><span>Astro</span><span>Node.js</span><span>Bun</span><span>Python</span><span>FastAPI</span><span>Django</span><span>Go</span><span>Rust</span><span>Laravel</span><span>PostgreSQL</span><span>Redis</span><span>Docker</span>
@@ -149,34 +153,34 @@
     </div>
     <div class="marquee rev" data-reveal>
       <div class="mq-track">
-        <span>Perbaiki bug dari kereta</span><span>Review PR sambil ngopi</span><span>Deploy toko online</span><span>Bot Telegram 24/7</span><span>API untuk aplikasi mobile</span><span>Cron job tiap pagi</span><span>Landing page klien</span><span>Side project tengah malam</span>
+        <span>Fix a bug on the train</span><span>Review PRs over coffee</span><span>Ship an online store</span><span>A 24/7 Telegram bot</span><span>An API for your mobile app</span><span>A cron job every morning</span><span>A client's landing page</span><span>The midnight side project</span>
       </div>
     </div>
   </section>
 
   <!-- ============ STATS ============ -->
   <section class="wrap stats">
-    <div class="stat" data-reveal><b><span data-count="60" data-prefix="&lt;">0</span><small>dtk</small></b><span>dari bayar sampai server siap</span></div>
-    <div class="stat" data-reveal style="--d:.1s"><b><span data-count="99.9" data-dec="1">0</span><small>%</small></b><span>target uptime server</span></div>
-    <div class="stat" data-reveal style="--d:.2s"><b><span data-count="3">0</span><small>engine</small></b><span>Claude, Codex & Gemini</span></div>
-    <div class="stat" data-reveal style="--d:.3s"><b><span data-count="24">0</span><small>/7</small></b><span>agen tetap jalan saat HP terkunci</span></div>
+    <div class="stat" data-reveal><b><span data-count="60" data-prefix="&lt;">0</span><small>s</small></b><span>from checkout to a running server</span></div>
+    <div class="stat" data-reveal style="--d:.1s"><b><span data-count="99.9" data-dec="1">0</span><small>%</small></b><span>uptime target</span></div>
+    <div class="stat" data-reveal style="--d:.2s"><b><span data-count="3">0</span><small>engines</small></b><span>Claude, Codex &amp; Gemini</span></div>
+    <div class="stat" data-reveal style="--d:.3s"><b><span data-count="24">0</span><small>/7</small></b><span>agents keep going while your phone sleeps</span></div>
   </section>
 
   <!-- ============ FEATURES ============ -->
-  <section class="section" id="fitur">
+  <section class="section" id="features">
     <div class="wrap">
       <div class="sec-head">
-        <p class="eyebrow" data-reveal>Fitur</p>
-        <h2 class="h2" data-split>Semua yang kamu butuhkan untuk <span class="accent">ngoding dari mana saja</span>.</h2>
-        <p class="sub" data-reveal>Satu server, dua peran: rumah bagi agen coding-mu, dan tempat aplikasimu hidup.</p>
+        <p class="eyebrow" data-reveal>Features</p>
+        <h2 class="h2" data-split>Everything you need to <span class="accent">code from anywhere</span>.</h2>
+        <p class="sub" data-reveal>One server, two jobs: a home for your coding agent, and a place for your apps to live.</p>
       </div>
 
-      <div class="bento">
-        <article class="card c-wide spot" data-reveal>
+      <div class="bento rail" data-reveal>
+        <article class="card c-wide spot">
           <div class="card-tx">
-            <span class="tag">Selalu menyala</span>
-            <h3>Agen tetap bekerja saat kamu tidur.</h3>
-            <p>Tutup laptop, kunci HP. Server menjalankan sesi agen sampai selesai dan mengirim notifikasi saat butuh izinmu.</p>
+            <span class="tag">Always on</span>
+            <h3>Your agent works while you sleep.</h3>
+            <p>Close the laptop, lock your phone. The server runs agent sessions to the end and pings you when it needs your approval.</p>
           </div>
           <div class="v-sleep" aria-hidden="true">
             <div class="moon"></div>
@@ -184,28 +188,28 @@
             <svg class="mascot-big"><use href="#mascot"/></svg>
             <span class="zz z1">z</span><span class="zz z2">z</span><span class="zz z3">Z</span>
             <div class="tasks">
-              <div class="task done"><i></i>Baca struktur repo</div>
-              <div class="task done"><i></i>Tulis endpoint /orders</div>
-              <div class="task run"><i></i>Jalankan test<em></em></div>
+              <div class="task done"><i></i>Read the repo</div>
+              <div class="task done"><i></i>Write /orders endpoint</div>
+              <div class="task run"><i></i>Run tests<em></em></div>
             </div>
           </div>
         </article>
-        <article class="card spot" data-reveal style="--d:.08s">
+        <article class="card spot">
           <div class="card-tx">
-            <span class="tag">Keamanan</span>
+            <span class="tag">Security</span>
             <h3>End-to-end encrypted.</h3>
-            <p>Relay hanya meneruskan sandi. Kode dan kunci API-mu tidak pernah terbaca di tengah jalan.</p>
+            <p>The relay only forwards ciphertext. Your code and API keys are never readable in transit.</p>
           </div>
           <div class="v-cipher" aria-hidden="true">
             <svg class="lock-ic"><use href="#i-lock"/></svg>
             <code id="cipher">a7f3 91c0 e2b8 4d5a</code>
           </div>
         </article>
-        <article class="card spot" data-reveal style="--d:.08s">
+        <article class="card spot">
           <div class="card-tx">
-            <span class="tag">Paralel</span>
-            <h3>Worktree per sesi.</h3>
-            <p>Beberapa agen bekerja bersamaan tanpa saling menimpa. Tiap sesi di branch-nya sendiri.</p>
+            <span class="tag">Parallel</span>
+            <h3>A worktree per session.</h3>
+            <p>Run several agents at once without stepping on each other. Every session gets its own branch.</p>
           </div>
           <svg class="v-branch" viewBox="0 0 260 90" aria-hidden="true">
             <path class="b-main" d="M10 70H250"/>
@@ -214,45 +218,45 @@
             <circle cx="10" cy="70" r="5"/><circle cx="110" cy="30" r="4" class="c1"/><circle cx="200" cy="30" r="4" class="c1"/><circle cx="140" cy="50" r="4" class="c2"/><circle cx="245" cy="70" r="5"/>
           </svg>
         </article>
-        <article class="card c-wide spot" data-reveal style="--d:.16s">
+        <article class="card c-wide spot">
           <div class="card-tx">
-            <span class="tag">Kendali</span>
-            <h3>Izin 1-tap, lengkap dengan diff.</h3>
-            <p>Setiap perubahan berisiko berhenti dulu menunggu persetujuanmu. Tolak, izinkan, atau izinkan selalu.</p>
+            <span class="tag">Control</span>
+            <h3>One-tap approvals, with the diff.</h3>
+            <p>Every risky change pauses for your OK. Deny, allow, or always allow.</p>
           </div>
           <div class="v-diff" aria-hidden="true">
             <div class="vd-file">src/pages/Menu.jsx</div>
             <div class="vd-l del">-  &lt;h2&gt;Menu&lt;/h2&gt;</div>
-            <div class="vd-l add">+  &lt;h2&gt;Menu Kopi ☕&lt;/h2&gt;</div>
+            <div class="vd-l add">+  &lt;h2&gt;Coffee menu ☕&lt;/h2&gt;</div>
             <div class="vd-l add">+  &lt;MenuGrid items={menu} /&gt;</div>
-            <div class="vd-btns"><span>Tolak</span><span>Selalu</span><span class="yes">Izinkan</span></div>
+            <div class="vd-btns"><span>Deny</span><span>Always</span><span class="yes">Allow</span></div>
           </div>
         </article>
-        <article class="card c-wide spot" data-reveal style="--d:.16s">
+        <article class="card c-wide spot">
           <div class="card-tx">
             <span class="tag">Deploy</span>
             <h3>Push, build, live.</h3>
-            <p>Frontend statis, server Node/Python/Go, atau container. Subdomain + SSL otomatis.</p>
+            <p>Static frontends, Node/Python/Go servers, or containers. Subdomain and SSL included.</p>
           </div>
           <div class="v-pipe" aria-hidden="true">
             <span class="node">git push</span><span class="wire"><i></i></span><span class="node">build</span><span class="wire"><i></i></span><span class="node live">live</span>
           </div>
         </article>
-        <article class="card spot" data-reveal>
+        <article class="card spot">
           <div class="card-tx">
             <span class="tag">Multi-model</span>
-            <h3>Pilih otak agenmu.</h3>
-            <p>Claude Agent SDK, Codex, atau Gemini CLI — ganti kapan saja, per sesi.</p>
+            <h3>Pick your agent's brain.</h3>
+            <p>Claude Agent SDK, Codex or Gemini CLI. Switch any time, per session.</p>
           </div>
           <div class="v-models" aria-hidden="true">
             <span style="--i:0">claude-opus-5-5</span><span style="--i:1">gpt-5-codex</span><span style="--i:2">gemini-3-pro</span>
           </div>
         </article>
-        <article class="card spot" data-reveal style="--d:.08s">
+        <article class="card spot">
           <div class="card-tx">
             <span class="tag">Dev tools</span>
-            <h3>Terminal & preview di saku.</h3>
-            <p>Shell penuh, dev server di latar, dan pratinjau aplikasi langsung di HP.</p>
+            <h3>Terminal &amp; preview in your pocket.</h3>
+            <p>A full shell, background dev servers, and a live app preview right on your phone.</p>
           </div>
           <div class="v-term" aria-hidden="true">
             <div><span class="pr">$</span> npm run dev</div>
@@ -260,11 +264,11 @@
             <div><span class="pr">$</span> <span class="caret"></span></div>
           </div>
         </article>
-        <article class="card c-wide spot" data-reveal style="--d:.16s">
+        <article class="card c-wide spot">
           <div class="card-tx">
             <span class="tag">Data</span>
-            <h3>Snapshot & backup harian.</h3>
-            <p>Kembalikan server atau checkpoint agen ke titik mana pun. Tanpa drama.</p>
+            <h3>Snapshots &amp; daily backups.</h3>
+            <p>Roll the server, or an agent checkpoint, back to any point. No drama.</p>
           </div>
           <div class="v-snap" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         </article>
@@ -273,25 +277,25 @@
   </section>
 
   <!-- ============ HOW IT WORKS ============ -->
-  <section class="section how" id="cara-kerja">
+  <section class="section how" id="how-it-works">
     <div class="wrap">
       <div class="sec-head">
-        <p class="eyebrow" data-reveal>Cara kerja</p>
-        <h2 class="h2" data-split>Dari nol ke <span class="accent">agen yang bekerja</span> dalam tiga langkah.</h2>
+        <p class="eyebrow" data-reveal>How it works</p>
+        <h2 class="h2" data-split>From zero to <span class="accent">a working agent</span> in three steps.</h2>
       </div>
       <div class="steps" id="steps">
         <div class="steps-line"><i></i></div>
         <div class="step" data-reveal>
           <span class="step-n">1</span>
-          <div><h3>Pilih server</h3><p>Tentukan ukuran dan lokasi. Server dibuat otomatis dengan snugcode, Git, Node, Python, dan Docker terpasang.</p></div>
+          <div><h3>Pick a server</h3><p>Choose a size and region. It comes up with snugcode, Git, Node, Python and Docker preinstalled.</p></div>
         </div>
         <div class="step" data-reveal>
           <span class="step-n">2</span>
-          <div><h3>Hubungkan dari HP</h3><p>Masuk dengan GitHub, buka PWA, dan server langsung muncul di daftar mesin. Tanpa SSH, tanpa port forwarding.</p></div>
+          <div><h3>Connect from your phone</h3><p>Sign in with GitHub and open snugcode agent. Your server is already in the list. No SSH, no port forwarding.</p></div>
         </div>
         <div class="step" data-reveal>
           <span class="step-n">3</span>
-          <div><h3>Beri arahan & deploy</h3><p>Minta agen membangun fitur, setujui diff-nya, lalu tap deploy. Aplikasimu live di server yang sama.</p></div>
+          <div><h3>Direct &amp; deploy</h3><p>Ask the agent for a feature, approve the diff, tap deploy. Your app goes live on the same server.</p></div>
         </div>
       </div>
     </div>
@@ -302,23 +306,23 @@
     <div class="wrap deploy">
       <div class="sec-head left">
         <p class="eyebrow" data-reveal>Deploy</p>
-        <h2 class="h2" data-split>Bukan cuma untuk agen. <span class="accent">Hosting-mu juga.</span></h2>
-        <p class="sub" data-reveal>snugcode mendeteksi framework, membangun, dan menjalankan aplikasimu dengan HTTPS otomatis. Pilih jenisnya:</p>
+        <h2 class="h2" data-split>Not just for agents. <span class="accent">Your hosting, too.</span></h2>
+        <p class="sub" data-reveal>snugcode detects the framework, builds, and runs your app with automatic HTTPS. Pick a type:</p>
         <div class="dtabs" role="tablist" data-reveal>
-          <button class="dtab on" data-kind="frontend">Frontend</button>
-          <button class="dtab" data-kind="backend">Backend</button>
-          <button class="dtab" data-kind="fullstack">Fullstack</button>
-          <button class="dtab" data-kind="database">Database</button>
-          <button class="dtab" data-kind="worker">Worker</button>
+          <button class="dtab on" role="tab" data-kind="frontend">Frontend</button>
+          <button class="dtab" role="tab" data-kind="backend">Backend</button>
+          <button class="dtab" role="tab" data-kind="fullstack">Fullstack</button>
+          <button class="dtab" role="tab" data-kind="database">Database</button>
+          <button class="dtab" role="tab" data-kind="worker">Worker</button>
           <span class="dtab-ind"></span>
         </div>
       </div>
       <div class="term" data-reveal data-tilt>
-        <div class="term-bar"><i></i><i></i><i></i><span id="termTitle">~/toko-kopi</span></div>
+        <div class="term-bar"><i></i><i></i><i></i><span id="termTitle">~/coffee-shop</span></div>
         <pre class="term-body" id="termBody"></pre>
         <div class="term-live" id="termLive">
           <span class="ok-ic"><svg><use href="#i-check"/></svg></span>
-          <div><b id="liveUrl">toko-kopi.snug.run</b><small id="liveMeta">Vite · statis · CDN</small></div>
+          <div><b id="liveUrl">coffee-shop.snug.run</b><small id="liveMeta">Vite · static · CDN</small></div>
           <span class="live-badge">LIVE</span>
         </div>
       </div>
@@ -326,98 +330,99 @@
   </section>
 
   <!-- ============ PRICING ============ -->
-  <section class="section pricing" id="harga">
+  <section class="section pricing" id="pricing">
     <div class="wrap">
       <div class="sec-head">
-        <p class="eyebrow" data-reveal>Harga</p>
-        <h2 class="h2" data-split>Harga jujur. <span class="accent">Tidur nyenyak.</span></h2>
-        <p class="sub" data-reveal>Bayar servernya saja. Bawa API key Claude, OpenAI, atau Gemini milikmu — tanpa markup token.</p>
+        <p class="eyebrow" data-reveal>Pricing</p>
+        <h2 class="h2" data-split>Honest pricing. <span class="accent">Sleep well.</span></h2>
+        <p class="sub" data-reveal>Pay for the server only. Bring your own Claude, OpenAI or Gemini key, with zero token markup.</p>
         <div class="billing" data-reveal>
-          <span class="bl on" data-b="m">Bulanan</span>
-          <button class="switch" id="billSwitch" role="switch" aria-checked="false" aria-label="Tagihan tahunan"><i></i></button>
-          <span class="bl" data-b="y">Tahunan <em class="save">hemat 20%</em></span>
+          <span class="bl on" data-b="m">Monthly</span>
+          <button class="switch" id="billSwitch" role="switch" aria-checked="false" aria-label="Yearly billing"><i></i></button>
+          <span class="bl" data-b="y">Yearly <em class="save">save 20%</em></span>
         </div>
       </div>
 
-      <div class="plans">
-        <article class="plan spot" data-reveal>
-          <div class="plan-h"><h3>Nap</h3><p>Untuk side project & coba-coba.</p></div>
-          <div class="price"><span class="cur">Rp</span><b data-m="59" data-y="47">59</b><span class="per">rb/bln</span></div>
+      <div class="plans rail" data-reveal>
+        <article class="plan spot">
+          <div class="plan-h"><h3>Nap</h3><p>For side projects and tinkering.</p></div>
+          <div class="price"><span class="cur">$</span><b data-m="6" data-y="5">6</b><span class="per">/mo</span></div>
           <ul class="specs"><li><b>1</b> vCPU</li><li><b>2 GB</b> RAM</li><li><b>25 GB</b> NVMe</li></ul>
           <ul class="feats">
-            <li><svg><use href="#i-check"/></svg>1 sesi agen paralel</li>
-            <li><svg><use href="#i-check"/></svg>2 aplikasi ter-deploy</li>
-            <li><svg><use href="#i-check"/></svg>Subdomain *.snug.run + SSL</li>
-            <li><svg><use href="#i-check"/></svg>Snapshot mingguan</li>
+            <li><svg><use href="#i-check"/></svg>1 parallel agent session</li>
+            <li><svg><use href="#i-check"/></svg>2 deployed apps</li>
+            <li><svg><use href="#i-check"/></svg>*.snug.run subdomain + SSL</li>
+            <li><svg><use href="#i-check"/></svg>Weekly snapshots</li>
           </ul>
-          <a href="#" class="btn btn-ghost btn-block mag">Mulai dengan Nap</a>
+          <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-ghost btn-block mag">Start with Nap</a>
         </article>
 
-        <article class="plan pop spot" data-reveal style="--d:.1s">
-          <span class="pop-badge">Paling populer</span>
-          <div class="plan-h"><h3>Snooze</h3><p>Untuk developer yang ngoding tiap hari.</p></div>
-          <div class="price"><span class="cur">Rp</span><b data-m="149" data-y="119">149</b><span class="per">rb/bln</span></div>
+        <article class="plan pop spot">
+          <span class="pop-badge">Most popular</span>
+          <div class="plan-h"><h3>Snooze</h3><p>For developers who code every day.</p></div>
+          <div class="price"><span class="cur">$</span><b data-m="14" data-y="11">14</b><span class="per">/mo</span></div>
           <ul class="specs"><li><b>2</b> vCPU</li><li><b>4 GB</b> RAM</li><li><b>80 GB</b> NVMe</li></ul>
           <ul class="feats">
-            <li><svg><use href="#i-check"/></svg>3 sesi agen paralel</li>
-            <li><svg><use href="#i-check"/></svg>10 aplikasi ter-deploy</li>
-            <li><svg><use href="#i-check"/></svg>Custom domain + SSL otomatis</li>
-            <li><svg><use href="#i-check"/></svg>Backup harian 7 hari</li>
-            <li><svg><use href="#i-check"/></svg>Postgres & Redis 1-klik</li>
+            <li><svg><use href="#i-check"/></svg>3 parallel agent sessions</li>
+            <li><svg><use href="#i-check"/></svg>10 deployed apps</li>
+            <li><svg><use href="#i-check"/></svg>Custom domains + auto SSL</li>
+            <li><svg><use href="#i-check"/></svg>Daily backups, 7 days</li>
+            <li><svg><use href="#i-check"/></svg>1-click Postgres &amp; Redis</li>
           </ul>
-          <a href="#" class="btn btn-primary btn-block mag">Mulai dengan Snooze</a>
+          <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-primary btn-block mag">Start with Snooze</a>
         </article>
 
-        <article class="plan spot" data-reveal style="--d:.2s">
-          <div class="plan-h"><h3>Deep Sleep</h3><p>Untuk tim kecil & aplikasi produksi.</p></div>
-          <div class="price"><span class="cur">Rp</span><b data-m="349" data-y="279">349</b><span class="per">rb/bln</span></div>
+        <article class="plan spot">
+          <div class="plan-h"><h3>Deep Sleep</h3><p>For small teams and production apps.</p></div>
+          <div class="price"><span class="cur">$</span><b data-m="32" data-y="26">32</b><span class="per">/mo</span></div>
           <ul class="specs"><li><b>4</b> vCPU</li><li><b>8 GB</b> RAM</li><li><b>160 GB</b> NVMe</li></ul>
           <ul class="feats">
-            <li><svg><use href="#i-check"/></svg>8 sesi agen paralel</li>
-            <li><svg><use href="#i-check"/></svg>Aplikasi tanpa batas</li>
-            <li><svg><use href="#i-check"/></svg>Backup harian 30 hari</li>
-            <li><svg><use href="#i-check"/></svg>Hingga 3 anggota tim</li>
-            <li><svg><use href="#i-check"/></svg>Dukungan prioritas</li>
+            <li><svg><use href="#i-check"/></svg>8 parallel agent sessions</li>
+            <li><svg><use href="#i-check"/></svg>Unlimited apps</li>
+            <li><svg><use href="#i-check"/></svg>Daily backups, 30 days</li>
+            <li><svg><use href="#i-check"/></svg>Up to 3 team members</li>
+            <li><svg><use href="#i-check"/></svg>Priority support</li>
           </ul>
-          <a href="#" class="btn btn-ghost btn-block mag">Mulai dengan Deep Sleep</a>
+          <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-ghost btn-block mag">Start with Deep Sleep</a>
         </article>
 
-        <article class="plan spot" data-reveal style="--d:.3s">
-          <div class="plan-h"><h3>Hibernate</h3><p>Server dedicated untuk perusahaan.</p></div>
-          <div class="price custom"><b>Kustom</b></div>
-          <ul class="specs"><li><b>16+</b> vCPU</li><li><b>64 GB+</b> RAM</li><li><b>GPU</b> opsional</li></ul>
+        <article class="plan spot">
+          <div class="plan-h"><h3>Hibernate</h3><p>Dedicated hardware for companies.</p></div>
+          <div class="price custom"><b>Custom</b></div>
+          <ul class="specs"><li><b>16+</b> vCPU</li><li><b>64 GB+</b> RAM</li><li><b>GPU</b> optional</li></ul>
           <ul class="feats">
-            <li><svg><use href="#i-check"/></svg>Server dedicated / on-prem</li>
-            <li><svg><use href="#i-check"/></svg>SSO & audit log</li>
-            <li><svg><use href="#i-check"/></svg>SLA 99,95%</li>
-            <li><svg><use href="#i-check"/></svg>Onboarding langsung</li>
+            <li><svg><use href="#i-check"/></svg>Dedicated or on-prem servers</li>
+            <li><svg><use href="#i-check"/></svg>SSO &amp; audit log</li>
+            <li><svg><use href="#i-check"/></svg>99.95% SLA</li>
+            <li><svg><use href="#i-check"/></svg>Hands-on onboarding</li>
           </ul>
-          <a href="#" class="btn btn-ghost btn-block mag">Hubungi kami</a>
+          <a href="https://github.com/arfakaisar/snugcode/issues" class="btn btn-ghost btn-block mag">Contact us</a>
         </article>
       </div>
 
       <!-- Configurator -->
       <div class="config spot" data-reveal>
         <div class="cfg-l">
-          <h3>Rakit server sendiri</h3>
-          <p class="sub-s">Geser untuk menyesuaikan. Harga dihitung langsung.</p>
+          <h3>Build your own server</h3>
+          <p class="sub-s">Drag to adjust. The price updates live.</p>
           <label class="rng"><span>vCPU <b id="vCpu">2</b></span><input type="range" id="rCpu" min="1" max="16" step="1" value="2"></label>
           <label class="rng"><span>RAM <b id="vRam">4 GB</b></span><input type="range" id="rRam" min="0" max="5" step="1" value="1"></label>
-          <label class="rng"><span>Penyimpanan <b id="vDisk">80 GB</b></span><input type="range" id="rDisk" min="25" max="500" step="5" value="80"></label>
+          <label class="rng"><span>Storage <b id="vDisk">80 GB</b></span><input type="range" id="rDisk" min="25" max="500" step="5" value="80"></label>
           <div class="regions" id="regions">
-            <button class="rg on" data-ms="12">🇮🇩 Jakarta</button>
-            <button class="rg" data-ms="18">🇸🇬 Singapura</button>
-            <button class="rg" data-ms="71">🇯🇵 Tokyo</button>
-            <button class="rg" data-ms="168">🇩🇪 Frankfurt</button>
+            <button class="rg on" data-ms="9">🇸🇬 Singapore</button>
+            <button class="rg" data-ms="11">🇩🇪 Frankfurt</button>
+            <button class="rg" data-ms="10">🇺🇸 Virginia</button>
+            <button class="rg" data-ms="12">🇯🇵 Tokyo</button>
+            <button class="rg" data-ms="14">🇮🇩 Jakarta</button>
           </div>
         </div>
         <div class="cfg-r">
           <div class="cfg-viz" aria-hidden="true">
             <div class="rack" id="rack"></div>
           </div>
-          <div class="cfg-price"><span class="cur">Rp</span><b id="cfgPrice">149</b><span class="per">rb/bln</span></div>
-          <p class="cfg-ping"><span class="dot-live"></span> Latensi dari Indonesia ± <b id="ping">12</b> ms</p>
-          <a href="#" class="btn btn-primary btn-block mag">Pesan server ini</a>
+          <div class="cfg-price"><span class="cur">$</span><b id="cfgPrice">15</b><span class="per">/mo</span></div>
+          <p class="cfg-ping"><span class="dot-live"></span> ~<b id="ping">9</b> ms to users in the region</p>
+          <a href="/auth/login?kind=user&amp;signup=1&amp;next=/" class="btn btn-primary btn-block mag">Order this server</a>
         </div>
       </div>
     </div>
@@ -428,16 +433,16 @@
     <div class="wrap faq-wrap">
       <div class="sec-head left">
         <p class="eyebrow" data-reveal>FAQ</p>
-        <h2 class="h2" data-split>Pertanyaan yang <span class="accent">sering muncul</span>.</h2>
-        <p class="sub" data-reveal>Belum terjawab? Tanya langsung lewat GitHub atau email.</p>
+        <h2 class="h2" data-split>Questions people <span class="accent">often ask</span>.</h2>
+        <p class="sub" data-reveal>Still curious? Ask us on GitHub.</p>
       </div>
       <div class="faq">
-        <div class="qa" data-reveal><button class="q">Apa bedanya dengan snugcode gratis di PC sendiri?<i></i></button><div class="a"><div><p>snugcode tetap open-source dan gratis dijalankan di PC-mu. snugcode Cloud memberimu server yang selalu menyala, sehingga agen tetap bekerja saat laptop mati, dan server yang sama bisa menjalankan aplikasimu.</p></div></div></div>
-        <div class="qa" data-reveal><button class="q">Apakah biaya model AI sudah termasuk?<i></i></button><div class="a"><div><p>Tidak. Kamu memakai API key atau langganan Claude, OpenAI, maupun Gemini milikmu sendiri, jadi tidak ada markup token. Kami hanya menagih servernya.</p></div></div></div>
-        <div class="qa" data-reveal><button class="q">Bisakah saya deploy aplikasi yang bukan dibuat oleh agen?<i></i></button><div class="a"><div><p>Tentu. Ini VPS sungguhan dengan akses shell penuh. Deploy repo apa pun — frontend statis, API, container Docker, worker, maupun database.</p></div></div></div>
-        <div class="qa" data-reveal><button class="q">Seberapa aman kode saya?<i></i></button><div class="a"><div><p>Koneksi HP ke server terenkripsi end-to-end; relay hanya meneruskan data terenkripsi. Setiap server terisolasi, dan kunci API disimpan terenkripsi di server milikmu.</p></div></div></div>
-        <div class="qa" data-reveal><button class="q">Bisa upgrade atau downgrade kapan saja?<i></i></button><div class="a"><div><p>Bisa. Ubah ukuran server dari dasbor; tagihan dihitung prorata per jam. Data dan aplikasi tetap aman saat resize.</p></div></div></div>
-        <div class="qa" data-reveal><button class="q">Metode pembayaran apa yang didukung?<i></i></button><div class="a"><div><p>QRIS, transfer bank, e-wallet, dan kartu kredit. Tagihan tahunan mendapat potongan 20%.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">How is this different from free snugcode on my own PC?<i></i></button><div class="a"><div><p>snugcode stays open source and free to run on your PC. snugcode Cloud gives you a server that never turns off, so your agent keeps working with the laptop closed, and the same server can host your apps.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">Are AI model costs included?<i></i></button><div class="a"><div><p>No. You use your own Claude, OpenAI or Gemini API key or subscription, so there is no token markup. We only charge for the server.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">Can I deploy apps the agent didn't build?<i></i></button><div class="a"><div><p>Of course. It's a real VPS with full shell access. Deploy any repo: static frontends, APIs, Docker containers, workers or databases.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">How safe is my code?<i></i></button><div class="a"><div><p>Your phone talks to your server end-to-end encrypted; the relay only forwards ciphertext. Every server is isolated, and API keys are stored encrypted on your own server.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">Can I upgrade or downgrade any time?<i></i></button><div class="a"><div><p>Yes. Resize from the dashboard; billing is prorated by the hour. Your data and apps stay put while resizing.</p></div></div></div>
+        <div class="qa" data-reveal><button class="q" aria-expanded="false">Which payment methods do you accept?<i></i></button><div class="a"><div><p>Credit and debit cards, plus local options such as QRIS and e-wallets where available. Yearly billing saves 20%.</p></div></div></div>
       </div>
     </div>
   </section>
@@ -448,11 +453,11 @@
       <div class="cta" data-reveal>
         <canvas id="stars" aria-hidden="true"></canvas>
         <div class="cta-mascot" aria-hidden="true"><svg><use href="#mascot"/></svg><span class="zz z1">z</span><span class="zz z2">z</span><span class="zz z3">Z</span></div>
-        <h2 class="h2" data-split>Biarkan agenmu bekerja. <span class="accent">Kamu istirahat saja.</span></h2>
-        <p class="sub">Server pertamamu siap dalam kurang dari semenit.</p>
+        <h2 class="h2" data-split>Let your agent work. <span class="accent">You get some rest.</span></h2>
+        <p class="sub">Your first server is ready in under a minute.</p>
         <div class="hero-cta center">
-          <a href="#harga" class="btn btn-primary btn-lg mag">Pilih server <svg><use href="#i-arrow"/></svg></a>
-          <a href="/agent/" class="btn btn-ghost btn-lg mag" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Buka snugcode agent</a>
+          <a href="#pricing" class="btn btn-primary btn-lg mag">Pick a server <svg><use href="#i-arrow"/></svg></a>
+          <a href="/agent/" class="btn btn-ghost btn-lg mag" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Open snugcode agent</a>
         </div>
       </div>
     </div>
@@ -463,27 +468,33 @@
   <div class="wrap foot-in">
     <div class="foot-brand">
       <a href="#top" class="brand"><span class="brand-ic"><svg><use href="#mascot"/></svg></span><span class="brand-tx">snugcode<em>cloud</em></span></a>
-      <p>Agen coding di saku, server yang tidak pernah tidur.</p>
+      <p>A coding agent in your pocket, on a server that never sleeps.</p>
     </div>
     <div class="foot-cols">
-      <div><h4>Produk</h4><a href="/agent/" data-agent>snugcode agent</a><a href="#fitur">Fitur</a><a href="#deploy">Deploy</a><a href="#harga">Harga</a></div>
-      <div><h4>Sumber</h4><a href="https://github.com/arfakaisar/snugcode">GitHub</a><a href="https://github.com/arfakaisar/snugcode/blob/main/docs/keamanan.md">Keamanan</a><a href="https://github.com/arfakaisar/snugcode/blob/main/CHANGELOG.md">Changelog</a></div>
-      <div><h4>Perusahaan</h4><a href="#">Tentang</a><a href="#">Ketentuan</a><a href="#">Privasi</a></div>
+      <div><h4>Product</h4><a href="/agent/" data-agent>snugcode agent</a><a href="#features">Features</a><a href="#deploy">Deploy</a><a href="#pricing">Pricing</a></div>
+      <div><h4>Resources</h4><a href="https://github.com/arfakaisar/snugcode">GitHub</a><a href="https://github.com/arfakaisar/snugcode/blob/main/docs/security.md">Security</a><a href="https://github.com/arfakaisar/snugcode/blob/main/CHANGELOG.md">Changelog</a></div>
+      <div><h4>Company</h4><a href="https://github.com/arfakaisar/snugcode#readme">About</a><a href="https://github.com/arfakaisar/snugcode/blob/main/LICENSE">License</a><a href="https://github.com/arfakaisar/snugcode/blob/main/docs/security.md">Privacy</a></div>
     </div>
   </div>
-  <div class="wrap foot-bot"><span>© 2026 snugcode</span><span class="status"><span class="dot-live"></span> Semua sistem normal</span></div>
+  <div class="wrap foot-bot"><span>© 2026 snugcode</span><span class="status"><span class="dot-live"></span> All systems normal</span></div>
 </footer>
+
+<!-- Mobile: sticky actions after the hero -->
+<div class="m-cta" id="mCta" aria-hidden="true">
+  <a href="#pricing" class="btn btn-primary">Pick a server</a>
+  <a href="/agent/" class="btn btn-ghost" data-agent><svg class="ic-l"><use href="#i-agent"/></svg> Agent</a>
+</div>
 
 <div class="modal" id="authModal" hidden>
   <div class="modal-scrim" data-close></div>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
-    <button class="icon-btn modal-x" data-close aria-label="Tutup"><span></span><span></span></button>
+    <button class="icon-btn modal-x" data-close aria-label="Close"><span></span><span></span></button>
     <div class="modal-mascot" aria-hidden="true"><svg><use href="#mascot"/></svg><span class="zz z1">z</span><span class="zz z2">z</span></div>
-    <h3 id="authTitle">Masuk dulu, ya</h3>
-    <p>snugcode agent memakai akun GitHub-mu: PC, runner cloud, dan sesi agen tersimpan di akun itu.</p>
-    <a href="/auth/login?kind=user&amp;next=/agent/" class="btn btn-primary btn-lg btn-block mag"><svg class="ic-l"><use href="#i-github"/></svg> Masuk dengan GitHub</a>
-    <a href="/auth/login?kind=user&amp;signup=1&amp;next=/agent/" class="btn btn-ghost btn-lg btn-block mag">Daftar akun baru</a>
-    <small>Belum punya akun GitHub? Pilih <b>Daftar</b>: kamu bisa membuatnya di tengah alur, lalu langsung kembali ke sini.</small>
+    <h3 id="authTitle">Sign in first</h3>
+    <p>snugcode agent uses your GitHub account. Your PCs, cloud runners and agent sessions are tied to it.</p>
+    <a href="/auth/login?kind=user&amp;next=/agent/" class="btn btn-primary btn-lg btn-block mag"><svg class="ic-l"><use href="#i-github"/></svg> Sign in with GitHub</a>
+    <a href="/auth/login?kind=user&amp;signup=1&amp;next=/agent/" class="btn btn-ghost btn-lg btn-block mag">Create an account</a>
+    <small>No GitHub account yet? Choose <b>Create an account</b>: you can make one mid-way and come straight back.</small>
   </div>
 </div>
 

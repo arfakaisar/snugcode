@@ -1,12 +1,12 @@
-// snugcode Cloud — interaksi landing page. Tanpa dependensi; semua animasi berbasis CSS
-// (transform/opacity) dan dipicu dari sini. Gerak dikurangi bila prefers-reduced-motion.
+// snugcode Cloud landing page interactions. No dependencies; animations are CSS (transform/opacity)
+// triggered from here. Motion is reduced under prefers-reduced-motion; pointer-only effects are skipped on touch.
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const fine = matchMedia('(pointer: fine)').matches;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* ---------- tema (sama dengan snugcode agent: pc.theme) ---------- */
+/* ---------- theme (shared with snugcode agent: pc.theme) ---------- */
 const syncThemeColor = () => ($('meta[name=theme-color]').content = document.documentElement.dataset.theme === 'light' ? '#faf9f5' : '#262624');
 syncThemeColor();
 $('#themeBtn').addEventListener('click', () => {
@@ -16,12 +16,13 @@ $('#themeBtn').addEventListener('click', () => {
   syncThemeColor();
 });
 
-/* ---------- akun: tombol snugcode agent & modal masuk/daftar ---------- */
-// Token login sama dengan snugcode agent (pc.token, satu origin). boot.js sudah memasang .authed bila ada
-// token; di sini token diperiksa ke relay agar token kedaluwarsa/dicabut tidak menampilkan tombol yang salah.
+/* ---------- account: snugcode agent buttons & sign-in modal ---------- */
+// Same login token as snugcode agent (pc.token, same origin). boot.js already set .authed when a token exists;
+// here it is checked against the relay so an expired/revoked token doesn't show the wrong buttons.
 const root = document.documentElement;
 const modal = $('#authModal');
 const openModal = () => {
+  closeMenu();
   modal.hidden = false;
   requestAnimationFrame(() => modal.classList.add('show'));
   $('.modal-card .btn-primary', modal).focus({ preventScroll: true });
@@ -59,20 +60,25 @@ for (const a of $$('[data-agent]')) {
   }
 }
 
-/* ---------- nav: scrolled, progress, link aktif, burger ---------- */
+/* ---------- nav: scrolled state, progress, active link, mobile menu ---------- */
 const nav = $('#nav');
 const prog = $('.progress span');
 const links = $$('#navLinks a[href^="#"]');
 const sections = links.map((a) => $(a.getAttribute('href')));
 const burger = $('#burger');
-burger.addEventListener('click', () => {
-  const open = burger.getAttribute('aria-expanded') !== 'true';
-  burger.setAttribute('aria-expanded', open);
-  $('#navLinks').classList.toggle('open', open);
-});
-$$('#navLinks a').forEach((a) => a.addEventListener('click', () => { burger.setAttribute('aria-expanded', 'false'); $('#navLinks').classList.remove('open'); }));
+const menu = $('#navLinks');
+function setMenu(open) {
+  burger.setAttribute('aria-expanded', String(open));
+  menu.classList.toggle('open', open);
+  root.classList.toggle('menu-open', open);
+}
+function closeMenu() { if (menu.classList.contains('open')) setMenu(false); }
+burger.addEventListener('click', () => setMenu(!menu.classList.contains('open')));
+$$('a', menu).forEach((a) => a.addEventListener('click', closeMenu));
+addEventListener('keydown', (e) => e.key === 'Escape' && closeMenu());
+matchMedia('(min-width: 861px)').addEventListener('change', closeMenu);
 
-/* ---------- teks per kata ---------- */
+/* ---------- word-by-word headings ---------- */
 for (const el of $$('[data-split]')) {
   let i = 0;
   const walk = (node) => {
@@ -94,13 +100,13 @@ for (const el of $$('[data-split]')) {
   walk(el);
 }
 
-/* ---------- reveal saat terlihat ---------- */
+/* ---------- reveal on scroll ---------- */
 const io = new IntersectionObserver((entries) => {
   for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-}, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+}, { threshold: 0.08, rootMargin: '0px 0px -24px 0px' });
 $$('[data-reveal], [data-split], .card').forEach((el) => io.observe(el));
 
-/* ---------- penghitung angka ---------- */
+/* ---------- counters ---------- */
 const countIO = new IntersectionObserver((entries) => {
   for (const e of entries) {
     if (!e.isIntersecting) continue;
@@ -109,7 +115,7 @@ const countIO = new IntersectionObserver((entries) => {
     const t0 = performance.now(), dur = reduced ? 1 : 1600;
     const tick = (t) => {
       const p = Math.min(1, (t - t0) / dur), v = to * (1 - Math.pow(1 - p, 4));
-      el.textContent = pre + v.toFixed(dec).replace('.', ',');
+      el.textContent = pre + v.toFixed(dec);
       if (p < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -117,8 +123,11 @@ const countIO = new IntersectionObserver((entries) => {
 }, { threshold: 0.6 });
 $$('[data-count]').forEach((el) => countIO.observe(el));
 
-/* ---------- scroll: progress, nav, parallax, garis langkah ---------- */
+/* ---------- scroll: progress, nav, parallax, steps line, mobile CTA bar ---------- */
 const floats = $$('[data-parallax]');
+const mCta = $('#mCta');
+const heroEl = $('#hero'), ctaEl = $('.cta-wrap');
+const mobile = matchMedia('(max-width: 860px)');
 const steps = $('#steps');
 const stepEls = $$('.step', steps);
 let ticking = false;
@@ -130,7 +139,11 @@ const onScroll = () => {
   let cur = -1;
   sections.forEach((s, i) => { if (s && s.getBoundingClientRect().top < innerHeight * 0.4) cur = i; });
   links.forEach((a, i) => a.classList.toggle('on', i === cur));
-  if (!reduced) for (const f of floats) f.style.setProperty('--py', `${y * f.dataset.parallax * -1}px`);
+  if (!reduced && !mobile.matches) for (const f of floats) f.style.setProperty('--py', `${y * f.dataset.parallax * -1}px`);
+  // Bottom action bar on phones: after the hero, hidden again near the closing CTA and footer.
+  const showBar = heroEl.getBoundingClientRect().bottom < 0 && ctaEl.getBoundingClientRect().top > innerHeight * 0.9;
+  mCta.classList.toggle('show', showBar);
+  mCta.setAttribute('aria-hidden', String(!showBar));
   const r = steps.getBoundingClientRect();
   const sp = Math.min(1, Math.max(0, (innerHeight * 0.75 - r.top) / r.height));
   steps.style.setProperty('--sp', sp);
@@ -139,7 +152,7 @@ const onScroll = () => {
 addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
 onScroll();
 
-/* ---------- pointer: glow hero, tilt, magnet, spotlight ---------- */
+/* ---------- pointer: hero glow, tilt, magnetic buttons, spotlight (mouse only) ---------- */
 if (fine && !reduced) {
   const hero = $('#hero');
   hero.addEventListener('pointermove', (e) => {
@@ -166,7 +179,7 @@ if (fine && !reduced) {
     b.addEventListener('pointerleave', () => { b.style.setProperty('--mx', '0px'); b.style.setProperty('--my', '0px'); });
   }
 }
-for (const c of $$('.spot')) {
+if (fine) for (const c of $$('.spot')) {
   c.addEventListener('pointermove', (e) => {
     const r = c.getBoundingClientRect();
     c.style.setProperty('--sx', `${e.clientX - r.left}px`);
@@ -174,9 +187,9 @@ for (const c of $$('.spot')) {
   });
 }
 
-/* ---------- rotator kata di hero ---------- */
+/* ---------- hero word rotator ---------- */
 {
-  const words = ['frontend', 'backend', 'API', 'database', 'bot Telegram', 'cron job'];
+  const words = ['frontend', 'backend', 'API', 'database', 'Telegram bot', 'cron job'];
   const rot = $('#rotator');
   let i = 0;
   if (!reduced) setInterval(() => {
@@ -189,7 +202,7 @@ for (const c of $$('.spot')) {
   }, 2200);
 }
 
-/* ---------- demo chat di HP ---------- */
+/* ---------- phone chat demo ---------- */
 {
   const feed = $('#feed'), input = $('#phInput'), send = $('#phSend');
   const mascot = '<svg><use href="#mascot"/></svg>';
@@ -209,7 +222,7 @@ for (const c of $$('.spot')) {
     send.classList.add('press');
     await sleep(180);
     send.classList.remove('press');
-    input.innerHTML = '<span class="ph-ph">Minta sesuatu ke agen…</span>';
+    input.innerHTML = '<span class="ph-ph">Ask the agent anything…</span>';
   };
   const tool = async (name, arg, ms) => {
     const m = add('tool', `<b>${name}</b> ${arg}<span class="sp"></span>`);
@@ -218,33 +231,33 @@ for (const c of $$('.spot')) {
   };
   const scripts = [
     async () => {
-      await type('Tambahkan halaman menu kopi + deploy ya');
-      add('user', 'Tambahkan halaman menu kopi + deploy ya');
+      await type('Add a coffee menu page and deploy it');
+      add('user', 'Add a coffee menu page and deploy it');
       await sleep(500);
       const th = add('ai', `${mascot}<span class="typing"><i></i><i></i><i></i></span>`);
       await sleep(1100); th.remove();
       await tool('Read', 'src/App.jsx', 700);
       await tool('Write', 'src/pages/Menu.jsx', 900);
-      const p = add('perm', '<div class="pt">Izinkan Edit?</div><div class="dl d">- &lt;h2&gt;Menu&lt;/h2&gt;</div><div class="dl a">+ &lt;MenuGrid items={menu}/&gt;</div><div class="pb"><span>Tolak</span><span>Selalu</span><span class="y">Izinkan</span></div>');
+      const p = add('perm', '<div class="pt">Allow Edit?</div><div class="dl d">- &lt;h2&gt;Menu&lt;/h2&gt;</div><div class="dl a">+ &lt;MenuGrid items={menu}/&gt;</div><div class="pb"><span>Deny</span><span>Always</span><span class="y">Allow</span></div>');
       await sleep(1400);
       $('.y', p).classList.add('tap');
       await sleep(600);
       await tool('Bash', 'npm run build', 1300);
-      await tool('Deploy', 'toko-kopi', 1200);
-      add('live', '<span class="dot-live"></span> toko-kopi.snug.run sudah live');
+      await tool('Deploy', 'coffee-shop', 1200);
+      add('live', '<span class="dot-live"></span> coffee-shop.snug.run is live');
     },
     async () => {
-      await type('Bikin endpoint POST /orders + test');
-      add('user', 'Bikin endpoint POST /orders + test');
+      await type('Build a POST /orders endpoint with tests');
+      add('user', 'Build a POST /orders endpoint with tests');
       await sleep(500);
       const th = add('ai', `${mascot}<span class="typing"><i></i><i></i><i></i></span>`);
       await sleep(1000); th.remove();
-      add('ai', `${mascot}<span>Siap! Aku buat route, validasi, dan test-nya.</span>`);
+      add('ai', `${mascot}<span>On it! I'll add the route, validation and tests.</span>`);
       await sleep(600);
       await tool('Write', 'api/orders.ts', 900);
       await tool('Write', 'api/orders.test.ts', 800);
       await tool('Bash', 'npm test', 1500);
-      add('ai', `${mascot}<span>12 test lulus ✓ API sudah jalan di <b style="color:#f5f4ef">api.toko-kopi.snug.run</b></span>`);
+      add('ai', `${mascot}<span>12 tests passed ✓ The API is live at <b style="color:#f5f4ef">api.coffee-shop.snug.run</b></span>`);
     },
   ];
   (async () => {
@@ -273,7 +286,7 @@ for (const c of $$('.spot')) {
   if (!reduced) setInterval(() => { pts.shift(); pts.push(Math.max(6, Math.min(60, pts.at(-1) + (Math.random() - 0.45) * 14))); draw(); }, 900);
 }
 
-/* ---------- sandi teracak ---------- */
+/* ---------- scrambling ciphertext ---------- */
 {
   const el = $('#cipher'), hex = '0123456789abcdef';
   if (!reduced) setInterval(() => {
@@ -281,29 +294,29 @@ for (const c of $$('.spot')) {
   }, 120);
 }
 
-/* ---------- deploy tab + terminal ---------- */
+/* ---------- deploy tabs + terminal ---------- */
 {
   const KINDS = {
-    frontend: { dir: '~/toko-kopi', url: 'toko-kopi.snug.run', meta: 'Vite · statis · CDN global', lines: [
-      ['p', '$ ', '', 'snug deploy'], ['d', '→ ', '', 'mendeteksi framework… '], ['v', '', '', 'Vite + React'],
-      ['d', '→ ', '', 'npm ci  '], ['g', '', '', '✓ 412 paket (6,1 dtk)'], ['d', '→ ', '', 'npm run build  '], ['g', '', '', '✓ dist/ 148 kB'],
-      ['d', '→ ', '', 'mengunggah ke edge  '], ['g', '', '', '✓'], ['d', '→ ', '', 'SSL '], ['b', '', '', "Let's Encrypt ✓"]] },
-    backend: { dir: '~/kopi-api', url: 'api.toko-kopi.snug.run', meta: 'Node 22 · PM2 · 2 instance', lines: [
+    frontend: { dir: '~/coffee-shop', url: 'coffee-shop.snug.run', meta: 'Vite · static · global CDN', lines: [
+      ['p', '$ ', '', 'snug deploy'], ['d', '→ ', '', 'detecting framework… '], ['v', '', '', 'Vite + React'],
+      ['d', '→ ', '', 'npm ci  '], ['g', '', '', '✓ 412 packages (6.1 s)'], ['d', '→ ', '', 'npm run build  '], ['g', '', '', '✓ dist/ 148 kB'],
+      ['d', '→ ', '', 'uploading to the edge  '], ['g', '', '', '✓'], ['d', '→ ', '', 'SSL '], ['b', '', '', "Let's Encrypt ✓"]] },
+    backend: { dir: '~/coffee-api', url: 'api.coffee-shop.snug.run', meta: 'Node 22 · PM2 · 2 instances', lines: [
       ['p', '$ ', '', 'snug deploy --port 3000'], ['d', '→ ', '', 'runtime: '], ['v', '', '', 'Node.js 22 (Express)'],
-      ['d', '→ ', '', 'npm ci --omit=dev  '], ['g', '', '', '✓'], ['d', '→ ', '', 'env: '], ['b', '', '', '6 variabel dari .env.production'],
+      ['d', '→ ', '', 'npm ci --omit=dev  '], ['g', '', '', '✓'], ['d', '→ ', '', 'env: '], ['b', '', '', '6 variables from .env.production'],
       ['d', '→ ', '', 'health check GET /health  '], ['g', '', '', '✓ 200 (14 ms)'], ['d', '→ ', '', 'zero-downtime swap  '], ['g', '', '', '✓']] },
-    fullstack: { dir: '~/kopi-web', url: 'kopi.id', meta: 'Next.js · SSR · custom domain', lines: [
-      ['p', '$ ', '', 'snug deploy --domain kopi.id'], ['d', '→ ', '', 'framework: '], ['v', '', '', 'Next.js 16 (App Router)'],
-      ['d', '→ ', '', 'next build  '], ['g', '', '', '✓ 23 route, 4 API'], ['d', '→ ', '', 'database: '], ['b', '', '', 'postgres://snug-db (internal)'],
-      ['d', '→ ', '', 'migrasi prisma  '], ['g', '', '', '✓ 3 migrasi'], ['d', '→ ', '', 'DNS kopi.id  '], ['g', '', '', '✓ terverifikasi']] },
-    database: { dir: '~', url: 'postgres://snug-db:5432', meta: 'PostgreSQL 17 · backup harian', lines: [
+    fullstack: { dir: '~/coffee-web', url: 'coffee.shop', meta: 'Next.js · SSR · custom domain', lines: [
+      ['p', '$ ', '', 'snug deploy --domain coffee.shop'], ['d', '→ ', '', 'framework: '], ['v', '', '', 'Next.js 16 (App Router)'],
+      ['d', '→ ', '', 'next build  '], ['g', '', '', '✓ 23 routes, 4 APIs'], ['d', '→ ', '', 'database: '], ['b', '', '', 'postgres://snug-db (internal)'],
+      ['d', '→ ', '', 'prisma migrate  '], ['g', '', '', '✓ 3 migrations'], ['d', '→ ', '', 'DNS coffee.shop  '], ['g', '', '', '✓ verified']] },
+    database: { dir: '~', url: 'postgres://snug-db:5432', meta: 'PostgreSQL 17 · daily backups', lines: [
       ['p', '$ ', '', 'snug db create postgres --name snug-db'], ['d', '→ ', '', 'image '], ['v', '', '', 'postgres:17-alpine'],
-      ['d', '→ ', '', 'volume 10 GB  '], ['g', '', '', '✓'], ['d', '→ ', '', 'kredensial disimpan di '], ['b', '', '', 'keychain server'],
-      ['d', '→ ', '', 'jadwal backup 03:00 WIB  '], ['g', '', '', '✓'], ['d', '→ ', '', 'jaringan '], ['b', '', '', 'internal saja']] },
-    worker: { dir: '~/kopi-bot', url: 'kopi-bot · cron */15', meta: 'Python 3.13 · restart otomatis', lines: [
+      ['d', '→ ', '', 'volume 10 GB  '], ['g', '', '', '✓'], ['d', '→ ', '', 'credentials stored in '], ['b', '', '', 'the server keychain'],
+      ['d', '→ ', '', 'backup schedule 03:00 UTC  '], ['g', '', '', '✓'], ['d', '→ ', '', 'network '], ['b', '', '', 'internal only']] },
+    worker: { dir: '~/coffee-bot', url: 'coffee-bot · cron */15', meta: 'Python 3.13 · auto-restart', lines: [
       ['p', '$ ', '', 'snug run --always "python bot.py"'], ['d', '→ ', '', 'runtime: '], ['v', '', '', 'Python 3.13 (uv)'],
-      ['d', '→ ', '', 'uv sync  '], ['g', '', '', '✓ 18 paket'], ['d', '→ ', '', 'proses '], ['b', '', '', 'kopi-bot (pid 2841)'],
-      ['d', '→ ', '', 'cron laporan */15 * * * *  '], ['g', '', '', '✓'], ['d', '→ ', '', 'log: '], ['b', '', '', 'snug logs kopi-bot -f']] },
+      ['d', '→ ', '', 'uv sync  '], ['g', '', '', '✓ 18 packages'], ['d', '→ ', '', 'process '], ['b', '', '', 'coffee-bot (pid 2841)'],
+      ['d', '→ ', '', 'cron report */15 * * * *  '], ['g', '', '', '✓'], ['d', '→ ', '', 'log: '], ['b', '', '', 'snug logs coffee-bot -f']] },
   };
   const tabs = $$('.dtab'), ind = $('.dtab-ind'), body = $('#termBody'), live = $('#termLive');
   let run = 0;
@@ -344,7 +357,9 @@ for (const c of $$('.spot')) {
     live.classList.add('show');
   };
   tabs.forEach((t) => t.addEventListener('click', () => {
-    tabs.forEach((x) => x.classList.toggle('on', x === t));
+    tabs.forEach((x) => (x.classList.toggle('on', x === t), x.setAttribute('aria-selected', String(x === t))));
+    // Phones: the tab strip scrolls sideways; keep the chosen tab in view.
+    t.scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduced ? 'auto' : 'smooth' });
     moveInd(t);
     play(t.dataset.kind);
   }));
@@ -354,9 +369,10 @@ for (const c of $$('.spot')) {
   termIO.observe($('.term'));
   requestAnimationFrame(() => moveInd($('.dtab.on')));
   addEventListener('resize', () => moveInd($('.dtab.on')));
+  document.fonts?.ready.then(() => moveInd($('.dtab.on')));
 }
 
-/* ---------- harga: bulanan/tahunan ---------- */
+/* ---------- pricing: monthly / yearly ---------- */
 {
   const sw = $('#billSwitch');
   const set = (yearly) => {
@@ -372,24 +388,24 @@ for (const c of $$('.spot')) {
   $$('.bl').forEach((b) => b.addEventListener('click', () => set(b.dataset.b === 'y')));
 }
 
-/* ---------- konfigurator server ---------- */
+/* ---------- server configurator ---------- */
 const cfg = (() => {
   const RAM = [2, 4, 8, 16, 32, 64];
   const rCpu = $('#rCpu'), rRam = $('#rRam'), rDisk = $('#rDisk'), price = $('#cfgPrice'), rack = $('#rack');
-  const state = { yearly: false, shown: 149, units: 0 };
+  const state = { yearly: false, shown: 15, units: 0 };
   const fill = (r) => r.style.setProperty('--fill', `${((r.value - r.min) / (r.max - r.min)) * 100}%`);
   state.update = () => {
     const cpu = +rCpu.value, ram = RAM[+rRam.value], disk = +rDisk.value;
     $('#vCpu').textContent = cpu; $('#vRam').textContent = ram + ' GB'; $('#vDisk').textContent = disk + ' GB';
     [rCpu, rRam, rDisk].forEach(fill);
-    let total = 19 + cpu * 38 + ram * 14 + disk * 0.4;
+    let total = 2 + cpu * 3.5 + ram * 1.3 + disk * 0.04;
     if (state.yearly) total *= 0.8;
     total = Math.round(total);
     const from = state.shown, t0 = performance.now();
     const anim = (t) => {
       const p = Math.min(1, (t - t0) / 400);
       state.shown = Math.round(from + (total - from) * (1 - Math.pow(1 - p, 3)));
-      price.textContent = state.shown.toLocaleString('id-ID');
+      price.textContent = state.shown.toLocaleString('en-US');
       if (p < 1) requestAnimationFrame(anim);
     };
     requestAnimationFrame(anim);
@@ -411,16 +427,37 @@ const cfg = (() => {
 })();
 
 /* ---------- FAQ ---------- */
+const setQa = (qa, open) => { qa.classList.toggle('open', open); $('.q', qa).setAttribute('aria-expanded', String(open)); };
 for (const qa of $$('.qa')) {
   $('.q', qa).addEventListener('click', () => {
     const open = !qa.classList.contains('open');
-    $$('.qa.open').forEach((x) => x.classList.remove('open'));
-    qa.classList.toggle('open', open);
+    $$('.qa.open').forEach((x) => setQa(x, false));
+    setQa(qa, open);
   });
 }
-$('.qa')?.classList.add('open');
+if ($('.qa')) setQa($('.qa'), true);
 
-/* ---------- langit berbintang di CTA ---------- */
+/* ---------- swipeable rails on phones (features, plans): dots + start on the popular plan ---------- */
+for (const rail of $$('.rail')) {
+  const items = [...rail.children];
+  const dots = document.createElement('div');
+  dots.className = 'rail-dots';
+  dots.setAttribute('aria-hidden', 'true');
+  dots.innerHTML = items.map(() => '<i></i>').join('');
+  rail.after(dots);
+  const sync = () => {
+    const mid = rail.scrollLeft + rail.clientWidth / 2;
+    let at = 0;
+    items.forEach((it, i) => { if (it.offsetLeft <= mid) at = i; });
+    [...dots.children].forEach((d, i) => d.classList.toggle('on', i === at));
+  };
+  rail.addEventListener('scroll', () => requestAnimationFrame(sync), { passive: true });
+  const pop = $('.pop', rail);
+  if (pop && mobile.matches) requestAnimationFrame(() => (rail.scrollLeft = pop.offsetLeft - (rail.clientWidth - pop.offsetWidth) / 2));
+  requestAnimationFrame(sync);
+}
+
+/* ---------- starry sky in the CTA ---------- */
 {
   const cv = $('#stars'), ctx = cv.getContext('2d');
   let stars = [], w = 0, h = 0, visible = false;
@@ -462,5 +499,5 @@ $('.qa')?.classList.add('open');
   }).observe(cv);
 }
 
-/* ---------- marquee: gandakan isi agar loop mulus ---------- */
+/* ---------- marquee: duplicate content for a seamless loop ---------- */
 for (const t of $$('.mq-track')) t.innerHTML += t.innerHTML;

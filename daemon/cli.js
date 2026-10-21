@@ -398,6 +398,7 @@ async function login() {
       const { loginViaDaemon } = await import('./tui.js');
       return await loginViaDaemon({ openBrowser: !flags['no-browser'] });
     } catch (e) {
+      // The Indonesian alternatives match messages from daemons installed before the English release.
       if (!/ECONNREFUSED|ENOENT|tidak menjawab|token lokal|not answering|local token/.test(e.message)) throw e;
       // An old daemon without a local channel: fall back to the old way (restart the daemon).
     }

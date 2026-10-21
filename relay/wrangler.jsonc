@@ -1,11 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Nama worker lama dipertahankan: mengganti nama = worker & database baru (lihat README).
-  // Alamat publik yang singkat disediakan worker alias `snugcode` (wrangler.alias.jsonc).
+  // The old worker name is kept: renaming = a new worker & database (see the README).
+  // The short public address is provided by the `snugcode` alias worker (wrangler.alias.jsonc).
   "name": "pocketcode-relay",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
-  // Log & metrik Workers (dashboard Cloudflare → Observability): error relay terlihat tanpa wrangler tail.
+  // Workers logs & metrics (Cloudflare dashboard → Observability): relay errors visible without wrangler tail.
   "observability": { "enabled": true },
   "assets": {
     "directory": "./public",
@@ -17,7 +17,7 @@
       { "name": "PENDING", "class_name": "Pending" }
     ]
   },
-  // Rate limit per IP untuk login & pendaftaran mesin (relay/src/index.js: limited).
+  // Per-IP rate limit for login & machine registration (relay/src/index.js: limited).
   "ratelimits": [
     { "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }
   ],
@@ -25,15 +25,15 @@
     { "tag": "v1", "new_sqlite_classes": ["Hub", "Pending"] }
   ],
   "vars": {
-    // Client ID OAuth App GitHub (boleh publik). Secret-nya di-set lewat
+    // GitHub OAuth App client ID (may be public). Its secret is set with
     // `wrangler secret put GITHUB_CLIENT_SECRET`.
     "GITHUB_CLIENT_ID": "Ov23li0XcnRmm4PTofH2",
     "DEV_AUTH": "0",
-    // Alamat utama PWA & login. Host lama tetap melayani PC dan API, tapi login dialihkan ke sini
-    // (callback OAuth App GitHub hanya boleh satu host) dan PWA di host lama menawarkan pindah.
+    // Main address for the PWA & login. Legacy hosts still serve PCs and the API, but login redirects here
+    // (a GitHub OAuth App callback allows only one host) and the PWA on a legacy host offers to move.
     "PUBLIC_URL": "https://snugcode.dev",
     "LEGACY_HOSTS": "snugcode.arfak.workers.dev,pocketcode-relay.arfak.workers.dev",
-    // Repo yang di-fork pengguna untuk runner Codespaces (berisi .devcontainer/ snugcode).
+    // The repo users fork for Codespaces runners (contains snugcode's .devcontainer/).
     "RUNNER_REPO": "arfakaisar/snugcode"
   }
 }

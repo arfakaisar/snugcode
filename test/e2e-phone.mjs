@@ -1,4 +1,4 @@
-// Uji end-to-end tanpa HP: bertindak seperti PWA terhadap relay lokal (mode dev).
+// End-to-end test without a phone: acts like the PWA against a local relay (dev mode).
 //   RELAY=http://127.0.0.1:8787 PIN=123456 node test/e2e-phone.mjs
 import * as C from '../shared/crypto.js';
 
@@ -42,7 +42,7 @@ async function pair(pin) {
   const f2 = await next((f) => f.t === 'pair2' || f.t === 'pair_err');
   if (f2.t === 'pair_err') return { err: f2.reason };
   const fin = C.pairFinishPhone(p.state, f2);
-  if (!fin) return { err: 'pin salah (terdeteksi di HP), sisa ' + f2.left };
+  if (!fin) return { err: 'wrong PIN (detected on the phone), attempts left ' + f2.left };
   ws.send(JSON.stringify({ t: 'pair3', ...fin.msg }));
   const ok = await next((f) => f.t === 'pair_ok' || f.t === 'pair_err');
   return ok.t === 'pair_ok' ? { deviceId: ok.deviceId, secret: fin.deviceSecret } : { err: ok.reason };
@@ -58,7 +58,7 @@ const fin = C.authFinishPhone(dev.secret, a.state, await next((f) => f.t === 'au
 ws.send(JSON.stringify({ t: 'auth3', ...fin.msg }));
 const ch = fin.channel;
 
-// Setelah auth, semua frame terenkripsi.
+// After auth, every frame is encrypted.
 const pending = new Map();
 let rpc = 0;
 const handlers = [];
@@ -80,7 +80,7 @@ const call = (method, p = {}) => {
   return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
 };
 
-log('repos (tanpa GitHub) ->', await call('repos').catch((e) => 'error: ' + e.message));
+log('repos (without GitHub) ->', await call('repos').catch((e) => 'error: ' + e.message));
 const s = await call('create', { repo: REPO });
 log('session:', JSON.stringify(s));
 await call('attach', { id: s.id });
@@ -110,7 +110,7 @@ log('git status:', JSON.stringify(st.files), 'branch', st.branch, 'ahead', st.ah
 const { diff } = await call('diff', { id: s.id });
 log('diff:\n' + diff.slice(0, 600));
 log('commit ->', await call('commit', { id: s.id, message: 'Add NOTES.md' }));
-log('push (tanpa token, harus gagal) ->', await call('push', { id: s.id }).catch((e) => 'error: ' + e.message.slice(0, 120)));
+log('push (without a token, must fail) ->', await call('push', { id: s.id }).catch((e) => 'error: ' + e.message.slice(0, 120)));
 
 const before = (await call('attach', { id: s.id, since: 0 })).events.length;
 log('riwayat event tersimpan:', before);

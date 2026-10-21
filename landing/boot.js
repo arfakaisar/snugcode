@@ -1,10 +1,9 @@
-// Dimuat di <head> sebelum render (file terpisah: CSP hanya mengizinkan skrip dari alamat sendiri).
-// 1. Tautan & aplikasi lama yang masih menuju `/` diteruskan ke snugcode agent (/agent/): aplikasi yang
-//    dipasang di layar utama sebelum pindah path, notifikasi push (#open=), izin Codespaces (#gh=), dan
-//    pindah dari alamat lama (#import=).
-// 2. Kembali dari login di landing page (#login=): token disimpan di kunci yang sama dengan snugcode agent
-//    (pc.token), jadi agent langsung terbuka tanpa login lagi.
-// 3. Tema (pc.theme, sama dengan snugcode agent) & status login dipasang sebelum CSS dirender (tanpa kedip).
+// Loaded in <head> before render (separate file: the CSP only allows same-origin scripts).
+// 1. Old links and apps that still open `/` are sent to snugcode agent (/agent/): apps added to the home screen
+//    before the move, push notification links (#open=), Codespaces auth (#gh=) and moves from the old host (#import=).
+// 2. Back from signing in on the landing page (#login=): the token is stored under the same key as snugcode agent
+//    (pc.token), so the agent opens without signing in again.
+// 3. Theme (pc.theme, shared with snugcode agent) and signed-in state are applied before CSS renders (no flash).
 (function () {
   var hash = location.hash;
   var standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;

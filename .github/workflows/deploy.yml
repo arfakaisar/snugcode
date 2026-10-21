@@ -1,10 +1,10 @@
-# Deploy relay + PWA ke Cloudflare (sama dengan `npm run deploy` di PC), otomatis saat main berubah
-# di bagian yang ikut ter-deploy, atau manual dari tab Actions (bisa dari HP: Run workflow).
-# Butuh secret repo CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers"); CLOUDFLARE_ACCOUNT_ID
-# opsional, hanya bila token punya akses ke lebih dari satu akun.
+# Deploys the relay + PWA to Cloudflare (same as `npm run deploy` on a PC), automatically when main changes
+# in deployed parts, or manually from the Actions tab (works from a phone: Run workflow).
+# Needs the repo secret CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers"); CLOUDFLARE_ACCOUNT_ID
+# is optional, only when the token can access more than one account.
 name: Deploy
 
-# Hanya setelah workflow CI lulus untuk commit main itu (PWA rusak tidak pernah sampai ke HP pengguna).
+# Only after the CI workflow passes for that main commit (a broken PWA never reaches users' phones).
 on:
   workflow_run:
     workflows: [CI]
@@ -23,11 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Commit yang lulus CI, bukan HEAD main terbaru.
+          # The commit that passed CI, not the latest main HEAD.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 2
-      # Dulu dibatasi `paths`: workflow_run tidak punya filter path, jadi dicek di sini.
-      - name: Ada perubahan yang ikut ter-deploy?
+      # Used to be limited by `paths`: workflow_run has no path filter, so it is checked here.
+      - name: Any deployable changes?
         id: changed
         run: |
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then echo go=1 >> "$GITHUB_OUTPUT"; exit 0; fi
@@ -36,13 +36,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Periksa secret Cloudflare
+      - name: Check the Cloudflare secret
         if: steps.changed.outputs.go == '1'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::Secret CLOUDFLARE_API_TOKEN belum di-set: Settings → Secrets and variables → Actions → New repository secret."
+            echo "::error::Secret CLOUDFLARE_API_TOKEN is not set: Settings → Secrets and variables → Actions → New repository secret."
             exit 1
           fi
       - run: npm ci && npm ci --prefix relay
@@ -56,8 +56,8 @@ jobs:
         run: |
           if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
           npm run deploy
-      # Smoke test: relay sehat dan PWA yang disajikan = hasil build commit ini (build.json sama).
-      - name: Cek versi baru aktif
+      # Smoke test: the relay is healthy and the served PWA = this commit's build (same build.json).
+      - name: Check the new version is live
         if: steps.changed.outputs.go == '1'
         run: |
           want="$(node -p "require('./relay/public/build.json').digest")"
@@ -66,4 +66,4 @@ jobs:
             if [ "$got" = "$want" ] && curl -sf https://snugcode.dev/api/health | grep -q wsProto; then echo "build $want aktif"; exit 0; fi
             sleep 3
           done
-          echo "::error::PWA/relay yang aktif bukan build commit ini (diharapkan $want, didapat ${got:-tidak ada})"; exit 1
+          echo "::error::the live PWA/relay is not this commit's build (expected $want, got ${got:-nothing})"; exit 1

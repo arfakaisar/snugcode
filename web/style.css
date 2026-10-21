@@ -1,16 +1,16 @@
-/* Font di-host sendiri (/fonts/ di root, dipakai bersama landing page; disalin dari @fontsource saat build): tanpa permintaan ke pihak ketiga. */
+/* Self-hosted fonts (/fonts/ at the root, shared with the landing page; copied from @fontsource at build time): no third-party requests. */
 @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url(/fonts/jetbrains-mono-400.woff2) format('woff2'); }
 @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url(/fonts/jetbrains-mono-500.woff2) format('woff2'); }
 @font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 200 900; font-display: swap; src: url(/fonts/source-serif-4.woff2) format('woff2-variations'), url(/fonts/source-serif-4.woff2) format('woff2'); }
 @font-face { font-family: 'Source Serif 4'; font-style: italic; font-weight: 200 900; font-display: swap; src: url(/fonts/source-serif-4-italic.woff2) format('woff2-variations'), url(/fonts/source-serif-4-italic.woff2) format('woff2'); }
 
-/* snugcode — UI mobile bergaya aplikasi chat: hangat, tenang, banyak gerak halus.
-   Prinsip: zoom dikunci seperti aplikasi native (meta viewport user-scalable=no, touch-action pan-x
-   pan-y tanpa pinch-zoom, gestur cubit iOS dibatalkan di dom.js; terminal punya cubit ukuran huruf
-   sendiri), tidak pernah zoom sendiri (kontrol form >= 16px, text-size-adjust 100%), shell mengikuti visualViewport saat keyboard terbuka, target sentuh
-   >= 36–44px, animasi hanya transform/opacity (murah di GPU), dan semua gerak dimatikan bila
-   prefers-reduced-motion. Tema gelap bawaan; terang otomatis/manual lewat [data-theme].
-   Kontras token teks memenuhi WCAG AA (≥ 4,5:1 terhadap --bg/--surface) di kedua tema. */
+/* snugcode — a chat-app-style mobile UI: warm, calm, lots of subtle motion.
+   Principles: zoom locked like a native app (meta viewport user-scalable=no, touch-action pan-x
+   pan-y without pinch-zoom, iOS pinch gestures cancelled in dom.js; the terminal has its own pinch for
+   font size), never auto-zooms (form controls >= 16px, text-size-adjust 100%), the shell follows visualViewport
+   while the keyboard is open, touch targets >= 36–44px, animations only use transform/opacity (cheap on the
+   GPU), and all motion is off under prefers-reduced-motion. Dark theme by default; light automatic/manual via [data-theme].
+   Text token contrast meets WCAG AA (≥ 4.5:1 against --bg/--surface) in both themes. */
 
 :root {
   --bg: #262624;
@@ -25,7 +25,7 @@
   --dim: #9a988f;
   --accent: #d97757;
   --accent-2: #c6613f;
-  /* Teks di atas aksen: gelap di tema gelap (putih di atas #d97757 hanya 3,1:1; WCAG AA butuh 4,5:1). */
+  /* Text on the accent: dark in the dark theme (white on #d97757 is only 3.1:1; WCAG AA needs 4.5:1). */
   --accent-fg: #1f1e1d;
   --on-bad: #1f1e1d;
   --accent-soft: rgba(217, 119, 87, .16);
@@ -56,8 +56,8 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --app-h: 100dvh;
-  /* Jarak bawah composer: home indicator / garis gestur hanya menempati bagian bawah safe-area,
-     jadi kartu input cukup berada sedikit di atasnya (seperti aplikasi chat native). */
+  /* Composer bottom gap: the home indicator / gesture bar only takes the bottom of the safe area,
+     so the input card only needs to sit slightly above it (like native chat apps). */
   --pad-b: max(10px, calc(var(--safe-b) - 4px));
   --app-top: 0px;
   --bar-h: 56px;
@@ -138,8 +138,8 @@
   }
 }
 
-/* pan-x pan-y: geser tetap jalan, cubit & ketuk-dua-kali tidak memperbesar halaman. Dipasang di semua
-   elemen karena touch-action dihitung per wadah gulir (nilai di <html> saja tidak sampai ke daftar). */
+/* pan-x pan-y: panning still works, pinch & double-tap don't zoom the page. Set on every element
+   because touch-action is computed per scroll container (a value on <html> alone doesn't reach lists). */
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: pan-x pan-y; }
 [hidden] { display: none !important; }
 
@@ -150,7 +150,7 @@ html {
   background: var(--bg);
 }
 html, body { margin: 0; height: 100%; overflow: hidden; }
-/* Ukuran teks pilihan pengguna (Akun & tampilan): isi layar, sheet & drawer ikut membesar. */
+/* User-chosen text size (Account & appearance): screen content, sheets & drawer grow with it. */
 #view, #sheetBody, #drawerPanel { zoom: var(--text-scale, 1); }
 body {
   color: var(--fg);
@@ -161,11 +161,11 @@ body {
   transition: background-color .3s, color .3s;
 }
 button, input, textarea, select { font: inherit; color: inherit; margin: 0; }
-/* Ukuran dasar ikon: SVG tanpa ukuran di dalam flex bisa membesar tanpa batas. */
+/* Base icon size: an unsized SVG inside flex can grow without limit. */
 svg { width: 18px; height: 18px; flex: none; }
-/* >= 16px: iOS Safari tidak akan zoom saat fokus. */
+/* >= 16px: iOS Safari won't zoom on focus. */
 input, textarea, select { font-size: 16px; }
-/* Tekan lama tombol tidak menyeleksi teks / memunculkan menu salin, seperti aplikasi native. */
+/* Long-pressing a button doesn't select text / show the copy menu, like native apps. */
 button { cursor: pointer; background: none; border: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 button:disabled { cursor: default; }
 a { color: var(--accent); text-decoration: none; }
@@ -174,15 +174,15 @@ a { color: var(--accent); text-decoration: none; }
 details > summary { list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 
-/* ---------- aplikasi terpasang di layar utama (iOS 26) ----------
-   1. WebKit 301108: dengan viewport-fit=cover + status bar black-translucent, viewport PWA dibuat lebih
-      pendek dari layar selama halaman lebih pendek dari layar, jadi shell fixed bottom:0 berhenti di atas
-      tepi bawah (composer melayang, ada pita kosong di bawahnya). Halaman setinggi layar membuat iOS
-      memberi viewport penuh; min() mencegah halaman bisa digulir bila status bar opak (inset atas 0).
-   2. Efek scroll-edge "Liquid Glass" iOS 26 memburamkan pita di bawah status bar dan tidak bisa dimatikan
-      lewat CSS/meta: semua yang menempel di atas (header, drawer, sheet, toast, terminal) diberi jarak
-      tambahan yang diisi warna latarnya sendiri, jadi judul & tombol berada di luar pita buram.
-      @supports -webkit-touch-callout = hanya WebKit iOS. */
+/* ---------- app installed on the home screen (iOS 26) ----------
+   1. WebKit 301108: with viewport-fit=cover + a black-translucent status bar, the PWA viewport is made shorter
+      than the screen while the page is shorter than the screen, so a fixed bottom:0 shell stops above the
+      bottom edge (floating composer, empty strip below it). A screen-tall page makes iOS give the full
+      viewport; min() keeps the page from scrolling when the status bar is opaque (top inset 0).
+   2. The iOS 26 "Liquid Glass" scroll-edge effect blurs the strip under the status bar and can't be turned off
+      with CSS/meta: everything stuck to the top (header, drawer, sheet, toast, terminal) gets extra padding
+      filled with its own background color, so titles & buttons sit outside the blurred strip.
+      @supports -webkit-touch-callout = iOS WebKit only. */
 @media (display-mode: standalone) {
   html { min-height: min(100lvh, calc(100% + env(safe-area-inset-top, 0px))); }
   @supports (-webkit-touch-callout: none) {
@@ -190,10 +190,10 @@ details > summary::-webkit-details-marker { display: none; }
   }
 }
 
-/* ---------- shell aplikasi ----------
-   Keyboard tertutup: menempel ke tepi layar lewat CSS (top/bottom 0). Tinggi dari JS tidak dipakai:
-   di PWA iOS innerHeight & visualViewport bisa kurang sebesar status bar dan meninggalkan celah di
-   bawah. Keyboard terbuka (html.kb): mengikuti visualViewport agar composer tidak tertutup. */
+/* ---------- app shell ----------
+   Keyboard closed: pinned to the screen edges with CSS (top/bottom 0). Heights from JS aren't used:
+   in an iOS PWA innerHeight & visualViewport can be short by the status bar height and leave a gap at the
+   bottom. Keyboard open (html.kb): follows visualViewport so the composer isn't covered. */
 #app {
   position: fixed;
   left: 0; right: 0; top: 0; bottom: 0;
@@ -213,7 +213,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
   z-index: 5;
   position: relative;
 }
-/* garis tipis yang memudar di bawah header */
+/* thin fading line under the header */
 #bar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -12px; height: 12px; background: linear-gradient(var(--bg), transparent); pointer-events: none; }
 #bar .side { display: flex; align-items: center; gap: 0; min-width: 44px; }
 #actions { justify-content: flex-end; }
@@ -287,7 +287,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 @keyframes shimmerText { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @keyframes skel { from { opacity: .45; } to { opacity: .9; } }
 
-/* ---------- maskot "Snug" ---------- */
+/* ---------- "Snug" mascot ---------- */
 .mascot {
   width: 24px; height: 24px; overflow: visible; flex: none;
   --m-body: #d97757; --m-cap: #6f7bc8; --m-cream: #fbeee0; --m-cream-2: #e3c4a8; --m-ink: #3a231a; --m-blush: #f6a48c; --m-z: #e9a688;
@@ -311,7 +311,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 .mascot .m-zz path:nth-child(2) { animation-delay: 1.2s; }
 .mascot .m-zz path:nth-child(3) { animation-delay: 2.4s; }
 .mascot .m-dots { opacity: 0; fill: var(--m-body); }
-/* tidur: bernapas pelan, selimut ikut naik-turun, topi bergoyang */
+/* sleeping: slow breathing, the blanket rises and falls, the hat sways */
 .mascot .m-breath { transform-origin: 32px 52px; animation: mBreath 3.6s ease-in-out infinite; }
 .mascot .m-blanket { transform-origin: 32px 57px; animation: mBlanket 3.6s ease-in-out infinite; }
 .mascot .m-cap { transform-origin: 26px 30px; animation: mCap 3.6s ease-in-out infinite; }
@@ -322,7 +322,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 @keyframes mShadow { 50% { transform: scaleX(.94); opacity: .12; } }
 @keyframes mMouth { 50% { transform: scale(1.25, 1.35); } }
 @keyframes mZ { 0% { opacity: 0; transform: translate(-4px, 6px) scale(.4) rotate(-12deg); } 25% { opacity: 1; } 75% { opacity: .9; } 100% { opacity: 0; transform: translate(4px, -7px) scale(1.15) rotate(8deg); } }
-/* bekerja: bangun, mata berkedip, kepala mengangguk, kaki mengetik, titik berpikir */
+/* working: awake, eyes blink, head nods, feet type, thinking dots */
 .mascot.think .m-sleep, .mascot.think .m-zz { display: none; }
 .mascot.think .m-open { opacity: 1; animation: mBlink 3.2s infinite; }
 .mascot.think .m-bob { animation: mBob .9s ease-in-out infinite; }
@@ -340,7 +340,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 @keyframes mCapBusy { 50% { transform: rotate(-9deg); } }
 @keyframes mType { to { transform: translateY(-2.2px); } }
 @keyframes mDot { 0%, 100% { opacity: .2; transform: translateY(1.5px) scale(.8); } 45% { opacity: 1; transform: none; } }
-/* muncul: meletup masuk (squash & stretch), selimut naik, zzz mulai setelahnya */
+/* appearing: pops in (squash & stretch), blanket rises, zzz starts afterwards */
 .mascot.draw { animation: mPop .85s var(--bounce) both; }
 .mascot.draw .m-blanket { animation: mBlanketIn .75s var(--spring) .3s both, mBlanket 3.6s ease-in-out 1.05s infinite; }
 .mascot.draw .m-cap { animation: mCapIn .9s var(--bounce) .15s both, mCap 3.6s ease-in-out 1.05s infinite; }
@@ -350,7 +350,7 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 @keyframes mPop { 0% { opacity: 0; transform: translateY(30%) scale(.2); } 55% { opacity: 1; transform: translateY(-6%) scale(1.12, .88); } 78% { transform: scale(.95, 1.07); } 100% { transform: none; } }
 @keyframes mBlanketIn { from { opacity: 0; transform: translateY(16px); } }
 @keyframes mCapIn { 0% { transform: translateY(-14px) rotate(-30deg); opacity: 0; } 60% { opacity: 1; } }
-/* dicolek: kaget melompat, mata terbuka sebentar */
+/* poked: jumps in surprise, eyes open briefly */
 .mascot.tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .mascot.poke .m-bob { animation: mJump .7s var(--bounce); }
 .mascot.poke .m-sleep, .mascot.poke .m-zz { display: none; }
@@ -359,14 +359,14 @@ html.kb #app { top: var(--app-top); bottom: auto; height: var(--app-h); }
 @keyframes mJump { 0% { transform: none; } 25% { transform: scale(1.1, .85); } 55% { transform: translateY(-9px) scale(.94, 1.08); } 80% { transform: scale(1.05, .95); } 100% { transform: none; } }
 .mascot.xl { width: 72px; height: 72px; }
 
-/* teks berkilau (status "berpikir…", memuat) */
+/* shimmering text ("thinking…" status, loading) */
 .shimmer {
   background: linear-gradient(90deg, var(--dim) 30%, var(--fg) 50%, var(--dim) 70%) 0 0 / 200% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: shimmerText 1.8s linear infinite;
 }
 
-/* ---------- tipografi & elemen umum ---------- */
+/* ---------- typography & common elements ---------- */
 h1 { font-size: 24px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.02em; font-weight: 600; }
 .serif { font-family: var(--serif); font-weight: 400; letter-spacing: -.01em; }
 .display { font-size: clamp(32px, 9.5vw, 44px); line-height: 1.08; letter-spacing: -.025em; }
@@ -387,7 +387,7 @@ code.inline, .kbd { font-family: var(--mono); background: var(--surface-2); bord
 .fine { font-size: 12px; color: var(--dim); margin-top: 16px; text-align: center; }
 .fine.link { display: block; color: var(--accent); text-decoration: none; }
 
-/* ---------- tombol ---------- */
+/* ---------- buttons ---------- */
 .btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; min-height: 48px; padding: 11px 18px; border-radius: 99px;
@@ -440,7 +440,7 @@ select.field {
 .inline .field { flex: 1; min-width: 0; }
 .inline .btn { width: auto; flex: none; margin: 0; }
 
-/* segmented control dengan penanda yang bergeser */
+/* segmented control with a sliding marker */
 .seg { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 4px; gap: 0; }
 .seg button { position: relative; z-index: 1; min-height: 40px; border-radius: 99px; color: var(--dim); font-size: 13.5px; font-weight: 600; transition: color .25s; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .seg button svg { width: 16px; height: 16px; }
@@ -452,9 +452,9 @@ select.field {
   transition: transform .45s var(--spring);
 }
 
-/* ---------- kartu & daftar ---------- */
-/* minmax(0, 1fr): item grid boleh lebih sempit dari isinya, jadi judul panjang terpotong "…"
-   alih-alih melebarkan kartu keluar layar. */
+/* ---------- cards & lists ---------- */
+/* minmax(0, 1fr): grid items may be narrower than their content, so long titles truncate with "…"
+   instead of widening the card off screen. */
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .card {
   display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
@@ -517,7 +517,7 @@ button.card:active .chev { transform: translateX(3px); }
 .addpc[open] { padding-bottom: 14px; }
 .addpc[open] > :not(summary) { animation: rise .4s var(--spring) both; }
 
-/* ---------- login & sapaan ---------- */
+/* ---------- login & greeting ---------- */
 .hero { flex: 1; display: flex; flex-direction: column; justify-content: center; max-width: 460px; margin: 0 auto; width: 100%; padding: calc(24px + var(--safe-t)) calc(24px + var(--safe-r)) calc(28px + var(--safe-b)) calc(24px + var(--safe-l)); }
 #bar:not([hidden]) ~ #view .hero { padding-top: 24px; }
 .scroll > .hero { min-height: 100%; }
@@ -547,7 +547,7 @@ button.card:active .chev { transform: translateX(3px); }
 .metachip {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 99px;
   background: var(--surface); border: 1px solid var(--line); color: var(--fg-2); font-size: 12.5px;
-  /* Sama dengan sapaan di atasnya (rise .6s, mulai .1s), berurutan per pil. */
+  /* Same as the greeting above it (rise .6s, starting at .1s), staggered per pill. */
   animation: rise .6s var(--spring) both; animation-delay: calc(.16s + var(--i, 0) * 60ms); transition: transform .2s var(--spring);
 }
 .metachip:active { transform: scale(.95); }
@@ -555,10 +555,10 @@ button.card:active .chev { transform: translateX(3px); }
 .metachip.warn { color: var(--bad); }
 .metachip.on { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
 
-/* beranda: tombol "mulai sesi" bergaya composer di bawah */
+/* home: composer-style "start a session" button at the bottom */
 .session.home .col { padding-bottom: calc(92px + var(--pad-b)); }
 .starter {
-  /* Bawah: safe-area (home indicator / navigasi gestur) sudah memberi jarak, jadi tidak ditambah lagi. */
+  /* Bottom: the safe area (home indicator / gesture navigation) already adds space, so none is added. */
   position: absolute; left: 0; right: 0; bottom: 0; padding: 26px calc(14px + var(--safe-r)) var(--pad-b) calc(14px + var(--safe-l));
   background: linear-gradient(to top, var(--bg) 58%, transparent); pointer-events: none;
 }
@@ -573,13 +573,13 @@ button.card:active .chev { transform: translateX(3px); }
 .starterbtn .sk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border-radius: 99px; background: var(--surface-2); color: var(--fg-2); flex: none; }
 .starterbtn .sk svg { width: 13px; height: 13px; }
 
-/* tarik untuk muat ulang */
+/* pull to refresh */
 .ptr { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); opacity: 0; pointer-events: none; }
 .ptr .mascot { width: 34px; height: 34px; }
 .ptr.spin { opacity: 1 !important; }
 .ptr.spin .mascot .m-bob { animation: mBob .5s ease-in-out infinite; }
 
-/* banner (pembaruan / GitHub) */
+/* banner (update / GitHub) */
 .banner {
   display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; margin: 4px 0 10px;
   padding: 12px 12px 12px 14px; border-radius: var(--r-lg); border: 1px solid transparent;
@@ -655,18 +655,18 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .dme .grow > span { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
 .dme .odot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
 
-/* ---------- sesi: percakapan ---------- */
+/* ---------- session: conversation ---------- */
 .session { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .session.chat { --ch: 120px; }
 #term { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 #term .col { padding-top: 6px; padding-bottom: calc(var(--ch) + 58px); }
-/* Sesi kosong: sambutan di tengah layar tanpa menggulir (ruang indikator kerja belum perlu). */
+/* Empty session: centered welcome without scrolling (no room needed for the work indicator yet). */
 #term .col:has(> .welcome:not(.used)) { min-height: 100%; display: flex; flex-direction: column; justify-content: center; padding-bottom: calc(var(--ch) + 4px); }
 #term .col:has(> .welcome:not(.used)) > .welcome { padding-top: 8px; }
 .ln { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; margin: 4px 0; }
 .ev { animation: rise .45s var(--spring) both; }
 
-/* pesan pengguna: gelembung di kanan */
+/* user message: bubble on the right */
 .u { margin: 24px 0 10px; display: flex; flex-direction: column; align-items: flex-end; white-space: normal; }
 .u .bubble {
   max-width: 86%; padding: 10px 15px; border-radius: 20px 20px 6px 20px; background: var(--bubble); color: var(--fg);
@@ -691,11 +691,11 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .shotmsg img.big { max-width: 100%; }
 .shotmsg figcaption { color: var(--dim); font-size: 11.5px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* teks agen: serif, tanpa gelembung */
+/* agent text: serif, no bubble */
 .txt { margin: 10px 0; font: 16.5px/1.65 var(--serif); color: var(--fg); white-space: normal; }
 .txt p { margin: 0 0 .75em; }
 .txt p:last-child { margin-bottom: 0; }
-/* Teks agen dirender bertahap: [blok selesai][blok terakhir]; jarak antar keduanya tetap seperti satu dokumen. */
+/* Agent text renders incrementally: [finished blocks][last block]; spacing between them stays like one document. */
 .txt > div:first-child:not(:empty):has(+ div:not(:empty)) > p:last-child { margin-bottom: .75em; }
 .txt h3 { font-size: 18px; font-weight: 600; margin: 1.1em 0 .4em; letter-spacing: -.01em; }
 .txt ul, .txt ol { margin: .2em 0 .85em; padding-left: 1.4em; }
@@ -719,7 +719,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .copybtn svg { width: 14px; height: 14px; }
 .copybtn.done { color: var(--ok); }
 
-/* langkah tool: baris ringkas; langkah berurutan menyatu jadi satu kartu */
+/* tool steps: compact rows; consecutive steps merge into one card */
 .tool { margin: 8px 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; font-size: 13.5px; white-space: normal; }
 .tool:has(+ .tool) { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; margin-bottom: 0; }
 .tool + .tool { margin-top: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
@@ -753,7 +753,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .dstat .a { color: var(--add-fg); }
 .dstat .d { color: var(--del-fg); }
 
-/* rencana (todo) */
+/* plan (todo) */
 .todo:not(.it) { margin: 12px 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 14px 16px; white-space: normal; transition: opacity .4s; }
 .todo.stale:not(.it) { opacity: .5; }
 .todo .tt { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--fg-2); margin-bottom: 10px; }
@@ -781,7 +781,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .donel .rw { order: 1; }
 .donel.bad { color: var(--bad); }
 
-/* sambutan sesi kosong */
+/* empty session welcome */
 .welcome { text-align: center; padding: 34px 4px 8px; white-space: normal; }
 .welcome .mascot { margin: 0 auto 14px; display: block; width: 92px; height: 92px; }
 .welcome h2 { font-size: clamp(22px, 6.4vw, 28px); line-height: 1.25; margin: 0 0 12px; animation: rise .6s var(--spring) .1s both; }
@@ -813,7 +813,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .difffile .dfb { overflow-x: auto; font: 12px/1.55 var(--mono); padding: 6px 0; }
 .difffile.collapsed .dfb { display: none; }
 
-/* ---------- dok izin (kartu di atas composer) ---------- */
+/* ---------- permission dock (card above the composer) ---------- */
 #dock:empty { display: none; }
 .perm {
   margin: 0 0 8px; border: 1px solid var(--line-2); background: var(--surface);
@@ -832,7 +832,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .perm .btnrow .btn { min-height: 44px; padding: 8px 12px; }
 .perm .btn:not(.primary):not(.ghost):not(.dangerfill) { background: var(--surface-2); border-color: transparent; }
 .perm .btn.ghost { color: var(--fg-2); }
-/* pertanyaan pilihan & rencana */
+/* multiple-choice questions & plans */
 .perm.ask { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; }
 .askq { margin: 12px 0; }
 .askq .qt { font-size: 14.5px; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -846,7 +846,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 .perm.ask .field { margin-bottom: 10px; min-height: 44px; }
 .perm .more { color: var(--dim); font-size: 11.5px; margin-top: 8px; text-align: center; }
 
-/* indikator kerja + tombol turun */
+/* work indicator + scroll-down button */
 #working {
   position: absolute; left: calc(14px + var(--safe-l)); bottom: calc(var(--ch) + 4px); z-index: 2;
   display: flex; align-items: center; gap: 9px; max-width: calc(100% - 90px);
@@ -868,7 +868,7 @@ html.drawer-drag #drawerPanel, html.drawer-drag #drawerScrim, html.drawer-drag #
 #tobottom svg { width: 18px; height: 18px; }
 #tobottom .n { background: var(--accent); color: var(--accent-fg); border-radius: 99px; padding: 0 6px; font-weight: 700; font-size: 11px; }
 
-/* ---------- composer: kartu melayang ---------- */
+/* ---------- composer: floating card ---------- */
 #composer {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
   padding: 22px calc(14px + var(--safe-r)) var(--pad-b) calc(14px + var(--safe-l));
@@ -981,7 +981,7 @@ html.kb .sheetfoot { bottom: -18px; margin-bottom: -18px; padding-bottom: 18px; 
 .menuitem .chev { width: 18px; height: 18px; color: var(--dim); flex: none; }
 .group { border-radius: var(--r-lg); background: var(--surface); padding: 4px; margin: 8px 0; }
 .group + .group { margin-top: 12px; }
-/* sakelar */
+/* switch */
 .switch { position: relative; width: 46px; height: 28px; border-radius: 99px; background: var(--surface-3); flex: none; transition: background .3s var(--spring); }
 .switch i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); transition: transform .4s var(--bounce); }
 .switch.on { background: var(--accent); }
@@ -989,7 +989,7 @@ html.kb .sheetfoot { bottom: -18px; margin-bottom: -18px; padding-bottom: 18px; 
 .switch.on i { transform: translateX(18px); }
 .menuitem:active .switch i { width: 26px; }
 .menuitem:active .switch.on i { transform: translateX(14px); }
-/* ubin lampiran */
+/* attachment tiles */
 .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 2px 0 6px; }
 .tile {
   display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 4px 12px; border-radius: var(--r-lg);
@@ -1007,7 +1007,7 @@ html.kb .sheetfoot { bottom: -18px; margin-bottom: -18px; padding-bottom: 18px; 
 }
 .chip:active { transform: scale(.94); }
 .chip.mono { font: 12.5px var(--mono); }
-/* konfirmasi */
+/* confirmation */
 .confirm { text-align: center; padding: 10px 6px 4px; }
 .confirm .cicon { width: 60px; height: 60px; border-radius: 20px; margin: 4px auto 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); animation: popIn .5s var(--bounce) both; }
 .confirm .cicon svg { width: 26px; height: 26px; }
@@ -1053,7 +1053,7 @@ img.shot { display: block; width: 100%; border: 1px solid var(--line); border-ra
 .log { font: 12px/1.5 var(--mono); color: var(--fg-2); border-left: 2px solid var(--line-2); padding-left: 12px; display: grid; gap: 6px; }
 .log .h { color: var(--accent); margin-right: 8px; }
 
-/* ---------- pemilih model ---------- */
+/* ---------- model picker ---------- */
 .mlist { margin-top: 6px; }
 .mprov { color: var(--dim); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; margin: 18px 4px 8px; display: flex; gap: 8px; align-items: center; }
 .mprov::after { content: ''; flex: 1; height: 1px; background: var(--line); }
@@ -1107,7 +1107,7 @@ input[type=range]:disabled { opacity: .3; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-24px) scale(.9); } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-14px) scale(.95); } }
 
-/* ---------- layar lebar: kolom tengah, sheet jadi dialog ---------- */
+/* ---------- wide screens: centered column, sheets become dialogs ---------- */
 @media (min-width: 720px) {
   .col { padding-left: 24px; padding-right: 24px; }
   #sheetPanel {
@@ -1127,7 +1127,7 @@ input[type=range]:disabled { opacity: .3; }
 @keyframes dialogIn { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
 @keyframes dialogOut { to { opacity: 0; transform: translate(-50%, -48%) scale(.97); } }
 
-/* layar pendek (landscape / keyboard terbuka) */
+/* short screens (landscape / keyboard open) */
 @media (max-height: 520px) {
   :root { --bar-h: 46px; }
   #subText { display: none; }
@@ -1136,7 +1136,7 @@ input[type=range]:disabled { opacity: .3; }
   .welcome { padding-top: 10px; }
   .welcome .mascot, .welcome .tips { display: none; }
 }
-/* Layar pendek + sedang mengetik: sembunyikan pil mode & dok tetap ringkas. */
+/* Short screen + typing: hide the mode pills & keep the dock compact. */
 html.kb.short #modes { display: none; }
 
 @media (hover: hover) {
@@ -1150,7 +1150,7 @@ html.kb.short #modes { display: none; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
 
-/* Langkah pembuatan runner cloud */
+/* Cloud runner creation steps */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .steps li { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r); background: var(--surface); animation: rise .4s var(--spring) both; }
 .steps .si { flex: none; width: 22px; height: 22px; display: grid; place-items: center; color: var(--dim); }
@@ -1159,13 +1159,13 @@ html.kb.short #modes { display: none; }
 .steps li.bad .si { color: var(--bad); }
 .steps li .dim { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Kartu mesin + tombol opsi (⋯) di sebelahnya: tombol tidak boleh bersarang di dalam tombol kartu. */
+/* Machine card + options button (⋯) next to it: a button can't be nested inside the card button. */
 .cardrow { position: relative; animation: rise .55s var(--spring) both; animation-delay: calc(var(--i, 0) * 45ms); }
 .cardrow .card { padding-right: 56px; animation: none; }
 .cardrow .more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--dim); }
 .cardrow .more:active { transform: translateY(-50%) scale(.9); }
 
-/* Progress proses lama (web/ui/progress.js): bar bergerak + tahap + waktu & perkiraan sisa */
+/* Long-running progress (web/ui/progress.js): moving bar + stage + elapsed & estimated remaining time */
 .prog { padding: 14px; border-radius: var(--r-lg); background: var(--surface); text-align: left; animation: rise .4s var(--spring) both; }
 .prog .ptop { display: flex; align-items: baseline; gap: 10px; }
 .prog .pretry { margin-top: 12px; text-align: center; }
@@ -1174,14 +1174,14 @@ html.kb.short #modes { display: none; }
 .prog .ptime { flex: none; color: var(--dim); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 .prog .pbar { position: relative; height: 8px; margin: 10px 0 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
 .prog .pbar i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width .5s linear; overflow: hidden; }
-/* Kilau yang terus berjalan: tanda hidup walau bar maju pelan */
+/* A continuous shimmer: a sign of life even when the bar moves slowly */
 .prog .pbar i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent); transform: translateX(-100%); animation: pshine 1.6s ease-in-out infinite; }
 @keyframes pshine { to { transform: translateX(100%); } }
 .prog.ok .pbar i { background: var(--ok); }
 .prog.ok .pbar i::after, .prog.bad .pbar i::after { animation: none; display: none; }
 .prog.bad .pbar i { background: var(--bad); }
 .prog .pdetail { color: var(--dim); font-size: 12.5px; min-height: 1.2em; overflow-wrap: anywhere; }
-.prog.slow .pdetail::after { content: ' · lebih lama dari biasanya, masih berjalan'; }
+.prog.slow .pdetail::after { content: ' · taking longer than usual, still running'; }
 .prog .psteps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .prog .psteps li { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13px; }
 .prog .psteps li.now { color: var(--fg); font-weight: 600; }
@@ -1222,7 +1222,7 @@ html.kb.short #modes { display: none; }
 textarea.field.editor { font: 12.5px/1.5 var(--mono); min-height: 52vh; white-space: pre; overflow: auto; tab-size: 2; }
 .mono { font-family: var(--mono); }
 
-/* review diff: komentar per baris/hunk, batalkan hunk */
+/* diff review: per-line/hunk comments, revert hunks */
 .difffile .dfa { display: flex; gap: 6px; padding: 4px 10px 8px; flex-wrap: wrap; }
 .difffile .dfa .chip svg { width: 14px; height: 14px; }
 .chip.danger { color: var(--bad); }
@@ -1241,7 +1241,7 @@ textarea.field.editor { font: 12.5px/1.5 var(--mono); min-height: 52vh; white-sp
 .cmt svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
 .revcount { text-align: center; align-self: center; }
 
-/* ---------- terminal interaktif ---------- */
+/* ---------- interactive terminal ---------- */
 .termview { position: fixed; inset: 0; z-index: 18; display: flex; flex-direction: column; background: var(--code-bg); padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l); animation: rise .3s var(--spring) both; }
 html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); padding-bottom: 0; }
 .termview.closing { animation: fadeOut .2s ease-in both; }
@@ -1261,13 +1261,13 @@ html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); pad
 .termview .tk.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 .termview .tk:active { transform: scale(.94); }
 
-/* Tambah PC: pilihan OS untuk perintah pemasang + status menunggu PC baru tertaut. */
+/* Add a PC: OS choice for the install command + waiting for the new PC to link. */
 .seg.small { margin-top: 10px; }
 .seg.small button { min-height: 34px; font-size: 12.5px; }
 .waitpc { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .waitpc .mascot { width: 28px; height: 28px; flex: none; }
 
-/* Kartu izin: tingkat risiko & jaring pengaman (rewind). */
+/* Permission card: risk level & safety net (rewind). */
 .perm .risk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 12.5px; color: var(--fg-2); }
 .perm .risk .rl { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; }
 .perm .risk .rl svg { width: 13px; height: 13px; }

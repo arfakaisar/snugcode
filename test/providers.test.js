@@ -212,8 +212,8 @@ test('translate: OpenAI stream -> Anthropic SSE (text, reasoning, split tool cal
   const tr = T.createStreamTranslator('m1');
   const chunks = [
     { choices: [{ delta: { reasoning_content: 'thinking' } }] },
-    { choices: [{ delta: { content: 'Hal' } }] },
-    { choices: [{ delta: { content: 'o' } }] },
+    { choices: [{ delta: { content: 'Hel' } }] },
+    { choices: [{ delta: { content: 'lo' } }] },
     { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_9', function: { name: 'Bash', arguments: '{"comm' }, extra_content: { google: { thought_signature: 'SIG9' } } }] } }] },
     { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'and":"ls"}' } }] } }] },
     { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
@@ -225,7 +225,7 @@ test('translate: OpenAI stream -> Anthropic SSE (text, reasoning, split tool cal
   const ev = parseSse(out);
   assert.equal(ev[0].type, 'message_start');
   assert.deepEqual(ev.filter((e) => e.type === 'content_block_start').map((e) => e.content_block.type), ['thinking', 'text', 'tool_use']);
-  assert.equal(ev.filter((e) => e.delta?.type === 'text_delta').map((e) => e.delta.text).join(''), 'Halo');
+  assert.equal(ev.filter((e) => e.delta?.type === 'text_delta').map((e) => e.delta.text).join(''), 'Hello');
   assert.equal(ev.filter((e) => e.delta?.type === 'input_json_delta').map((e) => e.delta.partial_json).join(''), '{"command":"ls"}');
   const md = ev.find((e) => e.type === 'message_delta');
   assert.equal(md.delta.stop_reason, 'tool_use');

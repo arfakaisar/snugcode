@@ -1,8 +1,8 @@
-// Uji end-to-end engine Gemini CLI: HP -> relay lokal -> daemon asli -> `gemini --acp` asli -> Gemini API tiruan.
-// Teks & usage, izin perintah shell dari HP (tetap bertanya saat auto-izin: Gemini CLI tanpa sandbox OS),
-// edit file lewat klien ACP (fs/write_text_file + checkpoint), instruksi proyek (AGENTS.md), mode rencana,
-// .gemini/settings.json milik repo yang tidak dijalankan, dan key asli yang tidak pernah sampai ke Gemini CLI.
-//   Butuh Gemini CLI: SNUGCODE_E2E_GEMINI=<path bundle/gemini.js> atau SNUGCODE_E2E_GEMINI=install.
+// End-to-end Gemini CLI engine test: phone -> local relay -> real daemon -> real `gemini --acp` -> fake Gemini API.
+// Text & usage, shell command permission from the phone (still asks in auto-allow: Gemini CLI has no OS sandbox),
+// file edits through the ACP client (fs/write_text_file + checkpoint), project instructions (AGENTS.md), plan mode,
+// a repo's own .gemini/settings.json that is never run, and a real key that never reaches Gemini CLI.
+//   Needs Gemini CLI: SNUGCODE_E2E_GEMINI=<path to bundle/gemini.js> or SNUGCODE_E2E_GEMINI=install.
 //   Terminal 1: npm run dev:relay      Terminal 2: npm run test:e2e:gemini
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,13 +12,13 @@ import { setup, ok, sleep } from './e2e-harness.mjs';
 
 const src = process.env.SNUGCODE_E2E_GEMINI;
 if (!src) {
-  console.log('… lewati uji Gemini CLI (set SNUGCODE_E2E_GEMINI=<path bundle/gemini.js> atau =install)');
+  console.log('… skipping the Gemini CLI test (set SNUGCODE_E2E_GEMINI=<path to bundle/gemini.js> or =install)');
   process.exit(0);
 }
-const KEY = 'AIzaMOCK-KEY-ASLI-' + Date.now();
+const KEY = 'AIzaMOCK-KEY-REAL-' + Date.now();
 const MODEL = 'gemini-mock-pro';
 
-// ---------- Gemini API tiruan (format asli + daftar model format OpenAI) ----------
+// ---------- fake Gemini API (native format + OpenAI-format model list) ----------
 const log = [];
 const ref = { repo: '' };
 const api = http.createServer((req, res) => {
@@ -43,11 +43,11 @@ const api = http.createServer((req, res) => {
     if (stream) log.push({ url: req.url, tools, userText, system: JSON.stringify(j.systemInstruction || ''), all: JSON.stringify(j.contents || []) });
     const fnDone = last.parts?.some((p) => p.functionResponse);
     let parts;
-    if (!stream) parts = [{ text: '{"reasoning":"uji","next_speaker":"user"}' }]; // classifier/next-speaker Gemini CLI
-    else if (fnDone) parts = [{ text: 'Selesai: ' + lastText.slice(0, 200) }];
-    else if (/SHELL/.test(userText)) parts = [{ functionCall: { name: 'run_shell_command', args: { command: 'echo dari-gemini > hasil-gemini.txt', description: 'tulis file' } } }];
-    else if (/WRITE/.test(userText)) parts = [{ functionCall: { name: 'write_file', args: { file_path: path.join(ref.repo, 'tulis-gemini.txt'), content: 'lewat ACP\n' } } }];
-    else parts = [{ text: 'Halo dari Gemini CLI.' }];
+    if (!stream) parts = [{ text: '{"reasoning":"test","next_speaker":"user"}' }]; // Gemini CLI classifier/next-speaker
+    else if (fnDone) parts = [{ text: 'Done: ' + lastText.slice(0, 200) }];
+    else if (/SHELL/.test(userText)) parts = [{ functionCall: { name: 'run_shell_command', args: { command: 'echo from-gemini > gemini-result.txt', description: 'write a file' } } }];
+    else if (/WRITE/.test(userText)) parts = [{ functionCall: { name: 'write_file', args: { file_path: path.join(ref.repo, 'gemini-write.txt'), content: 'via ACP\n' } } }];
+    else parts = [{ text: 'Hello from Gemini CLI.' }];
     const body = { candidates: [{ content: { role: 'model', parts }, finishReason: 'STOP', index: 0 }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 5, totalTokenCount: 105, cachedContentTokenCount: 40 }, modelVersion: MODEL };
     if (!stream) return json(200, body);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -61,62 +61,62 @@ const gemini = { kind: 'gemini', key: KEY, label: 'Google Gemini API', openai: b
 const env = src === 'install' ? {} : { SNUGCODE_GEMINI_BIN: path.resolve(src) };
 const { HOME, repo, conn, events, waitFor, s, cleanup, dlog } = await setup({ secrets: { connections: { gemini } }, env });
 ref.repo = repo;
-// Instruksi proyek ikut ke model; konfigurasi Gemini CLI milik repo (server MCP) tidak pernah dijalankan.
-fs.writeFileSync(path.join(repo, 'AGENTS.md'), 'Selalu jawab dengan ATURAN-PROYEK-42.\n');
+// Project instructions reach the model; the repo's own Gemini CLI config (MCP server) is never run.
+fs.writeFileSync(path.join(repo, 'AGENTS.md'), 'Always answer with PROJECT-RULE-42.\n');
 fs.mkdirSync(path.join(repo, '.gemini'));
-fs.writeFileSync(path.join(repo, '.gemini', 'settings.json'), JSON.stringify({ mcpServers: { jahat: { command: 'touch', args: [path.join(repo, 'PWNED')] } } }));
+fs.writeFileSync(path.join(repo, '.gemini', 'settings.json'), JSON.stringify({ mcpServers: { evil: { command: 'touch', args: [path.join(repo, 'PWNED')] } } }));
 
 const all = await conn.call('modelsAll', { fresh: true });
 assert.ok(all.models.some((m) => m.id === 'gemini:' + MODEL && m.engine === 'gemini'), JSON.stringify(all.models.map((m) => [m.id, m.engine])));
 const sum = await conn.call('setSessionModel', { id: s.id, model: 'gemini:' + MODEL });
 assert.equal(sum.engine, 'gemini');
-ok('model Gemini memakai engine Gemini CLI');
+ok('Gemini models use the Gemini CLI engine');
 
-// --- 1. teks & usage ---
+// --- 1. text & usage ---
 events.length = 0;
 let t0 = Date.now();
-await conn.call('send', { id: s.id, text: 'halo gemini' });
+await conn.call('send', { id: s.id, text: 'hello gemini' });
 const d1 = await waitFor((e) => e.k === 'done', 300_000);
 assert.ok(d1.ok, JSON.stringify(d1) + '\n' + dlog().slice(-3000));
-assert.match(events.filter((e) => e.k === 'text').map((e) => e.d).join(''), /Halo dari Gemini CLI/);
-assert.ok(d1.usage?.in > 0 && d1.usage?.cr > 0, 'usage terbaca: ' + JSON.stringify(d1.usage));
+assert.match(events.filter((e) => e.k === 'text').map((e) => e.d).join(''), /Hello from Gemini CLI/);
+assert.ok(d1.usage?.in > 0 && d1.usage?.cr > 0, 'usage read: ' + JSON.stringify(d1.usage));
 const first = log.find((l) => l.tools.length);
-assert.ok(first, 'Gemini CLI memanggil API tiruan lewat proxy');
-assert.match(first.system, /snugcode/, 'instruksi snugcode (GEMINI.md) dipakai');
-assert.ok(!first.tools.includes('enter_plan_mode'), 'enter_plan_mode tidak tersedia untuk agen');
-assert.match(first.userText, /ATURAN-PROYEK-42/, 'AGENTS.md disisipkan di prompt pertama');
-assert.ok(!fs.existsSync(path.join(repo, 'PWNED')), 'server MCP dari .gemini/settings.json repo tidak dijalankan');
-ok(`Gemini CLI: prompt pertama selesai (${Date.now() - t0} ms), usage ${JSON.stringify(d1.usage)}`);
+assert.ok(first, 'Gemini CLI calls the fake API through the proxy');
+assert.match(first.system, /snugcode/, 'snugcode instructions (GEMINI.md) used');
+assert.ok(!first.tools.includes('enter_plan_mode'), 'enter_plan_mode is not available to the agent');
+assert.match(first.userText, /PROJECT-RULE-42/, 'AGENTS.md is inserted into the first prompt');
+assert.ok(!fs.existsSync(path.join(repo, 'PWNED')), 'the MCP server from the repo .gemini/settings.json is not run');
+ok(`Gemini CLI: first prompt done (${Date.now() - t0} ms), usage ${JSON.stringify(d1.usage)}`);
 
-// --- 2. perintah shell: tetap bertanya walau auto-izin aktif ---
+// --- 2. shell command: still asks even with auto-allow on ---
 await conn.call('auto', { id: s.id, on: true });
 events.length = 0;
-await conn.call('send', { id: s.id, text: 'tolong SHELL' });
+await conn.call('send', { id: s.id, text: 'please SHELL' });
 const perm = await waitFor((e) => e.k === 'perm', 120_000);
 assert.equal(perm.tool, 'Bash');
-assert.match(perm.s, /echo dari-gemini/);
+assert.match(perm.s, /echo from-gemini/);
 await conn.call('perm', { id: s.id, pid: perm.pid, decision: 'allow' });
 const d2 = await waitFor((e) => e.k === 'done', 120_000);
 assert.ok(d2.ok, JSON.stringify(d2));
-assert.equal(fs.readFileSync(path.join(repo, 'hasil-gemini.txt'), 'utf8').trim(), 'dari-gemini');
-assert.ok(events.some((e) => e.k === 'cp'), 'checkpoint dibuat sebelum giliran Gemini');
-assert.ok(events.some((e) => e.k === 'tool' && e.name === 'Bash'), 'tool shell tampil sebagai Bash');
-ok('Gemini CLI: perintah shell bertanya ke HP walau auto-izin aktif, lalu jalan');
+assert.equal(fs.readFileSync(path.join(repo, 'gemini-result.txt'), 'utf8').trim(), 'from-gemini');
+assert.ok(events.some((e) => e.k === 'cp'), 'checkpoint made before the Gemini turn');
+assert.ok(events.some((e) => e.k === 'tool' && e.name === 'Bash'), 'the shell tool shows as Bash');
+ok('Gemini CLI: shell commands ask the phone even with auto-allow on, then run');
 
-// --- 3. edit file lewat klien ACP: di dalam worktree langsung diterapkan ---
+// --- 3. file edit through the ACP client: applied directly inside the worktree ---
 await conn.call('auto', { id: s.id, on: false });
 events.length = 0;
-await conn.call('send', { id: s.id, text: 'tolong WRITE' });
+await conn.call('send', { id: s.id, text: 'please WRITE' });
 const d3 = await waitFor((e) => e.k === 'done', 120_000);
 assert.ok(d3.ok, JSON.stringify(d3));
-assert.ok(!events.some((e) => e.k === 'perm'), 'edit di dalam worktree tidak bertanya');
-assert.equal(fs.readFileSync(path.join(repo, 'tulis-gemini.txt'), 'utf8'), 'lewat ACP\n');
-ok('Gemini CLI: write_file diterapkan lewat fs/write_text_file snugcode');
+assert.ok(!events.some((e) => e.k === 'perm'), 'edits inside the worktree do not ask');
+assert.equal(fs.readFileSync(path.join(repo, 'gemini-write.txt'), 'utf8'), 'via ACP\n');
+ok('Gemini CLI: write_file applied through snugcode fs/write_text_file');
 
-// --- 4. proses Gemini CLI mati: prompt berikutnya melanjutkan sesi yang sama (session/load) ---
+// --- 4. the Gemini CLI process dies: the next prompt resumes the same session (session/load) ---
 if (process.platform === 'linux') {
   const { execFileSync } = await import('node:child_process');
-  // Hanya proses Gemini CLI milik daemon uji ini (GEMINI_CLI_HOME di folder data uji).
+  // Only Gemini CLI processes of this test daemon (GEMINI_CLI_HOME in the test data folder).
   for (const pid of execFileSync('pgrep', ['-f', '--', '--acp'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
     try {
       if (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes('GEMINI_CLI_HOME=' + HOME)) process.kill(Number(pid));
@@ -124,27 +124,27 @@ if (process.platform === 'linux') {
   }
   await sleep(500);
   events.length = 0;
-  await conn.call('send', { id: s.id, text: 'masih ingat?' });
+  await conn.call('send', { id: s.id, text: 'still remember?' });
   const d4 = await waitFor((e) => e.k === 'done', 120_000);
   assert.ok(d4.ok, JSON.stringify(d4) + '\n' + dlog().slice(-2000));
   const last = log.at(-1).all;
-  assert.match(last, /tolong WRITE/, 'riwayat sesi sebelumnya ikut (session/load)');
-  assert.equal((last.match(/ATURAN-PROYEK-42/g) || []).length, 1, 'instruksi proyek tidak disisipkan ulang');
-  ok('Gemini CLI: proses mati lalu sesi dilanjutkan dengan riwayatnya (session/load)');
+  assert.match(last, /please WRITE/, 'previous session history is carried over (session/load)');
+  assert.equal((last.match(/PROJECT-RULE-42/g) || []).length, 1, 'project instructions are not inserted again');
+  ok('Gemini CLI: process died, then the session resumed with its history (session/load)');
 }
 
-// --- 5. mode rencana: Gemini CLI di mode `plan` (hanya baca) ---
+// --- 5. plan mode: Gemini CLI in `plan` mode (read-only) ---
 await conn.call('plan', { id: s.id, on: true });
-fs.rmSync(path.join(repo, 'tulis-gemini.txt'), { force: true });
+fs.rmSync(path.join(repo, 'gemini-write.txt'), { force: true });
 events.length = 0;
-await conn.call('send', { id: s.id, text: 'tolong WRITE lagi' });
+await conn.call('send', { id: s.id, text: 'please WRITE again' });
 const d5 = await waitFor((e) => e.k === 'done' || e.k === 'perm', 120_000);
 if (d5.k === 'perm') await conn.call('perm', { id: s.id, pid: d5.pid, decision: 'deny' }), await waitFor((e) => e.k === 'done', 120_000);
-assert.ok(!fs.existsSync(path.join(repo, 'tulis-gemini.txt')), 'mode rencana: tidak ada file yang ditulis');
+assert.ok(!fs.existsSync(path.join(repo, 'gemini-write.txt')), 'plan mode: no file written');
 await conn.call('plan', { id: s.id, on: false });
-ok('Gemini CLI: mode rencana tidak menulis file');
+ok('Gemini CLI: plan mode writes no files');
 
-// --- 6. key asli tidak pernah sampai ke Gemini CLI ---
+// --- 6. the real key never reaches Gemini CLI ---
 if (process.platform === 'linux') {
   const { execFileSync } = await import('node:child_process');
   const pids = execFileSync('pgrep', ['-f', '--', '--acp'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
@@ -155,13 +155,13 @@ if (process.platform === 'linux') {
       return '';
     }
   }).join('\n');
-  assert.ok(envs, 'proses gemini --acp ditemukan');
-  assert.ok(!envs.includes(KEY), 'key asli tidak ada di env Gemini CLI');
+  assert.ok(envs, 'gemini --acp process found');
+  assert.ok(!envs.includes(KEY), 'the real key is not in the Gemini CLI env');
   assert.match(envs, /GEMINI_API_KEY=pc-local-/);
   const gdir = path.join(HOME, 'gemini', 'repo', '.gemini');
   const files = fs.readdirSync(gdir, { recursive: true }).map((f) => path.join(gdir, String(f))).filter((f) => fs.statSync(f).isFile());
-  assert.ok(!files.some((f) => fs.readFileSync(f, 'utf8').includes(KEY)), 'key tidak tertulis di GEMINI_CLI_HOME');
-  ok('Gemini CLI: key asli tidak ada di env (hanya token lokal proxy)');
+  assert.ok(!files.some((f) => fs.readFileSync(f, 'utf8').includes(KEY)), 'the key is not written in GEMINI_CLI_HOME');
+  ok('Gemini CLI: real key not in the env (only the local proxy token)');
 }
 
 await cleanup();

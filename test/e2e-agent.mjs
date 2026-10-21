@@ -30,9 +30,9 @@ await conn.call('perm', { id: s.id, pid: perm.pid, decision: 'allow' });
 const done1 = await waitFor((e) => e.k === 'done');
 assert.ok(done1.ok, JSON.stringify(done1));
 const t1 = Date.now() - t0;
-assert.equal(fs.readFileSync(path.join(repo, 'hasil.txt'), 'utf8'), 'dibuat agen\n');
+assert.equal(fs.readFileSync(path.join(repo, 'result.txt'), 'utf8'), 'made by the agent\n');
 assert.ok(events.some((e) => e.k === 'cp'), 'checkpoint saved');
-assert.match(events.filter((e) => e.k === 'text').map((e) => e.d).join(''), /Selesai menulis file/);
+assert.match(events.filter((e) => e.k === 'text').map((e) => e.d).join(''), /Finished writing the file/);
 const pids1 = claudePids();
 ok(`prompt 1: Write permission from the phone, file written, checkpoint exists (${t1} ms), claude processes: ${pids1.length}`);
 
@@ -54,14 +54,14 @@ events.length = 0;
 await conn.call('send', { id: s.id, text: 'please WRITE2 a file' });
 assert.ok((await waitFor((e) => e.k === 'done')).ok);
 assert.ok(!events.some((e) => e.k === 'perm'), 'no permission prompt');
-assert.equal(fs.readFileSync(path.join(repo, 'hasil2.txt'), 'utf8'), 'langsung\n');
+assert.equal(fs.readFileSync(path.join(repo, 'result2.txt'), 'utf8'), 'direct\n');
 ok('edit review off: Write in the worktree applies directly (a checkpoint is still made)');
 
 // The real 9router key is only seen by the router (through the proxy), not by the claude process
-assert.ok(routerLog.length && routerLog.every((l) => l.auth === 'Bearer ROUTER-KEY-ASLI' && !l.key), JSON.stringify(routerLog.slice(0, 3)));
+assert.ok(routerLog.length && routerLog.every((l) => l.auth === 'Bearer ROUTER-KEY-REAL' && !l.key), JSON.stringify(routerLog.slice(0, 3)));
 if (process.platform === 'linux') {
   const envOfClaude = pids2.map((p) => fs.readFileSync(`/proc/${p}/environ`, 'utf8')).join('\n');
-  assert.ok(!envOfClaude.includes('ROUTER-KEY-ASLI'), 'the real key is not in the claude process env');
+  assert.ok(!envOfClaude.includes('ROUTER-KEY-REAL'), 'the real key is not in the claude process env');
   assert.match(envOfClaude, /ANTHROPIC_AUTH_TOKEN=pc-local-/);
 }
 ok('the 9router key is not in the claude process env; the proxy injects it for the router');
@@ -85,7 +85,7 @@ await conn.call('send', { id: s.id, text: 'BASHSECRET now' });
 const res5 = await waitFor((e) => e.k === 'result' || e.k === 'perm');
 if (support.ok) {
   assert.equal(res5.k, 'result', 'auto-approved Bash passes without asking');
-  assert.doesNotMatch(JSON.stringify(res5), /ROUTER-KEY-ASLI|machineToken/);
+  assert.doesNotMatch(JSON.stringify(res5), /ROUTER-KEY-REAL|machineToken/);
   assert.match(res5.d, /Permission denied|No such file/);
   ok('auto-approved Bash in the OS sandbox: `cat <data>/s*.json` denied (' + res5.d.split('\n')[0].slice(0, 60) + ')');
 } else {
@@ -150,9 +150,9 @@ ok('old clients (text frames) still work; the diff is cut at 400KB per the frame
 const hist = await conn.call('attach', { id: s.id, since: 0 });
 const u1 = hist.events.find((e) => e.k === 'user' && /WRITE/.test(e.d));
 const nRw = await conn.call('rewind', { id: s.id, seq: u1.seq });
-assert.ok(!fs.existsSync(path.join(repo, 'hasil.txt')));
-assert.ok(!fs.existsSync(path.join(repo, 'hasil2.txt')));
-ok(`rewind: ${nRw} file(s) restored, hasil.txt gone`);
+assert.ok(!fs.existsSync(path.join(repo, 'result.txt')));
+assert.ok(!fs.existsSync(path.join(repo, 'result2.txt')));
+ok(`rewind: ${nRw} file(s) restored, result.txt gone`);
 
 // Atomic index & session list
 const idx = JSON.parse(fs.readFileSync(path.join(HOME, 'sessions', 'index.json'), 'utf8'));

@@ -815,9 +815,9 @@ test('shared event model: plans, activity, finished summary, duplicate filter', 
   assert.deepEqual(E.doneParts({ k: 'done', turns: 1, ms: 1000, usage: { in: 20000, out: 100, cr: 17000, cw: 2000 } }), ['1 step', '1.0s', '20k→100 tok', 'cache 85%']);
   assert.deepEqual(E.doneParts({ k: 'done', turns: 1, ms: 1000, usage: { in: 20000, out: 100, cr: 0, cw: 0 } }).at(-1), 'cache 0%');
   // Streaming text chunks are merged for attach; other events & the last seq are kept.
-  const ev = [{ k: 'user', d: 'hai', seq: 1 }, { k: 'text', d: 'Ha', seq: 2, ts: 1 }, { k: 'text', d: 'lo', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }];
-  assert.deepEqual(E.mergeText(ev), [{ k: 'user', d: 'hai', seq: 1 }, { k: 'text', d: 'Halo', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }]);
-  assert.equal(ev[1].d, 'Ha', 'the original history is not modified');
+  const ev = [{ k: 'user', d: 'hi', seq: 1 }, { k: 'text', d: 'Hel', seq: 2, ts: 1 }, { k: 'text', d: 'lo', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }];
+  assert.deepEqual(E.mergeText(ev), [{ k: 'user', d: 'hi', seq: 1 }, { k: 'text', d: 'Hello', seq: 3, ts: 2 }, { k: 'tool', name: 'Read', seq: 4 }, { k: 'text', d: '!', seq: 5, ts: 3 }]);
+  assert.equal(ev[1].d, 'Hel', 'the original history is not modified');
   assert.equal(E.fmtDuration(95_000), '1m 35s');
   const cur = new E.EventCursor();
   assert.deepEqual([{ seq: 1 }, { seq: 2 }, { seq: 2 }, { k: 'proc' }, { seq: 1 }, { seq: 3 }].map((e) => cur.accept(/** @type {any} */ (e))), [true, true, false, true, false, true]);
@@ -1016,7 +1016,7 @@ test('defaultModel: Claude Sonnet first when a new router is added from the phon
 
 test('sealedBox: compatible with libsodium crypto_box_seal (Codespaces secrets)', async () => {
   const { sealedBox, openSealedBox } = await import('../shared/sealedbox.js');
-  // Vector made with PyNaCl (libsodium): SealedBox(pk).encrypt(b'dari libsodium').
+  // Vector made with PyNaCl (libsodium): SealedBox(pk).encrypt(b'dari libsodium') (plaintext kept as generated).
   const sk = Uint8Array.from(Buffer.from('Q51sZey2LLuTdK8wnOawoY7wXkg4if6dmK9S3Yr4DRQ=', 'base64'));
   const ct = Uint8Array.from(Buffer.from('CpPJECbbMMgGtPT105AaDDBQLfhgEN/iDyGvxtQP12UN8yriTUc+LN3IrpIfQsQdFLM92NOqLR5xJmyMohs=', 'base64'));
   assert.equal(new TextDecoder().decode(openSealedBox(ct, sk)), 'dari libsodium');
