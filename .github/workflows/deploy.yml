@@ -62,8 +62,8 @@ jobs:
         run: |
           want="$(node -p "require('./relay/public/build.json').digest")"
           for i in $(seq 1 20); do
-            got="$(curl -sf https://snugcode.arfak.workers.dev/build.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).digest)}catch{}})")"
-            if [ "$got" = "$want" ] && curl -sf https://snugcode.arfak.workers.dev/api/health | grep -q wsProto; then echo "build $want aktif"; exit 0; fi
+            got="$(curl -sf https://snugcode.dev/build.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).digest)}catch{}})")"
+            if [ "$got" = "$want" ] && curl -sf https://snugcode.dev/api/health | grep -q wsProto; then echo "build $want aktif"; exit 0; fi
             sleep 3
           done
           echo "::error::PWA/relay yang aktif bukan build commit ini (diharapkan $want, didapat ${got:-tidak ada})"; exit 1

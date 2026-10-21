@@ -53,14 +53,14 @@ hasil build dari kode bertag, dan workflow Deploy memastikan relay menyajikan bu
 
 ```bash
 # PWA yang sedang disajikan relay
-curl -s https://snugcode.arfak.workers.dev/build.json | jq -r .digest
+curl -s https://snugcode.dev/build.json | jq -r .digest
 # hasil build dari kode sumber (tag yang sama)
 git checkout vX.Y.Z && npm ci && npm run build:web && jq -r .digest relay/public/build.json
 # atau unduh build.json dari halaman rilis GitHub dan bandingkan
 ```
 
 Digest yang berbeda berarti PWA yang disajikan bukan hasil build kode itu. Cek satu file langsung:
-`curl -s https://snugcode.arfak.workers.dev/app.js | sha256sum` dibandingkan dengan `files["app.js"]`.
+`curl -s https://snugcode.dev/app.js | sha256sum` dibandingkan dengan `files["app.js"]`.
 
 ## Self-host relay
 

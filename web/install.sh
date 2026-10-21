@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pemasang snugcode untuk macOS & Linux:  curl -fsSL https://snugcode.arfak.workers.dev/install.sh | sh
+# Pemasang snugcode untuk macOS & Linux:  curl -fsSL https://snugcode.dev/install.sh | sh
 # Memeriksa Node.js 22+ & git, memasang snugcode (npm bila sudah terbit, selain itu rilis GitHub terbaru),
 # lalu menjalankan `snugcode setup`. Relay lain: SNUGCODE_RELAY=https://relay-mu.example sh install.sh
 set -e

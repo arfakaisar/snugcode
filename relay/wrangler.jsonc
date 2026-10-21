@@ -31,8 +31,8 @@
     "DEV_AUTH": "0",
     // Alamat utama PWA & login. Host lama tetap melayani PC dan API, tapi login dialihkan ke sini
     // (callback OAuth App GitHub hanya boleh satu host) dan PWA di host lama menawarkan pindah.
-    "PUBLIC_URL": "https://snugcode.arfak.workers.dev",
-    "LEGACY_HOSTS": "pocketcode-relay.arfak.workers.dev",
+    "PUBLIC_URL": "https://snugcode.dev",
+    "LEGACY_HOSTS": "snugcode.arfak.workers.dev,pocketcode-relay.arfak.workers.dev",
     // Repo yang di-fork pengguna untuk runner Codespaces (berisi .devcontainer/ snugcode).
     "RUNNER_REPO": "arfakaisar/snugcode"
   }
