@@ -7,6 +7,9 @@ snugcode di HP. Kamu tidak perlu melakukan apa pun di sini.
   (bila `/workspaces` tidak bisa ditulis, folder data pindah ke `~/.snugcode`).
 - Tahap dan error saat runner menyala juga dikirim ke aplikasi, jadi biasanya log tidak perlu dibuka.
 - Status: `snugcode status`
+- Daemon yang mati dinyalakan lagi oleh supervisor; SIGTERM ke supervisor diabaikan (`pkill node` tidak mematikan
+  runner). Untuk menghentikannya: `snugcode stop`. Bila runner tetap tidak tersambung, aplikasi menyalakan ulang
+  codespace ini sekali secara otomatis.
 - Runner berhenti sendiri setelah 30 menit tidak dipakai (bisa diubah di aplikasi: Pengaturan runner →
   Berhenti otomatis), dan menyala lagi saat kamu membuka runner "Cloud" di aplikasi.
 - Repo yang dikerjakan agen ada di `/workspaces/.snugcode/workspaces/`, satu worktree per sesi.

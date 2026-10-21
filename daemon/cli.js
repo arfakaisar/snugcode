@@ -349,7 +349,9 @@ async function start() {
   if (pinLockedUntil(sec)) console.log(c.r(`! Pairing terkunci sampai ${new Date(pinLockedUntil(sec)).toLocaleTimeString()} karena PIN salah berkali-kali. \`snugcode pin\` membukanya sekarang.`));
   const d = new Daemon(cfg);
   d.start();
-  const bye = () => Promise.resolve(d.stop()).finally(() => process.exit(0));
+  // Di bawah supervisor runner cloud, berhenti karena sinyal bukan "berhenti sengaja" (exit 0): keluar
+  // dengan 128+sinyal, supervisor yang memutuskan menyalakannya lagi (mis. `pkill node` dari agen).
+  const bye = (sig) => Promise.resolve(d.stop()).finally(() => process.exit(process.env.SNUGCODE_SUPERVISED === '1' ? 128 + (os.constants.signals[sig] || 15) : 0));
   process.on('SIGINT', bye);
   process.on('SIGTERM', bye);
 }
@@ -614,14 +616,15 @@ function help() {
 
 // ---------- runner cloud ----------
 // Isi konfigurasi dari env (idempoten), lalu jalankan daemon di bawah supervisor: restart/update dari
-// HP (exit 75) dan crash menyalakannya lagi; exit 0 (menganggur / shutdown) menghentikan supervisor —
-// container ikut berhenti. --no-supervise: jalankan daemon langsung di proses ini.
+// HP (exit 75), crash, dan sinyal yang mengenai daemon saja menyalakannya lagi; exit 0 (menganggur /
+// `snugcode stop`) dan SIGTERM ke supervisor menghentikannya — container ikut berhenti.
+// --no-supervise: jalankan daemon langsung di proses ini.
 async function cloud() {
   ensureDirs();
   // Dibaca sebelum env rahasia dibuang (scrubSecretEnv).
   const apiKey = process.env.SNUGCODE_API_KEY || '';
   const apiUrl = process.env.SNUGCODE_API_URL || '';
-  const { bootstrapCloud, reportStatus } = await import('./runner.js');
+  const { bootstrapCloud, reportStatus, supervisorIgnoresTerm } = await import('./runner.js');
   const cfg = loadConfig();
   const sec = loadSecrets();
   let boot;
@@ -683,7 +686,13 @@ async function cloud() {
       setTimeout(run, wait);
     });
   };
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => ((stopping = true), child?.exitCode === null ? child.kill(sig) : process.exit(0)));
+  const stop = (sig) => ((stopping = true), child?.exitCode === null ? child.kill(sig) : process.exit(0));
+  process.on('SIGINT', stop);
+  // Codespaces: tidak ada yang menyalakan runner lagi selama codespace masih menyala (postStartCommand
+  // hanya saat start), jadi SIGTERM nyasar (`pkill node`, `killall node` dari agen/terminal) diabaikan.
+  // Codespace yang dihentikan tetap mematikan semuanya (SIGKILL). Berhenti sengaja: `snugcode stop`.
+  if (supervisorIgnoresTerm(cfg)) process.on('SIGTERM', () => console.log(c.y('! SIGTERM diabaikan: runner Codespaces tetap berjalan (hentikan dari aplikasi atau `snugcode stop`).')));
+  else process.on('SIGTERM', stop);
   run();
 }
 
