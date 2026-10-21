@@ -154,6 +154,9 @@ await openTool('Terminal');
 await page.waitForSelector('.termview .xterm-rows');
 await page.waitForFunction(() => document.querySelector('.termview .xterm-rows')?.textContent.trim().length > 0, null, { timeout: 15000 });
 await page.click('.termview .tscreen');
+// Prompt pendek: baris perintah tidak terbungkus di lebar HP (prompt runner CI panjang), jadi isi baris bisa dicocokkan.
+await page.keyboard.type("PS1='$ '");
+await page.keyboard.press('Enter');
 await page.keyboard.type('echo snug-$((6*7))');
 await page.keyboard.press('Enter');
 await page.waitForFunction(() => /snug-42/.test(document.querySelector('.termview .xterm-rows')?.textContent || ''), null, { timeout: 15000 });
@@ -171,7 +174,7 @@ await shot('13-terminal');
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 229, key: 'Unidentified' });
   };
   // Keyboard fisik/emulasi di atas tidak ikut terkirim ganda oleh penangan IME (spasi lewat keypress)
-  assert.match(await rows(), /[$#] echo snug-\$\(\(6/);
+  assert.match(await rows(), /^\$ echo snug-\$\(\(6\*7\)\)$/m);
   for (const w of ['e', 'ec', 'ech', 'echo']) await ime(w);
   await waitLine(/[$#] echo$/);
   await cdp.send('Input.insertText', { text: 'echo ' });
