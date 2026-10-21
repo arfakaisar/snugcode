@@ -1,4 +1,9 @@
-// Bundle PWA (web/ + shared/crypto.js) ke relay/public untuk di-deploy bersama relay.
+// Bundle situs ke relay/public untuk di-deploy bersama relay:
+//   /         landing page (landing/), disalin apa adanya
+//   /agent/   PWA snugcode agent (web/ + shared/crypto.js)
+//   /sw.js    service worker PWA di root (scope `/`): registrasi & langganan push HP yang memasang PWA
+//             saat masih di `/` tetap sama, jadi notifikasi tidak perlu diizinkan ulang.
+//   /fonts/   font bersama, /install.sh & /install.ps1 (pemasang satu baris), build.json, _headers
 import { build } from 'esbuild';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -7,17 +12,19 @@ import { securityHeaders } from '../relay/src/headers.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const out = path.join(root, 'relay', 'public');
+const agent = path.join(out, 'agent');
 // Kosongkan isi folder tanpa menghapus foldernya (di Windows folder yang
 // sedang dipantau `wrangler dev` tidak bisa dihapus).
 fs.mkdirSync(out, { recursive: true });
 for (const f of fs.readdirSync(out)) fs.rmSync(path.join(out, f), { recursive: true, force: true });
+fs.mkdirSync(agent);
 await build({
   entryPoints: [path.join(root, 'web', 'app.js')],
   bundle: true,
   format: 'esm',
   minify: true,
   target: ['es2022', 'safari15'],
-  outfile: path.join(out, 'app.js'),
+  outfile: path.join(agent, 'app.js'),
   logLevel: 'info',
 });
 // xterm.js hanya dimuat saat terminal dibuka (import dinamis dengan URL, tidak ikut app.js).
@@ -27,19 +34,23 @@ await build({
   format: 'esm',
   minify: true,
   target: ['es2022', 'safari15'],
-  outfile: path.join(out, 'xterm.js'),
+  outfile: path.join(agent, 'xterm.js'),
   logLevel: 'warning',
 });
-fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(out, 'xterm.css'));
-const shell = ['index.html', 'install.sh', 'install.ps1', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'];
-for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
+fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(agent, 'xterm.css'));
+const shell = ['index.html', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'];
+for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(agent, f));
+// Root: pemasang (URL-nya dipakai di README & PC: snugcode.dev/install.sh), landing page, dan ikon yang
+// dicari browser/iOS langsung di root.
+for (const f of ['install.sh', 'install.ps1', 'icon.svg', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png']) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
+for (const f of fs.readdirSync(path.join(root, 'landing'))) fs.copyFileSync(path.join(root, 'landing', f), path.join(out, f));
 // iOS 27: lembar "Add to Home Screen" memakai pemuat gambarnya sendiri yang gagal mengambil ikon dari URL jaringan
 // (hasilnya ikon huruf "S"), sedangkan data: URI didukung sejak Safari 27. File PNG tetap disajikan untuk iOS lama.
-const indexHtml = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(agent, 'index.html'), 'utf8');
 const touchIcon = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'web', 'apple-touch-icon.png')).toString('base64');
 const inlined = indexHtml.replace('rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png"', `rel="apple-touch-icon" sizes="180x180" href="${touchIcon}"`);
 if (inlined === indexHtml) throw new Error('index.html: <link rel="apple-touch-icon"> tidak ditemukan');
-fs.writeFileSync(path.join(out, 'index.html'), inlined);
+fs.writeFileSync(path.join(agent, 'index.html'), inlined);
 // Security header untuk aset yang disajikan langsung (worker alias); relay menambahkannya sendiri.
 // Host WebSocket yang diizinkan CSP: alamat publik & lama dari relay/wrangler.jsonc (relay self-host
 // memakai varsnya sendiri), atau SNUGCODE_WS_HOSTS="a.example,b.example".
@@ -60,7 +71,7 @@ for (const [name, src] of Object.entries(FONTS)) fs.copyFileSync(path.join(root,
 // Nama cache service worker = hash isi aset: setiap deploy yang mengubah UI otomatis membuat
 // sw.js berbeda, sehingga HP memasang versi baru tanpa perlu menaikkan nomor versi manual.
 const hash = crypto.createHash('sha256');
-for (const f of ['app.js', 'xterm.js', 'xterm.css', ...shell]) hash.update(fs.readFileSync(path.join(out, f)));
+for (const f of ['app.js', 'xterm.js', 'xterm.css', ...shell]) hash.update(fs.readFileSync(path.join(agent, f)));
 const sw = fs.readFileSync(path.join(root, 'web', 'sw.js'), 'utf8');
 const stamped = sw.replace(/const CACHE = '[^']*';/, `const CACHE = 'snugcode-${hash.digest('hex').slice(0, 10)}';`);
 if (stamped === sw) throw new Error('sw.js: baris `const CACHE = ...` tidak ditemukan');
@@ -79,4 +90,4 @@ walk(out);
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const digest = crypto.createHash('sha256').update(JSON.stringify(files)).digest('hex');
 fs.writeFileSync(path.join(out, 'build.json'), JSON.stringify({ version, digest, files }, null, 2) + '\n');
-console.log(`PWA → relay/public (build ${digest.slice(0, 16)})`);
+console.log(`landing + PWA (/agent/) → relay/public (build ${digest.slice(0, 16)})`);

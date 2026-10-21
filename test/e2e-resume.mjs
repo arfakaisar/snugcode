@@ -61,7 +61,7 @@ const ready = (ms) =>
 // Aplikasi kembali terlihat (di HP: visibilitychange setelah dibuka dari latar belakang).
 const resume = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 
-await page.goto(URL_ + '/');
+await page.goto(URL_ + '/agent/');
 await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);
 await page.reload();
 await page.locator('text=' + PCNAME).first().click();

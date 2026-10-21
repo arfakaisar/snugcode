@@ -356,7 +356,7 @@ async function capturePwa(browser) {
   const sheet = '#sheet:not([hidden])';
 
   try {
-    await page.goto(RELAY + '/');
+    await page.goto(RELAY + '/agent/');
     await page.waitForSelector('text=Login dengan GitHub');
     await shot('login', 1400);
     await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);

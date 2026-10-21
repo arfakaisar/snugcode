@@ -47,6 +47,8 @@ export function showLogin() {
         h('div', { class: 'feats' }, ...feats.map(([icon, t1, t2], i) => h('div', { class: 'feat', style: `--i:${i}` }, h('span', { class: 'fi' }, ic(icon)), h('span', {}, h('b', {}, t1), h('span', {}, t2))))),
         h('a', { class: 'btn primary big', href: '/auth/login?kind=user', onclick: () => haptic() }, ic('github'), 'Login dengan GitHub'),
         h('div', { class: 'fine' }, 'Punya PC? Pakai akun GitHub yang sama dengan saat setup di PC. Tanpa PC? Pilih runner cloud setelah login.'),
+        // Tab baru: di aplikasi terpasang, `/` dialihkan kembali ke /agent/ (landing/boot.js).
+        h('a', { class: 'fine link', href: '/', target: '_blank', rel: 'noopener' }, 'Tentang snugcode & server cloud →'),
       ),
     ),
   );

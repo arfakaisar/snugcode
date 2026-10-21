@@ -1,8 +1,8 @@
-/* Font di-host sendiri (fonts/, disalin dari @fontsource saat build): tanpa permintaan ke pihak ketiga. */
-@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/jetbrains-mono-400.woff2) format('woff2'); }
-@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/jetbrains-mono-500.woff2) format('woff2'); }
-@font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 200 900; font-display: swap; src: url(fonts/source-serif-4.woff2) format('woff2-variations'), url(fonts/source-serif-4.woff2) format('woff2'); }
-@font-face { font-family: 'Source Serif 4'; font-style: italic; font-weight: 200 900; font-display: swap; src: url(fonts/source-serif-4-italic.woff2) format('woff2-variations'), url(fonts/source-serif-4-italic.woff2) format('woff2'); }
+/* Font di-host sendiri (/fonts/ di root, dipakai bersama landing page; disalin dari @fontsource saat build): tanpa permintaan ke pihak ketiga. */
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url(/fonts/jetbrains-mono-400.woff2) format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url(/fonts/jetbrains-mono-500.woff2) format('woff2'); }
+@font-face { font-family: 'Source Serif 4'; font-style: normal; font-weight: 200 900; font-display: swap; src: url(/fonts/source-serif-4.woff2) format('woff2-variations'), url(/fonts/source-serif-4.woff2) format('woff2'); }
+@font-face { font-family: 'Source Serif 4'; font-style: italic; font-weight: 200 900; font-display: swap; src: url(/fonts/source-serif-4-italic.woff2) format('woff2-variations'), url(/fonts/source-serif-4-italic.woff2) format('woff2'); }
 
 /* snugcode — UI mobile bergaya aplikasi chat: hangat, tenang, banyak gerak halus.
    Prinsip: zoom dikunci seperti aplikasi native (meta viewport user-scalable=no, touch-action pan-x
@@ -385,6 +385,7 @@ code.inline, .kbd { font-family: var(--mono); background: var(--surface-2); bord
 .skeleton { height: 76px; border-radius: var(--r); margin: 10px 0; background: var(--surface); animation: skel .9s ease-in-out infinite alternate; animation-delay: calc(var(--i, 0) * 150ms); }
 .lead { font-size: 16px; color: var(--fg-2); margin: 0 0 22px; line-height: 1.55; }
 .fine { font-size: 12px; color: var(--dim); margin-top: 16px; text-align: center; }
+.fine.link { display: block; color: var(--accent); text-decoration: none; }
 
 /* ---------- tombol ---------- */
 .btn {
