@@ -10,6 +10,7 @@
 ## Menjalankan test
 ```bash
 npm ci && npm ci --prefix relay
+printf 'TOKEN_SECRET=dev\n' > relay/.dev.vars   # sekali saja; tanpa ini login dev gagal "TOKEN_SECRET belum di-set"
 npm test                      # unit test
 npm run typecheck
 npm run dev:relay             # terminal lain: relay lokal (DEV_AUTH)
