@@ -24,11 +24,11 @@ export async function linkMachine(code, login) {
 
 // ---------- mock 9router (Anthropic Messages API, streaming) ----------
 // A prompt containing WRITE -> tool_use Write; SLOW -> slow reply; READSECRET -> Read secrets.json;
-// MARKDOWN -> long markdown reply; TODOS -> TodoWrite; WRITE2 -> tool_use Write to hasil2.txt;
+// MARKDOWN -> long markdown reply; TODOS -> TodoWrite; WRITE2 -> tool_use Write to result2.txt;
 // BASHSECRET -> Bash `cat <data folder>/s*.json`. Reply texts are fixtures asserted by the PWA tests.
 export const routerLog = [];
 // Long markdown (headings, code with blank lines, lists) to test incremental rendering.
-const MD = Array.from({ length: 12 }, (_, i) => `## Bagian ${i + 1}\n\nParagraf **tebal** dan \`kode\` nomor ${i + 1}.\n\n\`\`\`js\nconst x${i} = 1;\n\nconsole.log(x${i});\n\`\`\`\n\n- item a${i}\n- item b${i}`).join('\n\n');
+const MD = Array.from({ length: 12 }, (_, i) => `## Section ${i + 1}\n\nParagraph with **bold** and \`code\` number ${i + 1}.\n\n\`\`\`js\nconst x${i} = 1;\n\nconsole.log(x${i});\n\`\`\`\n\n- item a${i}\n- item b${i}`).join('\n\n');
 let n = 0;
 // delay > 0: events are sent gradually (ms per event), e.g. to record documentation GIFs.
 const sse = (res, events, delay = 0) => {
@@ -94,7 +94,7 @@ export function startMockRouter(cwdRef, reply, { key } = {}) {
       // A custom scenario from the caller (scripts/docs-images.mjs): { events, delay } or null.
       const custom = reply?.({ model, msgs, lastText, cwd: cwdRef.cwd, body: j });
       if (custom) return sse(res, custom.events, custom.delay);
-      if (hasResult || lastText.includes('"type":"tool_result"')) return sse(res, textMsg(model, 'Selesai menulis file.\n\nBaris **dua**.'));
+      if (hasResult || lastText.includes('"type":"tool_result"')) return sse(res, textMsg(model, 'Finished writing the file.\n\nLine **two**.'));
       if (/SLOW/.test(lastText)) {
         const ev = textMsg(model, 'x'.repeat(600));
         res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -108,13 +108,13 @@ export function startMockRouter(cwdRef, reply, { key } = {}) {
         return;
       }
       if (/MARKDOWN/.test(lastText)) return sse(res, textMsg(model, MD));
-      if (/TODOS/.test(lastText)) return sse(res, toolMsg(model, 'TodoWrite', { todos: [{ content: 'Baca kode', status: 'completed', activeForm: 'Membaca kode' }, { content: 'Ubah tombol', status: 'in_progress', activeForm: 'Mengubah tombol' }, { content: 'Uji', status: 'pending', activeForm: 'Menguji' }] }));
+      if (/TODOS/.test(lastText)) return sse(res, toolMsg(model, 'TodoWrite', { todos: [{ content: 'Read the code', status: 'completed', activeForm: 'Reading the code' }, { content: 'Change the button', status: 'in_progress', activeForm: 'Changing the button' }, { content: 'Test', status: 'pending', activeForm: 'Testing' }] }));
       if (/READSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Read', { file_path: cwdRef.secrets }));
       // Shell glob: gets past the regex blocklist, only the OS sandbox can deny it.
-      if (/BASHSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Bash', { command: `cat ${path.dirname(cwdRef.secrets)}/s*.json`, description: 'baca' }));
-      if (/WRITE2/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil2.txt', content: 'langsung\n' }));
-      if (/WRITE/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/hasil.txt', content: 'dibuat agen\n' }));
-      return sse(res, textMsg(model, 'Halo dari mock router.'));
+      if (/BASHSECRET/.test(lastText)) return sse(res, toolMsg(model, 'Bash', { command: `cat ${path.dirname(cwdRef.secrets)}/s*.json`, description: 'read' }));
+      if (/WRITE2/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/result2.txt', content: 'direct\n' }));
+      if (/WRITE/.test(lastText)) return sse(res, toolMsg(model, 'Write', { file_path: cwdRef.cwd + '/result.txt', content: 'made by the agent\n' }));
+      return sse(res, textMsg(model, 'Hello from the mock router.'));
     });
   });
   return new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv)));
@@ -142,7 +142,7 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply, se
   assert.equal(reg.status, 'ok');
   fs.mkdirSync(HOME, { recursive: true });
   fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ relayUrl: RELAY, routerUrl: `http://127.0.0.1:${router.address().port}/v1`, machineName: name, machineId: reg.mid, model: 'claude-mock-1' }));
-  fs.writeFileSync(ref.secrets, JSON.stringify({ machineToken: reg.token, prs: C.bytesToHex(await C.pinToPrs(PIN, reg.mid)), routerKey: 'ROUTER-KEY-ASLI', devices: {}, pinFails: 0, githubToken: null, ...secrets }));
+  fs.writeFileSync(ref.secrets, JSON.stringify({ machineToken: reg.token, prs: C.bytesToHex(await C.pinToPrs(PIN, reg.mid)), routerKey: 'ROUTER-KEY-REAL', devices: {}, pinFails: 0, githubToken: null, ...secrets }));
   // The caller shell's Claude Code/Anthropic env (e.g. when run from inside Claude Code) doesn't leak into the test daemon.
   const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ANTHROPIC_)/.test(k)));
   const DAEMON = `
@@ -156,8 +156,8 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply, se
   process.on('exit', () => daemon.exitCode === null && daemon.kill('SIGKILL'));
   daemon.stdout.on('data', (d) => (dlog += d));
   daemon.stderr.on('data', (d) => (dlog += d));
-  for (let i = 0; i < 50 && !/Connected to the relay|Terhubung ke relay/.test(dlog); i++) await sleep(200);
-  assert.match(dlog, /Connected to the relay|Terhubung ke relay/);
+  for (let i = 0; i < 50 && !/Connected to the relay/.test(dlog); i++) await sleep(200);
+  assert.match(dlog, /Connected to the relay/);
   ok('daemon connected to the relay');
 
   // --- phone: web/conn.js in Node ---

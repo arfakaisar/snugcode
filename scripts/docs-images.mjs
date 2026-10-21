@@ -1,9 +1,9 @@
-// Gambar & GIF README (docs/images) dari UI asli: PWA hasil build di Chromium terhadap daemon asli +
-// mock 9router (test/e2e-harness.mjs) yang memutar skenario agen di bawah. Setiap tangkapan layar
-// dibuat dalam tema gelap & terang; GIF direkam dari layar yang sama dan di-encode dengan gifenc.
-// Hero & terminal dirender dari docs/mockups/*.html.
+// README images & GIFs (docs/images) from the real UI: the built PWA in Chromium against the real daemon +
+// a mock 9router (test/e2e-harness.mjs) that plays the agent scenarios below. Every screenshot is made
+// in the dark & light themes; GIFs are recorded from the same screens and encoded with gifenc.
+// The hero & terminal are rendered from docs/mockups/*.html.
 //   Terminal 1: npm run build:web && npm run dev:relay
-//   Terminal 2: npm run docs:images            (ONLY=hero,tui untuk mockup saja)
+//   Terminal 2: npm run docs:images            (ONLY=hero,tui for the mockups only)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,9 +19,9 @@ const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null;
 const PC = 'Laptop Arfa';
 fs.mkdirSync(OUT, { recursive: true });
 
-// ---------- skenario agen (respons mock 9router) ----------
+// ---------- agent scenarios (mock 9router replies) ----------
 let nMsg = 0;
-// blocks: string = teks (di-stream per potong), { tool, input } = tool_use.
+// blocks: string = text (streamed in pieces), { tool, input } = tool_use.
 function msg(model, blocks, out = 180) {
   const ev = [{ type: 'message_start', message: { id: 'msg_doc' + ++nMsg, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 900, cache_read_input_tokens: 17200, output_tokens: 1 } } }];
   let tool = false;
@@ -42,9 +42,9 @@ function msg(model, blocks, out = 180) {
 }
 
 const todos = (done, active) =>
-  ['Baca halaman pengaturan', 'Tambahkan toggle tema gelap', 'Simpan pilihan ke localStorage', 'Jalankan test'].map((content, i) => ({
+  ['Read the settings page', 'Add a dark theme toggle', 'Save the choice to localStorage', 'Run the tests'].map((content, i) => ({
     content,
-    activeForm: content.replace(/^Baca/, 'Membaca').replace(/^Tambahkan/, 'Menambahkan').replace(/^Simpan/, 'Menyimpan').replace(/^Jalankan/, 'Menjalankan'),
+    activeForm: content.replace(/^Read/, 'Reading').replace(/^Add/, 'Adding').replace(/^Save/, 'Saving').replace(/^Run/, 'Running'),
     status: i < done ? 'completed' : i === active ? 'in_progress' : 'pending',
   }));
 
@@ -52,8 +52,8 @@ const SETTINGS_OLD = `      </section>
     </main>`;
 const SETTINGS_NEW = `      </section>
       <section>
-        <h2>Tampilan</h2>
-        <Toggle label="Tema gelap" checked={theme === 'dark'}
+        <h2>Appearance</h2>
+        <Toggle label="Dark theme" checked={theme === 'dark'}
           onChange={(on) => setTheme(on ? 'dark' : 'light')} />
       </section>
     </main>`;
@@ -76,25 +76,25 @@ const SCENES = [
     key: 'dark mode',
     delay: 28,
     steps: (cwd) => [
-      ['Saya cek dulu halaman pengaturan dan cara tema dipakai di aplikasi.', { tool: 'TodoWrite', input: { todos: todos(0, 0) } }],
+      ['Let me check the settings page and how themes are used in the app first.', { tool: 'TodoWrite', input: { todos: todos(0, 0) } }],
       [{ tool: 'Read', input: { file_path: cwd + '/src/pages/Settings.jsx' } }],
       [{ tool: 'TodoWrite', input: { todos: todos(1, 1) } }],
       [{ tool: 'Edit', input: { file_path: cwd + '/src/pages/Settings.jsx', old_string: SETTINGS_OLD, new_string: SETTINGS_NEW } }],
       [{ tool: 'Write', input: { file_path: cwd + '/src/hooks/useTheme.js', content: USE_THEME } }],
       [{ tool: 'TodoWrite', input: { todos: todos(3, 3) } }],
-      [{ tool: 'Bash', input: { command: 'npm test', description: 'Jalankan test' } }],
+      [{ tool: 'Bash', input: { command: 'npm test', description: 'Run the tests' } }],
       [{ tool: 'TodoWrite', input: { todos: todos(4, -1) } }],
       [
-        'Dark mode sudah ditambahkan ke **halaman pengaturan**.\n\n' +
-          '- Toggle baru *Tema gelap* di bagian **Tampilan**\n' +
-          '- Pilihan disimpan ke `localStorage` lewat hook `useTheme` dan dipulihkan saat halaman dimuat\n' +
-          '- Semua **6 test lulus**\n\n' +
-          'Mau sekalian saya buatkan commit dan Pull Request?',
+        'Dark mode is now on the **settings page**.\n\n' +
+          '- A new *Dark theme* toggle in the **Appearance** section\n' +
+          '- The choice is saved to `localStorage` by the `useTheme` hook and restored when the page loads\n' +
+          '- All **6 tests pass**\n\n' +
+          'Want me to make a commit and a pull request too?',
       ],
     ],
   },
-  { key: 'navbar', delay: 4, steps: () => [['Navbar sekarang berubah menjadi menu hamburger di bawah `768px`, dan tautan aktif diberi garis bawah.']] },
-  { key: 'laporan', delay: 220, steps: () => [['Saya mulai dari skema tabel `transaksi`, lalu menambahkan endpoint `GET /laporan/harian` yang mengelompokkan penjualan per jam. '.repeat(4)]] },
+  { key: 'navbar', delay: 4, steps: () => [['The navbar now turns into a hamburger menu below `768px`, and the active link is underlined.']] },
+  { key: 'report', delay: 220, steps: () => [['I started from the `transactions` table schema, then added a `GET /reports/daily` endpoint that groups sales by hour. '.repeat(4)]] },
 ];
 
 const userText = (m) => (typeof m.content === 'string' ? m.content : (m.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'));
@@ -113,7 +113,7 @@ function reply({ model, msgs, body }) {
   return null;
 }
 
-// ---------- repo contoh ----------
+// ---------- sample repos ----------
 const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=Arfa', '-c', 'user.email=arfa@example.com', ...a], { cwd, stdio: 'pipe' });
 function writeTree(dir, files) {
   for (const [f, c] of Object.entries(files)) {
@@ -121,15 +121,15 @@ function writeTree(dir, files) {
     fs.writeFileSync(path.join(dir, f), c);
   }
 }
-const SITE = `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Toko Kopi — Menu</title>
+const SITE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coffee Shop — Menu</title>
 <style>body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#f6efe6;color:#2b1d14}header{padding:28px 22px 18px;background:#2b1d14;color:#f6efe6}header h1{margin:0;font:600 28px Georgia,serif}header p{margin:4px 0 0;opacity:.7}
 main{padding:18px}.c{display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 2px #0001}.c b{display:block}.c span{opacity:.6;font-size:14px}.p{font-weight:600;color:#a0522d}
 .e{margin-top:16px;padding:14px;border-radius:14px;background:#fde8e4;color:#9b2c1f;font-size:14px}</style></head>
-<body><header><h1>Toko Kopi</h1><p>Menu hari ini · buka 07.00–22.00</p></header><main>
-<div class="c"><div><b>Kopi Susu Gula Aren</b><span>espresso, susu segar, aren</span></div><div class="p">22k</div></div>
+<body><header><h1>Coffee Shop</h1><p>Today's menu · open 7am–10pm</p></header><main>
+<div class="c"><div><b>Palm Sugar Latte</b><span>espresso, fresh milk, palm sugar</span></div><div class="p">22k</div></div>
 <div class="c"><div><b>Americano</b><span>double shot</span></div><div class="p">18k</div></div>
-<div class="c"><div><b>Matcha Latte</b><span>matcha Uji, susu oat</span></div><div class="p">26k</div></div>
-<div class="e" id="promo">Promo tidak bisa dimuat.</div></main>
+<div class="c"><div><b>Matcha Latte</b><span>Uji matcha, oat milk</span></div><div class="p">26k</div></div>
+<div class="e" id="promo">Couldn't load promos.</div></main>
 <script>const promo = undefined; document.getElementById('promo').textContent = promo.items.map((p) => p.name).join(', ');</script></body></html>`;
 const TOKO = {
   'package.json': JSON.stringify({ name: 'toko-kopi', private: true, scripts: { dev: 'node server.js', test: 'node test/run.js' } }, null, 2) + '\n',
@@ -145,37 +145,37 @@ export default function Settings() {
 
   return (
     <main className="settings">
-      <h1>Pengaturan</h1>
+      <h1>Settings</h1>
       <section>
-        <h2>Notifikasi</h2>
-        <Toggle label="Promo & menu baru" checked={notif} onChange={setNotif} />
+        <h2>Notifications</h2>
+        <Toggle label="Promos & new menu items" checked={notif} onChange={setNotif} />
 ${SETTINGS_OLD}
   );
 }
 `,
   'src/components/Toggle.jsx': `export function Toggle({ label, checked, onChange }) {\n  return <label className="toggle"><input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />{label}</label>;\n}\n`,
-  'test/run.js': `// Test ringan tanpa dependency: memeriksa isi komponen.
+  'test/run.js': `// Lightweight test without dependencies: checks component contents.
 const fs = require('fs');
 const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
 const settings = read('src/pages/Settings.jsx');
 const hook = read('src/hooks/useTheme.js');
 const cases = [
-  ['Settings › menampilkan toggle notifikasi', settings.includes('Promo & menu baru')],
-  ['Settings › menampilkan toggle tema gelap', settings.includes('Tema gelap')],
-  ['Toggle › meneruskan nilai checkbox', read('src/components/Toggle.jsx').includes('e.target.checked')],
-  ['useTheme › membaca tema tersimpan', hook.includes('localStorage.getItem')],
-  ['useTheme › menyimpan pilihan ke localStorage', hook.includes('localStorage.setItem')],
-  ['useTheme › menerapkan data-theme', hook.includes('dataset.theme')],
+  ['Settings › shows the notifications toggle', settings.includes('Promos & new menu items')],
+  ['Settings › shows the dark theme toggle', settings.includes('Dark theme')],
+  ['Toggle › passes the checkbox value', read('src/components/Toggle.jsx').includes('e.target.checked')],
+  ['useTheme › reads the saved theme', hook.includes('localStorage.getItem')],
+  ['useTheme › saves the choice to localStorage', hook.includes('localStorage.setItem')],
+  ['useTheme › applies data-theme', hook.includes('dataset.theme')],
 ];
 let fail = 0;
 for (const [name, ok] of cases) { console.log((ok ? '  ✓ ' : '  ✗ ') + name); if (!ok) fail++; }
-console.log('\\n  ' + (cases.length - fail) + ' lulus · ' + fail + ' gagal');
+console.log('\\n  ' + (cases.length - fail) + ' passed · ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
 `,
 };
 
-// ---------- perekam GIF ----------
-// Screenshot PNG beruntun dari halaman; jeda yang dihabiskan untuk tangkapan diam tidak ikut terekam.
+// ---------- GIF recorder ----------
+// Successive PNG screenshots of the page; time spent on still captures isn't recorded.
 function recorder(page) {
   let frames = [], on = false, loop = null, paused = false, skew = 0;
   return {
@@ -205,7 +205,7 @@ function recorder(page) {
       await sleep(400);
       on = false;
       await loop;
-      // Bingkai identik digabung; bingkai terakhir ditahan sebelum GIF berulang.
+      // Identical frames are merged; the last frame is held before the GIF loops.
       const out = [];
       for (let i = 0; i < frames.length; i++) {
         const next = frames[i + 1]?.t ?? frames[i].t + hold;
@@ -220,8 +220,8 @@ function recorder(page) {
   };
 }
 
-// Encode di halaman Chromium terpisah: PNG → canvas (diperkecil) → palet global → frame berbeda saja
-// (piksel yang sama dengan frame sebelumnya dibuat transparan agar GIF kecil).
+// Encode in a separate Chromium page: PNG → canvas (downscaled) → global palette → changed pixels only
+// (pixels equal to the previous frame are made transparent to keep the GIF small).
 async function encodeGif(browser, frames, width, file) {
   const enc = await browser.newPage();
   const src = fs.readFileSync(path.join(ROOT, 'node_modules/gifenc/dist/gifenc.esm.js')).toString('base64');
@@ -264,11 +264,11 @@ async function encodeGif(browser, frames, width, file) {
   console.log(`✔ ${file} (${frames.length} frame, ${(fs.statSync(path.join(OUT, file)).size / 1048576).toFixed(1)} MB)`);
 }
 
-// ---------- tangkapan PWA ----------
+// ---------- PWA captures ----------
 async function capturePwa(browser) {
   const { mem, conn, s: harnessSess, cleanup } = await setup({ name: PC, reply });
-  await conn.call('delete', { id: harnessSess.id }); // diganti repo contoh di bawah
-  // Repo contoh dengan nama & remote GitHub asli-tampak; sesi lokal dibuat setelah remote terpasang.
+  await conn.call('delete', { id: harnessSess.id }); // replaced by the sample repos below
+  // Sample repos with realistic names & GitHub remotes; local sessions are created after the remote is set.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'snug-docs-'));
   const makeRepo = (name, files, branch, message = 'init') => {
     const dir = path.join(tmp, name);
@@ -280,25 +280,25 @@ async function capturePwa(browser) {
     git(dir, 'remote', 'add', 'origin', `https://github.com/arfakaisar/${name}.git`);
     return dir;
   };
-  TOKO_DIR = makeRepo('toko-kopi', TOKO, 'fitur/dark-mode', 'Halaman pengaturan & toggle notifikasi');
+  TOKO_DIR = makeRepo('toko-kopi', TOKO, 'feature/dark-mode', 'Settings page & notifications toggle');
   const extra = [];
-  for (const [name, prompt] of [['portfolio-site', 'Perbaiki layout navbar di mobile'], ['api-kasir', 'Tambah endpoint laporan penjualan harian']]) {
+  for (const [name, prompt] of [['portfolio-site', 'Fix the navbar layout on mobile'], ['pos-api', 'Add a daily sales report endpoint']]) {
     const dir = makeRepo(name, { 'README.md': '# ' + name + '\n' });
     extra.push({ dir, prompt, s: await conn.call('create', { local: dir }) });
   }
   await conn.call('send', { id: extra[0].s.id, text: extra[0].prompt });
   await sleep(300);
   const sess = await conn.call('create', { local: TOKO_DIR });
-  await conn.call('edits', { id: sess.id, on: true }); // izin edit tampil sebagai diff di HP
+  await conn.call('edits', { id: sess.id, on: true }); // edit permissions show as a diff on the phone
 
   const swaps = [
     ['claude-mock-1', 'claude-opus-5-5'],
     ['claude-mock-2', 'claude-sonnet-5-5'],
     ['tester', 'arfakaisar'],
-    ['GitHub belum login', '@arfakaisar'],
+    ['GitHub not signed in', '@arfakaisar'],
   ];
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, colorScheme: 'dark' });
-  // Data contoh & indikator ketukan dipasang di setiap halaman: teks diganti saat DOM berubah.
+  // Sample data & a tap indicator are installed on every page: text is swapped as the DOM changes.
   await ctx.addInitScript((swaps) => {
     const fix = (root) => {
       if (!root) return;
@@ -335,7 +335,7 @@ async function capturePwa(browser) {
     await sleep(230);
     await loc.click();
   };
-  // Tangkapan diam: gelap & terang, tanpa toast.
+  // Still captures: dark & light, without toasts.
   const shot = async (name, wait = 900) => {
     await sleep(wait);
     await page.evaluate(() => document.documentElement.classList.add('noToast'));
@@ -366,17 +366,17 @@ async function capturePwa(browser) {
     await page.waitForSelector('#input');
     await sleep(800);
 
-    // GIF 1: prompt → rencana → izin edit (Selalu) → izin npm test → ringkasan.
+    // GIF 1: prompt → plan → edit permission → npm test permission → summary.
     rec.start();
     await sleep(600);
     await tap(page.locator('#input'));
-    await page.locator('#input').pressSequentially('Tambahkan dark mode ke halaman pengaturan', { delay: 38 });
+    await page.locator('#input').pressSequentially('Add dark mode to the settings page', { delay: 38 });
     await sleep(350);
     await tap(page.locator('#send'));
     await page.waitForSelector('#dock .perm', { timeout: 60000 });
     await sleep(1600);
     await rec.still(() => shot('session', 200));
-    // Setiap izin (Edit, Write, npm test) disetujui dengan satu ketukan sampai agen selesai.
+    // Every permission (Edit, Write, npm test) is approved with one tap until the agent is done.
     while (!(await page.$('.donel'))) {
       const perm = await page.$('#dock .perm');
       if (!perm) {
@@ -410,10 +410,10 @@ async function capturePwa(browser) {
     await page.waitForSelector(sheet + ' input[placeholder="Commit message…"]');
     await sleep(500);
     await tap(page.locator(sheet + ' input[placeholder="Commit message…"]'));
-    await page.locator(sheet + ' input[placeholder="Commit message…"]').pressSequentially('Tambahkan dark mode di pengaturan', { delay: 36 });
+    await page.locator(sheet + ' input[placeholder="Commit message…"]').pressSequentially('Add dark mode to settings', { delay: 36 });
     await sleep(300);
     await tap(page.locator(sheet + ' button', { hasText: 'Commit' }).last());
-    await page.waitForSelector(sheet + ' >> text=Tambahkan dark mode di pengaturan', { timeout: 15000 });
+    await page.waitForSelector(sheet + ' >> text=Add dark mode to settings', { timeout: 15000 });
     await sleep(1200);
     await encodeGif(browser, await rec.stop(2800), 540, 'demo-git.gif');
     await closeSheet();
@@ -423,7 +423,7 @@ async function capturePwa(browser) {
     await shot('model');
     await closeSheet();
 
-    // GIF 3: Run & Preview — dev server, screenshot dari Chrome di PC, error console.
+    // GIF 3: Run & Preview — dev server, screenshot from Chrome on the PC, console errors.
     rec.start();
     await sleep(500);
     await tap(page.locator('[aria-label="Run & preview"]'));
@@ -442,7 +442,7 @@ async function capturePwa(browser) {
     await encodeGif(browser, await rec.stop(3000), 540, 'demo-run.gif');
     await closeSheet();
 
-    // Beranda: satu sesi masih bekerja.
+    // Home: one session still working.
     await conn.call('send', { id: extra[1].s.id, text: extra[1].prompt });
     await page.click('#menuBtn');
     await page.waitForSelector('#drawerPanel .dsess');
@@ -451,8 +451,8 @@ async function capturePwa(browser) {
     await page.waitForSelector('#view .card.sess');
     await shot('sessions', 1500);
   } catch (e) {
-    await page.screenshot({ path: path.join(os.tmpdir(), 'snug-docs-gagal.png') }).catch(() => {});
-    console.log('GAGAL:', e.message, '\n' + (await page.evaluate(() => document.body.innerText).catch(() => '')).slice(-1200));
+    await page.screenshot({ path: path.join(os.tmpdir(), 'snug-docs-failed.png') }).catch(() => {});
+    console.log('FAILED:', e.message, '\n' + (await page.evaluate(() => document.body.innerText).catch(() => '')).slice(-1200));
     throw e;
   } finally {
     await ctx.close();
@@ -461,13 +461,13 @@ async function capturePwa(browser) {
       fs.rmSync(tmp, { recursive: true, force: true });
     } catch {}
   }
-  if (errors.length) console.log('error JavaScript:', errors);
+  if (errors.length) console.log('JavaScript errors:', errors);
   return errors;
 }
 
 // ---------- mockup: terminal & hero ----------
 async function renderMockups(browser) {
-  // Terminal dianimasikan oleh tui.html sendiri (window.at(ms)); setiap 90 ms satu frame.
+  // The terminal is animated by tui.html itself (window.at(ms)); one frame every 90 ms.
   const p = await browser.newPage({ viewport: { width: 880, height: 700 }, deviceScaleFactor: 2 });
   await p.goto(pathToFileURL(path.join(ROOT, 'docs', 'mockups', 'tui.html')).href);
   await p.waitForTimeout(800);
@@ -483,7 +483,7 @@ async function renderMockups(browser) {
   await p.screenshot({ path: path.join(OUT, 'tui.jpg'), type: 'jpeg', quality: 90 });
   await p.close();
   await encodeGif(browser, frames, 880, 'demo-tui.gif');
-  // Hero memakai tangkapan terbaru (termasuk tui.jpg di atas).
+  // The hero uses the latest captures (including tui.jpg above).
   const hero = await browser.newPage({ viewport: { width: 1280, height: 640 }, deviceScaleFactor: 2 });
   await hero.goto(pathToFileURL(path.join(ROOT, 'docs', 'mockups', 'hero.html')).href);
   await hero.waitForTimeout(1500);

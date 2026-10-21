@@ -1,9 +1,9 @@
-# Rilis bertag untuk kanal pembaruan "stable" (daemon/updater.js): push tag vX.Y.Z yang sama dengan
-# "version" di package.json, misalnya:
-#   npm version minor   # menaikkan versi + commit + tag
+# Tagged releases for the "stable" update channel (daemon/updater.js): push a vX.Y.Z tag matching
+# "version" in package.json, for example:
+#   npm version minor   # bumps the version + commit + tag
 #   git push --follow-tags
-# Daemon kanal stable hanya memasang rilis (bukan setiap commit di main), dan bisa kembali ke versi
-# sebelumnya dengan `snugcode update --rollback` / tombol di aplikasi.
+# Daemons on the stable channel only install releases (not every commit on main), and can go back to the
+# previous version with `snugcode update --rollback` / the button in the app.
 name: Release
 
 on:
@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: write
-  # npm publish --provenance (asal paket bisa diverifikasi di npmjs.com)
+  # npm publish --provenance (package origin verifiable on npmjs.com)
   id-token: write
 
 jobs:
@@ -24,23 +24,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Tag sama dengan versi package.json
+      - name: Tag matches the package.json version
         run: |
           v="v$(node -p "require('./package.json').version")"
           if [ "$v" != "$GITHUB_REF_NAME" ]; then echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $v"; exit 1; fi
       - run: npm ci
       - run: npm test
-      # Hash PWA hasil build dari kode bertag: bandingkan dengan https://<relay>/build.json (docs/security.md).
+      # PWA hashes built from the tagged code: compare with https://<relay>/build.json (docs/security.md).
       - run: npm run build:web
       - name: Buat rilis GitHub
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" relay/public/build.json --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag
-      # Terbitkan ke npm (`npm i -g snugcode`, dipakai pemasang install.sh/ps1) bila secret NPM_TOKEN di-set.
-      - name: Terbitkan ke npm
+      # Publish to npm (`npm i -g snugcode`, used by the install.sh/ps1 installers) when the NPM_TOKEN secret is set.
+      - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN belum di-set: lewati npm publish (pemasang memakai rilis GitHub)."; exit 0; fi
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN is not set: skipping npm publish (installers use GitHub releases)."; exit 0; fi
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           npm publish --provenance --access public

@@ -1,4 +1,4 @@
-# Agent SDK, Codex, dan wrangler berubah cepat: PR pembaruan mingguan, dikelompokkan agar tidak banjir.
+# The Agent SDK, Codex, and wrangler change fast: weekly update PRs, grouped to avoid a flood.
 version: 2
 updates:
   - package-ecosystem: npm

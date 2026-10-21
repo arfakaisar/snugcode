@@ -1,6 +1,6 @@
-// Ikon aplikasi dari maskot Snug: SVG (favicon, ikon "any") + PNG untuk Android, maskable, dan iOS
-// (iOS tidak memakai SVG untuk ikon layar utama). Hasil di web/ ikut di-commit; jalankan ulang
-// setelah mengubah maskot:  npm run icons
+// App icons from the Snug mascot: SVG (favicon, "any" icon) + PNGs for Android, maskable, and iOS
+// (iOS doesn't use SVG for home screen icons). The output in web/ is committed; run again
+// after changing the mascot:  npm run icons
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -8,7 +8,7 @@ import { findBrowser } from '../daemon/browser.js';
 
 const WEB = path.resolve(import.meta.dirname, '..', 'web');
 
-// Maskot statis (warna tetap), koordinat 64×64 seperti MASCOT di web/ui/dom.js.
+// Static mascot (fixed colors), 64×64 coordinates like MASCOT in web/ui/dom.js.
 const MASCOT = `<ellipse cx="32" cy="58.6" rx="21" ry="2.4" fill="#000" opacity=".22"/>
 <path d="M13 50C13 33 21 21.5 32 21.5S51 33 51 50Z" fill="#d97757"/>
 <path d="M23.4 37.2q3 3 6 0M34.6 37.2q3 3 6 0" fill="none" stroke="#3a231a" stroke-width="2.6" stroke-linecap="round"/>
@@ -22,10 +22,10 @@ const MASCOT = `<ellipse cx="32" cy="58.6" rx="21" ry="2.4" fill="#000" opacity=
 <path d="M11.5 53.2h41" fill="none" stroke="#e3c4a8" stroke-width="1.3" stroke-dasharray="2 2.6" stroke-linecap="round"/>
 <ellipse cx="24.4" cy="45.6" rx="3.5" ry="2.5" fill="#d97757"/><ellipse cx="39.6" cy="45.6" rx="3.5" ry="2.5" fill="#d97757"/>
 <path d="M45.5 15h3l-3 3.2h3M50.5 8.5h4l-4 4.2h4" fill="none" stroke="#e9a688" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-// Kotak pembatas maskot (termasuk zzz & pompom) dalam koordinat 64×64: dipusatkan di kanvas 512.
+// Mascot bounding box (including zzz & pompom) in 64×64 coordinates: centered on the 512 canvas.
 const BOX = { x0: 7, x1: 59.4, y0: 8.5, y1: 58.6 };
 
-// scale = lebar maskot dalam px di kanvas 512; rx = sudut latar (0 = full-bleed untuk maskable/iOS).
+// scale = mascot width in px on the 512 canvas; rx = background corner radius (0 = full-bleed for maskable/iOS).
 function svg({ width, rx }) {
   const k = width / (BOX.x1 - BOX.x0);
   const tx = 256 - ((BOX.x0 + BOX.x1) / 2) * k;
@@ -41,11 +41,11 @@ ${MASCOT}
 }
 
 const icons = {
-  // "any": ubin bersudut bulat, maskot ±75% lebar ikon.
+  // "any": rounded tile, mascot ~75% of the icon width.
   'icon.svg': svg({ width: 384, rx: 112 }),
-  // Maskable: launcher Android memotong ke lingkaran/squircle; maskot di dalam zona aman (r = 40%).
+  // Maskable: Android launchers crop to a circle/squircle; the mascot stays inside the safe zone (r = 40%).
   'icon-maskable.svg': svg({ width: 310, rx: 0 }),
-  // iOS membulatkan sudut sendiri dan tidak memotong ke lingkaran.
+  // iOS rounds the corners itself and doesn't crop to a circle.
   'apple-touch-icon.svg': svg({ width: 360, rx: 0 }),
 };
 for (const [f, s] of Object.entries(icons)) fs.writeFileSync(path.join(WEB, f), s);
@@ -64,7 +64,7 @@ for (const [src, out, size] of [
   await page.screenshot({ path: path.join(WEB, out), omitBackground: true });
   console.log('✔ ' + out);
 }
-// iOS juga mencari /apple-touch-icon-precomposed.png di root bila tag <link> tidak terbaca.
+// iOS also looks for /apple-touch-icon-precomposed.png at the root when the <link> tag isn't read.
 fs.copyFileSync(path.join(WEB, 'apple-touch-icon.png'), path.join(WEB, 'apple-touch-icon-precomposed.png'));
 fs.rmSync(path.join(WEB, 'apple-touch-icon.svg'));
 await browser.close();

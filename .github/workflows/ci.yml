@@ -21,14 +21,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Cek sintaks semua modul
+      - name: Syntax-check every module
         shell: bash
         run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js landing/*.js relay/src/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done && bash -n .devcontainer/*.sh
       - name: Type check (tsc --checkJs, termasuk relay)
         if: runner.os == 'Linux'
         run: npm ci --prefix relay && npm run typecheck
-      # Test yang gagal juga ditulis sebagai anotasi: terbaca di halaman run (dan lewat API publik) tanpa
-      # membuka log job.
+      # Failing tests are also written as annotations: readable on the run page (and through the public API)
+      # without opening the job log.
       - name: npm test
         shell: bash
         run: |
@@ -37,13 +37,13 @@ jobs:
           sum=$(sed -n '/failing tests:/,$p' test.log)
           [ -n "$sum" ] || sum=$(grep -A15 'not ok' test.log)
           msg=$(printf '%s' "$sum" | head -c 6000 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}1')
-          echo "::error title=npm test gagal (${{ runner.os }})::${msg:-lihat log}"
+          echo "::error title=npm test failed (${{ runner.os }})::${msg:-see the log}"
           exit 1
       - name: Bundle PWA
         run: npm run build:web
 
-  # Ujung ke ujung: relay dev (wrangler) + daemon asli + Claude Agent SDK + mock 9router,
-  # klien HP (web/conn.js), PWA di Chrome, dan TUI di pseudo-terminal. Tanpa key/akun asli.
+  # End to end: dev relay (wrangler) + real daemon + Claude Agent SDK + mock 9router,
+  # phone client (web/conn.js), the PWA in Chrome, and the TUI in a pseudo-terminal. No real keys/accounts.
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -54,18 +54,18 @@ jobs:
           cache: npm
       - run: npm ci && npm ci --prefix relay
       - run: npm run build:web
-      # Sandbox OS (bubblewrap + socat) untuk Bash auto-izin engine Claude dan sandbox Codex: butuh user
-      # namespace tanpa batasan AppArmor.
-      - name: Siapkan sandbox OS
+      # OS sandbox (bubblewrap + socat) for the Claude engine's auto-allowed Bash and the Codex sandbox: needs
+      # user namespaces without AppArmor restrictions.
+      - name: Set up the OS sandbox
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: Jalankan relay dev
+      - name: Start the dev relay
         env:
           WRANGLER_SEND_METRICS: 'false'
         run: |
           (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &)
-          # Relay kedua dengan batas soket mati 3 detik: uji mesin yang mati tanpa menutup soket (e2e-relay).
+          # A second relay with a 3-second dead-socket limit: tests machines that die without closing the socket (e2e-relay).
           (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --var MACHINE_STALE_MS:3000 --port 8788 --ip 127.0.0.1 --inspector-port 9230 --persist-to ../.wrangler-stale > ../wrangler-stale.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && curl -sf http://127.0.0.1:8788/api/health && exit 0; sleep 1; done
           cat wrangler.log wrangler-stale.log; exit 1
@@ -74,17 +74,17 @@ jobs:
           RELAY_STALE: http://127.0.0.1:8788
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
-      # Koneksi multi-provider: endpoint OpenAI-only lewat penerjemah (Claude Agent SDK) dan model GPT
-      # lewat Codex app-server asli (sandbox bubblewrap butuh user namespace tanpa batasan AppArmor).
-      - name: Siapkan Codex untuk uji koneksi
+      # Multi-provider connections: OpenAI-only endpoints through the translator (Claude Agent SDK) and GPT models
+      # through the real Codex app-server (the bubblewrap sandbox needs user namespaces without AppArmor limits).
+      - name: Set up Codex for the connection tests
         run: |
           mkdir -p "$RUNNER_TEMP/codex" && cd "$RUNNER_TEMP/codex" && echo '{"private":true}' > package.json
           npm install --no-audit --no-fund --include=optional "$(node -p "require('$GITHUB_WORKSPACE/daemon/codex-version.json').spec")"
       - run: npm run test:e2e:connections
         env:
           SNUGCODE_E2E_CODEX: ${{ runner.temp }}/codex
-      # Engine Gemini CLI (ACP) asli terhadap Gemini API tiruan, versi yang sama dengan yang dipasang daemon.
-      - name: Siapkan Gemini CLI untuk uji engine
+      # The real Gemini CLI engine (ACP) against a fake Gemini API, the same version the daemon installs.
+      - name: Set up Gemini CLI for the engine test
         run: |
           mkdir -p "$RUNNER_TEMP/gemini" && cd "$RUNNER_TEMP/gemini" && echo '{"private":true}' > package.json
           npm install --no-audit --no-fund --omit=dev "$(node -p "require('$GITHUB_WORKSPACE/daemon/gemini-version.json').spec")"
@@ -94,7 +94,7 @@ jobs:
       - run: npm run test:ui
         env:
           SHOTS: ${{ runner.temp }}/shots
-      # HP kembali dari latar belakang dengan jaringan yang menahan koneksi: tidak macet di "Menghubungi relay".
+      # The phone returns from the background on a network that stalls connections: never stuck on "Contacting the relay".
       - run: npm run test:e2e:resume
       - if: failure()
         uses: actions/upload-artifact@v4
