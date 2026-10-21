@@ -1,6 +1,6 @@
-// Engine Claude Agent SDK: model Claude dan endpoint format Anthropic / OpenAI Chat (lewat penerjemah
-// di loopback proxy). Satu proses `claude` per sesi, dipakai ulang antar prompt (streaming input).
-// Izin (canUseTool), checkpoint (hook PreToolUse), dan event tetap milik Session (sessions.js).
+// Claude Agent SDK engine: Claude models and Anthropic / OpenAI Chat format endpoints (via the translator
+// in the loopback proxy). One `claude` process per session, reused across prompts (streaming input).
+// Permissions (canUseTool), checkpoints (PreToolUse hook), and events stay with Session (sessions.js).
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,32 +19,32 @@ import { devToolsServer, DEV_START } from './devtools.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// Tool bawaan yang ditawarkan ke model (tool MCP snugcode ikut otomatis). Tanpa daftar ini
-// Claude Code mengirim ±27 tool (Cron*, ScheduleWakeup, SendMessage, Workflow, EnterWorktree, …)
-// yang tidak dipakai di snugcode: ±40 KB skema (≈10k token) di SETIAP request model.
-// Grep/Glob wajib disebut: build native menggantinya dengan Bash grep/find (output tak dibatasi).
+// Built-in tools offered to the model (snugcode MCP tools are added automatically). Without this list
+// Claude Code sends ~27 tools (Cron*, ScheduleWakeup, SendMessage, Workflow, EnterWorktree, …)
+// that snugcode doesn't use: ~40 KB of schemas (≈10k tokens) on EVERY model request.
+// Grep/Glob must be listed: the native build replaces them with Bash grep/find (unbounded output).
 export const AGENT_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent', 'AskUserQuestion', 'ExitPlanMode', 'WebFetch', 'WebSearch'];
-// Tool yang bisa mengubah file: baru boleh jalan setelah checkpoint prompt tersimpan (hook PreToolUse),
-// termasuk yang lolos tanpa canUseTool lewat aturan "Selalu" (mis. Bash(npm test *)).
+// Tools that can change files: only allowed to run after the prompt checkpoint is saved (PreToolUse hook),
+// including those that pass without canUseTool via "Always" rules (e.g. Bash(npm test *)).
 const MUTATING_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|' + DEV_START;
 
-// Setiap langkah agen = satu request model (1–10 detik lewat router), jadi jumlah langkah yang
-// menentukan kecepatan. Model non-Claude (Gemini) membaca file 40–120 baris per langkah dan
-// mencari nama file dulu lalu mencari ulang isinya: 4–9× lebih banyak request untuk tugas yang
-// sama. Hook ini melebarkan Read potongan menjadi satu file utuh (bila muat sekali baca) dan
-// Grep tanpa output_mode menjadi baris yang cocok + nomor baris. Izin tetap lewat canUseTool.
+// Every agent step = one model request (1–10 seconds through a router), so the number of steps
+// determines speed. Non-Claude models (Gemini) read files 40–120 lines per step and
+// search for file names first, then search their contents again: 4–9× more requests for the same
+// task. This hook widens partial Reads to the whole file (if it fits in one read) and
+// Grep without output_mode to matching lines + line numbers. Permissions still go through canUseTool.
 const WIDEN_MATCHER = 'Read|Grep';
-const WIDEN_MAX_BYTES = 64 * 1024; // ±16k token: jauh di bawah batas token Read Claude Code
-const WIDEN_MAX_LINES = 2000; // batas baris bawaan Read tanpa limit
+const WIDEN_MAX_BYTES = 64 * 1024; // ~16k tokens: well below Claude Code's Read token limit
+const WIDEN_MAX_LINES = 2000; // Read's default line limit without a limit
 const GREP_HEAD_LIMIT = 100;
 const NO_WIDEN_EXT = /\.(pdf|ipynb|png|jpe?g|gif|webp|bmp|ico|svg)$/i;
-// Model Claude: cc/…, claude-… tanpa provider, atau claude-… lewat provider lain (ag/claude-sonnet-4-6).
+// Claude models: cc/…, claude-… without a provider, or claude-… via another provider (ag/claude-sonnet-4-6).
 export const isClaudeModel = (id) => {
   const p = parseModelId(id || '');
   return (p.conn === 'router' && nativeEffortModel(p.provider, p.base)) || isClaudeId(p.base);
 };
 
-/** Input tool yang dilebarkan, atau null bila dibiarkan apa adanya. */
+/** The widened tool input, or null to leave it as-is. */
 export function widenToolInput(tool, input, cwd) {
   if (!input || typeof input !== 'object') return null;
   if (tool === 'Read') {
@@ -59,7 +59,7 @@ export function widenToolInput(tool, input, cwd) {
     } catch {
       return null;
     }
-    if (buf.includes(0)) return null; // biner
+    if (buf.includes(0)) return null; // binary
     let lines = 1;
     for (const b of buf) if (b === 10 && ++lines > WIDEN_MAX_LINES) return null;
     const { offset, limit, ...rest } = input;
@@ -71,19 +71,19 @@ export function widenToolInput(tool, input, cwd) {
   return null;
 }
 
-// Path binary Claude untuk query(): `claudeExecutable` di config.json (fallback manual)
-// atau binary dari paket platform SDK. Gagal lebih awal dengan pesan yang jelas.
+// Claude binary path for query(): `claudeExecutable` in config.json (manual fallback)
+// or the binary from the SDK's platform package. Fails early with a clear message.
 function claudeExecutable(cfg) {
   if (cfg.claudeExecutable) {
-    if (!fs.existsSync(cfg.claudeExecutable)) throw new Error(`claudeExecutable di config.json tidak ditemukan: ${cfg.claudeExecutable}`);
+    if (!fs.existsSync(cfg.claudeExecutable)) throw new Error(`claudeExecutable in config.json not found: ${cfg.claudeExecutable}`);
     return cfg.claudeExecutable;
   }
   if (!findNativeBinary(import.meta.url)) throw new Error(missingBinaryMessage(ROOT));
   return undefined;
 }
 
-// Antrean pesan user untuk query() dalam mode streaming input: satu proses claude per sesi
-// menerima prompt demi prompt lewat iterator ini.
+// User message queue for query() in streaming input mode: one claude process per session
+// receives prompt after prompt through this iterator.
 function inputQueue() {
   const items = [];
   let wake = null;
@@ -117,21 +117,21 @@ export async function startClaudeAgent(s, route) {
   const claudeExe = claudeExecutable(cfg);
   const actualModel = route.model;
   const effort = /** @type {import('@anthropic-ai/claude-agent-sdk').EffortLevel | null} */ (route.effort);
-  // Subagen & tugas utilitas: model ringan dari koneksi yang sama (Haiku / Flash, lihat lightModel).
+  // Subagents & utility tasks: a light model from the same connection (Haiku / Flash, see lightModel).
   const light = lightModel(s.meta.model, knownRefs(sec, route.conn.id));
   const lightId = splitRef(resolveModelEffort(light.id).actualModel).id;
   const proxy = s.mgr.proxy;
   const baseUrl = proxy ? await proxy.ready().catch(() => null) : null;
-  if (!baseUrl) throw new Error('Loopback proxy snugcode tidak berjalan. Restart daemon (`snugcode restart`).');
-  // Proses claude hanya memegang token lokal untuk koneksi ini; key asli disuntikkan oleh proxy.
+  if (!baseUrl) throw new Error('The snugcode loopback proxy is not running. Restart the daemon (`snugcode restart`).');
+  // The claude process only holds a local token for this connection; the real key is injected by the proxy.
   const authToken = s.mgr.tokenFor(route.conn, route.wire);
-  // Sandbox OS untuk Bash saat perintah lolos tanpa dilihat pengguna (auto-izin), atau selalu bila diatur.
+  // OS sandbox for Bash when commands pass without the user seeing them (auto-approve), or always if configured.
   const mode = sandboxMode(cfg);
   const support = mode === 'off' ? { ok: false } : await sandboxSupport();
   const sandboxed = support.ok && (mode === 'always' || !!s.meta.auto);
   if (s.meta.auto && mode !== 'off' && !support.ok && !s.mgr.warnedClaudeSandbox) {
     s.mgr.warnedClaudeSandbox = true;
-    s.emitEvent({ k: 'note', d: `◆ Sandbox OS tidak tersedia (${support.reason}): perintah auto-izin berjalan tanpa sandbox, jadi kredensial di folder data snugcode tidak terlindungi di tingkat OS.` });
+    s.emitEvent({ k: 'note', d: `◆ OS sandbox unavailable (${support.reason}): auto-approved commands run without a sandbox, so credentials in the snugcode data folder aren't protected at the OS level.` });
   }
   const key = ['claude', claudeExe, lightId, baseUrl, authToken, sandboxed].join('|');
   if (sandboxed && !s.meta.local && !s.meta.computer) excludeSandboxStubs(s.meta.cwd);
@@ -142,12 +142,12 @@ export async function startClaudeAgent(s, route) {
     try {
       if (cur.model !== actualModel) await cur.q.setModel(actualModel);
       cur.model = actualModel;
-      // null = effort bawaan model ("auto").
+      // null = the model's default effort ("auto").
       if (cur.effort !== effort) await cur.q.applyFlagSettings({ effortLevel: effort });
       cur.effort = effort;
       return cur;
     } catch (e) {
-      s.mgr.log('! ganti model di proses berjalan gagal, proses dibuat ulang: ' + e.message);
+      s.mgr.log('! switching model in the running process failed, recreating the process: ' + e.message);
     }
   }
   s.closeAgent();
@@ -160,20 +160,20 @@ export async function startClaudeAgent(s, route) {
     ANTHROPIC_DEFAULT_OPUS_MODEL: actualModel,
     ANTHROPIC_DEFAULT_SONNET_MODEL: actualModel,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: lightId,
-    // _FORCE: tanpa ini subagen bawaan (Explore, …) tetap memakai model utama.
+    // _FORCE: without it the built-in subagents (Explore, …) still use the main model.
     CLAUDE_CODE_SUBAGENT_MODEL: lightId,
     CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
     CLAUDE_CONFIG_DIR: CLAUDE_DIR,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    // Proses panjang lewat dev_start; Bash/Agent latar belakang hanya menambah skema & giliran liar.
+    // Long processes go through dev_start; background Bash/Agent only add schemas & stray turns.
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
-    // Output Bash (npm install/test, build) yang masuk konteks dibatasi; bawaan Claude Code 30k karakter.
+    // Bash output (npm install/test, build) entering the context is capped; Claude Code's default is 30k characters.
     BASH_MAX_OUTPUT_LENGTH: process.env.BASH_MAX_OUTPUT_LENGTH || '15000',
     CLAUDE_AGENT_SDK_CLIENT_APP: 'snugcode/0.1',
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
   });
-  // pnpm/yarn tetap ada untuk Bash agen walau tidak terpasang global (bila shim sudah disiapkan).
+  // pnpm/yarn stay available to the agent's Bash even without a global install (once the shims are prepared).
   Object.assign(env, await toolchainEnv('', env));
 
   const input = inputQueue();
@@ -187,12 +187,12 @@ export async function startClaudeAgent(s, route) {
       ...(effort ? { effort } : {}),
       resume: s.meta.claudeSessionId || undefined,
       includePartialMessages: true,
-      // 'default': Write/Edit ikut lewat canUseTool (checkpoint, mode tinjau edit, folder data);
-      // auto-izin & "Selalu" tetap meloloskannya tanpa bertanya.
-      // Mode rencana diatur dari HP/terminal saja, jadi agen tidak boleh masuk sendiri.
+      // 'default': Write/Edit also go through canUseTool (checkpoint, edit review mode, data folder);
+      // auto-approve & "Always" still let them through without asking.
+      // Plan mode is only set from the phone/terminal, so the agent may not enter it on its own.
       permissionMode: s.meta.plan ? 'plan' : 'default',
-      // Setelan proyek (.claude/settings.json) TIDAK dimuat: isinya (hook, aturan izin, env,
-      // apiKeyHelper) bisa ditulis siapa pun yang punya repo. CLAUDE.md dimuat sendiri (projectInstructions).
+      // Project settings (.claude/settings.json) are NOT loaded: their contents (hooks, permission rules, env,
+      // apiKeyHelper) can be written by anyone with the repo. CLAUDE.md is loaded by us (projectInstructions).
       settingSources: [],
       ...(sandboxed ? { sandbox: sandboxOptions({ cwd: s.meta.cwd, computer: !!s.meta.computer }) } : {}),
       settings: { plansDirectory: PLANS_DIR, ...(s.allowRules.size ? { permissions: { allow: [...s.allowRules] } } : {}) },
@@ -215,7 +215,7 @@ export async function startClaudeAgent(s, route) {
     kind: 'claude',
     key,
     q,
-    // Auto-izin dinyalakan saat proses ini berjalan tanpa sandbox: Bash tetap bertanya sampai prompt berikutnya.
+    // Auto-approve was turned on while this process runs without a sandbox: Bash keeps asking until the next prompt.
     unsandboxedAuto: support.ok && !sandboxed,
     input,
     model: actualModel,
@@ -226,7 +226,7 @@ export async function startClaudeAgent(s, route) {
     idle: null,
     lastUsed: Date.now(),
     loop: /** @type {Promise<void> | null} */ (null),
-    // Gambar dikirim sebagai blok konten pesan user.
+    // Images are sent as content blocks of the user message.
     push({ text, images = [] }) {
       const content = images.length ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mime, data: i.data } })), ...(text ? [{ type: 'text', text }] : [])] : text;
       input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });

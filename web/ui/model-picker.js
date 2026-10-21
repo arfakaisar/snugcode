@@ -1,9 +1,9 @@
-// Pemilih model dengan slider effort dan uji kesehatan model.
+// Model picker with an effort slider and model health checks.
 import * as M from '../../shared/models.js';
 import { app } from './state.js';
 import { busyButton, h, haptic, ic, isOldDaemon, loading, toast, ui } from './dom.js';
 
-// ---------- Pemilih model + slider effort ----------
+// ---------- Model picker + effort slider ----------
 export const modelCache = { list: null, errors: [], at: 0, probes: new Map() };
 
 export async function loadModels(fresh = false) {
@@ -11,7 +11,7 @@ export async function loadModels(fresh = false) {
   let list;
   modelCache.errors = [];
   if (app.current?.info?.caps?.includes('modelsAll')) {
-    // Semua koneksi sekaligus; koneksi yang gagal dilaporkan tanpa menggagalkan yang lain.
+    // All connections at once; a failing connection is reported without failing the rest.
     const r = await app.conn.call('modelsAll', { fresh });
     list = r.models;
     modelCache.errors = r.errors || [];
@@ -20,7 +20,7 @@ export async function loadModels(fresh = false) {
       list = await app.conn.call('modelsInfo', { fresh });
     } catch (e) {
       if (!isOldDaemon(e)) throw e;
-      list = await app.conn.call('models'); // daemon versi lama: hanya ID
+      list = await app.conn.call('models'); // old daemon: IDs only
     }
   }
   modelCache.list = list;
@@ -31,22 +31,22 @@ export async function loadModels(fresh = false) {
 export function probeModel(id, retest = false) {
   if (retest) modelCache.probes.delete(id);
   if (!modelCache.probes.has(id)) {
-    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Perbarui snugcode di PC untuk menguji model.' : e.message }));
+    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Update snugcode on the PC to test models.' : e.message }));
     modelCache.probes.set(id, p);
-    // Kegagalan koneksi tidak disimpan; hasil dari model disimpan 5 menit.
+    // Connection failures aren't cached; model results are cached for 5 minutes.
     p.then((r) => (r.ok === null ? modelCache.probes.delete(id) : setTimeout(() => modelCache.probes.delete(id), 5 * 60 * 1000)));
   }
   return modelCache.probes.get(id);
 }
 
-// Sheet pemilih model. onPick(id) dipanggil saat "Pakai" ditekan.
+// Model picker sheet. onPick(id) is called when "Use" is tapped.
 /** @param {{ title: string, current?: string, onPick: (id: string) => *, onBack?: () => void }} opts */
 export async function pickModel({ title, current: cur, onPick, onBack }) {
-  const q = h('input', { class: 'field', type: 'search', placeholder: 'Cari model…', autocapitalize: 'off', autocomplete: 'off', enterkeyhint: 'search' });
-  const list = h('div', { class: 'mlist' }, loading('Memuat model…'));
+  const q = h('input', { class: 'field', type: 'search', placeholder: 'Search models…', autocapitalize: 'off', autocomplete: 'off', enterkeyhint: 'search' });
+  const list = h('div', { class: 'mlist' }, loading('Loading models…'));
   const probeLine = h('div', { class: 'probe' });
-  const useBtn = h('button', { class: 'btn primary' }, 'Pakai');
-  ui.sheet(ui.head(title, { back: onBack, sub: cur ? 'sekarang: ' + M.modelLabel(cur) : '' }), h('div', { class: 'search' }, ic('search'), q), list, h('div', { class: 'sheetfoot' }, probeLine, useBtn));
+  const useBtn = h('button', { class: 'btn primary' }, 'Use');
+  ui.sheet(ui.head(title, { back: onBack, sub: cur ? 'current: ' + M.modelLabel(cur) : '' }), h('div', { class: 'search' }, ic('search'), q), list, h('div', { class: 'sheetfoot' }, probeLine, useBtn));
 
   let groups;
   try {
@@ -56,16 +56,16 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
   }
   const errs = modelCache.errors.map((e) => h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), `${e.conn}: ${e.err}`));
   if (!groups.length) {
-    const add = app.current?.info?.caps?.includes('connAdd') ? h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: async () => (await import('./settings.js')).connectionsSheet({ back: onBack }) }, ic('key'), 'Tambah API key / login ChatGPT') : null;
-    return list.replaceChildren(...errs, h('div', { class: 'empty' }, 'Belum ada model yang bisa dipakai agen.'), add || '');
+    const add = app.current?.info?.caps?.includes('connAdd') ? h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: async () => (await import('./settings.js')).connectionsSheet({ back: onBack }) }, ic('key'), 'Add an API key / sign in to ChatGPT') : null;
+    return list.replaceChildren(...errs, h('div', { class: 'empty' }, 'No models available to the agent yet.'), add || '');
   }
   if (errs.length) list.before(...errs);
-  // Daftar model bisa berubah kapan saja (model mati dihapus, koneksi dihapus).
+  // The model list can change at any time (dead models dropped, connections removed).
   const exact = cur ? M.findGroup(groups, cur) : null;
   const p = cur ? M.parseModelId(cur) : null;
   const sameGroup = !exact && p ? groups.find((g) => g.key === (p.conn !== 'router' ? `${p.conn}:${p.base}` : (p.provider ? p.provider + '/' : '') + p.base)) : null;
   if (cur && !exact)
-    list.before(h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), sameGroup ? `Varian ${M.modelLabel(cur)} sudah tidak tersedia. Pilih tingkat effort lain.` : `${M.modelLabel(cur, { provider: true })} sudah tidak tersedia. Pilih model lain.`));
+    list.before(h('div', { class: 'err', style: 'display:flex;gap:8px' }, ic('alert'), sameGroup ? `Variant ${M.modelLabel(cur)} is no longer available. Pick another effort level.` : `${M.modelLabel(cur, { provider: true })} is no longer available. Pick another model.`));
   const g0 = exact || sameGroup || groups[0];
   const sel = { group: g0, effort: M.defaultChoice(g0, cur) };
   let probeTimer;
@@ -74,22 +74,22 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
   const resolved = () => M.resolveId(sel.group, sel.effort);
   const update = () => {
     const id = resolved();
-    useBtn.replaceChildren(id === cur ? '✓ Sedang dipakai' : 'Pakai ' + M.modelLabel(id));
+    useBtn.replaceChildren(id === cur ? '✓ In use' : 'Use ' + M.modelLabel(id));
     useBtn.disabled = id === cur;
     useBtn.className = 'btn primary';
-    probeLine.replaceChildren(h('span', { class: 'spinner' }), h('span', { class: 'dim' }, 'menguji ' + M.modelLabel(id) + '…'));
+    probeLine.replaceChildren(h('span', { class: 'spinner' }), h('span', { class: 'dim' }, 'testing ' + M.modelLabel(id) + '…'));
     clearTimeout(probeTimer);
     probeFor = id;
     probeTimer = setTimeout(async () => {
       const r = await probeModel(id);
       if (probeFor !== id) return;
-      const retest = h('button', { class: 'linkbtn', onclick: () => (probeModel(id, true), update()) }, 'uji ulang');
-      if (r.ok) probeLine.replaceChildren(h('span', { class: 'ok' }, `✓ siap · ${(r.ms / 1000).toFixed(1)}s`), retest);
+      const retest = h('button', { class: 'linkbtn', onclick: () => (probeModel(id, true), update()) }, 'retest');
+      if (r.ok) probeLine.replaceChildren(h('span', { class: 'ok' }, `✓ ready · ${(r.ms / 1000).toFixed(1)}s`), retest);
       else if (r.ok === null) probeLine.replaceChildren(h('span', { class: 'dim' }, r.err), retest);
       else {
         probeLine.replaceChildren(h('span', { class: 'e' }, '✗ ' + r.err), retest);
         if (id !== cur) {
-          useBtn.replaceChildren('Tetap pakai ' + M.modelLabel(id));
+          useBtn.replaceChildren('Use ' + M.modelLabel(id) + ' anyway');
           useBtn.className = 'btn warn';
         }
       }
@@ -115,7 +115,7 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
     }
     panel.append(head);
     if (g.levels.length >= 2) {
-      slider = h('input', { type: 'range', min: '0', max: String(g.levels.length - 1), step: '1', 'aria-label': 'Tingkat effort' });
+      slider = h('input', { type: 'range', min: '0', max: String(g.levels.length - 1), step: '1', 'aria-label': 'Effort level' });
       slider.oninput = () => {
         sel.effort = g.levels[+slider.value].effort;
         haptic(6);
@@ -128,7 +128,7 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
       only.onclick = () => ((sel.effort = g.levels[0].effort), sync());
       head.append(only);
     }
-    panel.append(h('div', { class: 'hint' }, '← cepat & hemat   ·   berpikir lebih dalam →'));
+    panel.append(h('div', { class: 'hint' }, '← fast & cheap   ·   thinks deeper →'));
     const sync = () => {
       val.textContent = sel.effort === null ? 'auto' : M.EFFORT_LABEL[sel.effort] || sel.effort;
       if (slider) {
@@ -153,13 +153,13 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
     for (const g of shown) {
       if (g.provider !== lastProvider) {
         lastProvider = g.provider;
-        // Koneksi (Claude API, ChatGPT, OpenRouter, …) atau provider di router lama (cc/, ag/, …).
-        const head = g.conn && g.conn !== 'router' ? (g.label || M.PROVIDER_LABEL[g.provider] || g.provider) : (M.PROVIDER_LABEL[g.provider] || g.provider || 'lainnya') + (g.provider ? ` · ${g.provider}/` : '');
+        // Connection (Claude API, ChatGPT, OpenRouter, …) or a provider on the old router (cc/, ag/, …).
+        const head = g.conn && g.conn !== 'router' ? (g.label || M.PROVIDER_LABEL[g.provider] || g.provider) : (M.PROVIDER_LABEL[g.provider] || g.provider || 'other') + (g.provider ? ` · ${g.provider}/` : '');
         out.push(h('div', { class: 'mprov' }, head));
       }
       const isSel = g === sel.group;
       const inUse = g.variants.some((v) => v.id === cur);
-      const badges = [g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : null, g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'gambar' : null].filter(Boolean);
+      const badges = [g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : null, g.ctx ? M.ctxLabel(g.ctx) + ' context' : null, g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} effort levels` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : null, g.vision ? 'images' : null].filter(Boolean);
       out.push(
         h('div', { class: 'model' + (isSel ? ' sel' : ''), role: 'button', tabindex: '0', onclick: () => {
           if (sel.group === g) return;
@@ -169,17 +169,17 @@ export async function pickModel({ title, current: cur, onPick, onBack }) {
           render();
           update();
         } },
-          h('div', { class: 'row' }, h('span', { class: 'mname' }, g.name), inUse ? h('span', { class: 'tag on' }, 'dipakai') : null),
+          h('div', { class: 'row' }, h('span', { class: 'mname' }, g.name), inUse ? h('span', { class: 'tag on' }, 'in use') : null),
           h('div', { class: 'sub' }, badges.join(' · ')),
           isSel ? effortPanel(g) : null,
         ),
       );
     }
-    list.replaceChildren(...(out.length ? out : [h('div', { class: 'empty' }, 'Tidak ada model yang cocok.')]));
+    list.replaceChildren(...(out.length ? out : [h('div', { class: 'empty' }, 'No matching models.')]));
   };
   q.oninput = render;
   useBtn.onclick = async () => {
-    const done = busyButton(useBtn, 'Menyimpan…');
+    const done = busyButton(useBtn, 'Saving…');
     try {
       await onPick(resolved());
       haptic(15);

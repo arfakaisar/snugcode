@@ -1,21 +1,21 @@
-// Tool MCP in-process untuk agen: menjalankan dev server di latar belakang, membaca log,
-// dan melihat hasil UI sendiri (screenshot + error konsol) — tanpa memblokir Bash.
+// In-process MCP tools for the agent: run dev servers in the background, read logs,
+// and see its own UI (screenshot + console errors) — without blocking Bash.
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { capture } from './browser.js';
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] });
 const fail = (t) => ({ content: [{ type: 'text', text: t }], isError: true });
-const tail = (s, n = 6000) => (s.length > n ? '…' + s.slice(-n) : s) || '(belum ada output)';
+const tail = (s, n = 6000) => (s.length > n ? '…' + s.slice(-n) : s) || '(no output yet)';
 
 export const DEV_START = 'mcp__snugcode__dev_start';
-// Tanpa izin hanya untuk URL localhost (dev server); URL lain/`file:` ditanyakan (lihat sessions.js).
+// Allowed without asking only for localhost URLs (dev servers); other URLs/`file:` ask (see sessions.js).
 export const SCREENSHOT = 'mcp__snugcode__preview_screenshot';
-// Tool yang tidak menjalankan perintah baru: tidak perlu izin.
+// Tools that don't run new commands: no permission needed.
 export const SAFE_DEV_TOOLS = ['dev_stop', 'dev_logs', 'dev_list', 'preview_screenshot'].map((n) => 'mcp__snugcode__' + n);
 
-// Log konsol untuk model: baris kembar (spam HMR/re-render) digabung, tiap baris & totalnya dibatasi.
-// Error didahulukan; log biasa hanya mengisi sisa ruang.
+// Console log for the model: duplicate lines (HMR/re-render spam) are merged, each line & the total are capped.
+// Errors first; regular logs only fill the remaining space.
 export function consoleSummary(logs, { maxLine = 400, maxTotal = 5000 } = {}) {
   const seen = new Map();
   for (const l of logs) {
@@ -37,8 +37,8 @@ export function consoleSummary(logs, { maxLine = 400, maxTotal = 5000 } = {}) {
   return out.join('\n');
 }
 
-// Definisi tool dev, dipakai engine Claude (server MCP in-process Agent SDK) dan engine Codex
-// (server MCP stdio, lihat mcp-bridge.js). handler(session, args) -> hasil MCP.
+// Dev tool definitions, used by the Claude engine (Agent SDK in-process MCP server) and the Codex engine
+// (stdio MCP server, see mcp-bridge.js). handler(session, args) -> MCP result.
 /** @type {{ name: string, description: string, shape: Record<string, any>, handler: (session: any, args: any) => Promise<any> }[]} */
 const DEV_TOOLS = [
   {
@@ -69,13 +69,13 @@ const DEV_TOOLS = [
     },
     async handler(session, { url, path = '/', width, height, fullPage, image = true }) {
       if (!url) {
-        // Proses terbaru: setelah agen menyalakan ulang server, yang lama bisa masih berjalan dengan kode basi.
+        // Newest process: after the agent restarts a server, the old one may still be running stale code.
         const p = session.procs.list().filter((x) => x.status === 'running' && x.port).sort((a, b) => b.startedAt - a.startedAt)[0];
         if (!p) return fail('No running dev server with a detected port. Start one with dev_start or pass url.');
         url = `http://localhost:${p.port}${path.startsWith('/') ? path : '/' + path}`;
       }
       const r = await capture(url, { width, height, fullPage, scale: 1, cfg: session.mgr.config });
-      // Tampilkan juga di HP (bukan riwayat: base64 terlalu besar untuk .jsonl). Batas frame relay ~1MB.
+      // Also show it on the phone (not in history: base64 is too big for .jsonl). Relay frame limit ~1MB.
       if (r.data.length < 450_000) session.live({ k: 'shot', url, mime: r.mime, data: r.data });
       const logs = consoleSummary(r.logs);
       const info = { type: 'text', text: `${url} — "${r.title}"\nconsole:\n${logs || '(empty)'}` };
@@ -102,11 +102,11 @@ export function devToolsServer(session) {
   });
 }
 
-// Untuk server MCP stdio (engine Codex): skema JSON tiap tool.
+// For the stdio MCP server (Codex engine): JSON schema of each tool.
 export const devToolList = () => DEV_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(z.object(t.shape)) }));
 
-// Dipanggil lewat jembatan MCP (engine Codex). Di engine Claude izin dicek canUseTool sebelum tool
-// jalan; di sini izin yang sama dicek lebih dulu (dev_start menjalankan perintah, screenshot URL luar).
+// Called through the MCP bridge (Codex engine). In the Claude engine canUseTool checks permission before the tool
+// runs; here the same permission is checked first (dev_start runs a command, screenshots of external URLs).
 export async function callDevTool(session, name, args = {}) {
   const t = DEV_TOOLS.find((x) => x.name === name);
   if (!t) return fail('unknown tool ' + name);

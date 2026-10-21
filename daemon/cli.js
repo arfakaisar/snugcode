@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // snugcode — CLI daemon.
-//   snugcode setup     : setup awal (API key model, GitHub, PIN)
-//   snugcode start     : jalankan daemon
-//   snugcode stop      : hentikan daemon yang berjalan di latar belakang
-//   snugcode autostart : jalankan otomatis saat login (on|off)
-//   snugcode pin       : ganti PIN / buka kunci setelah salah berkali-kali
-//   snugcode devices   : daftar HP terpasang;  snugcode revoke <id|all>
-//   snugcode status    : ringkasan konfigurasi
-//   snugcode cloud     : runner cloud (Codespaces/container) — konfigurasi dari env, lihat runner.js
+//   snugcode setup     : first-time setup (model API key, GitHub, PIN)
+//   snugcode start     : run the daemon
+//   snugcode stop      : stop the daemon running in the background
+//   snugcode autostart : start automatically at login (on|off)
+//   snugcode pin       : change the PIN / unlock after too many wrong attempts
+//   snugcode devices   : list paired phones;  snugcode revoke <id|all>
+//   snugcode status    : configuration summary
+//   snugcode cloud     : cloud runner (Codespaces/container) — configured from env, see runner.js
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,8 +28,8 @@ import { AUTOSTART_UNIT, autostartFilePath, writeAutostart, disableAutostart, sy
 const CLI = fileURLToPath(import.meta.url);
 const COMMAND_NAMES = ['setup', 'login', 'connect', 'disconnect', 'start', 'stop', 'restart', 'update', 'clean', 'autostart', 'pin', 'devices', 'revoke', 'status', 'help', 'cloud', 'keychain'];
 const args = process.argv.slice(2);
-// Tanpa perintah -> buka TUI (seperti `claude`). Kata pertama yang bukan
-// perintah dianggap prompt awal: snugcode "jelaskan repo ini".
+// No command -> open the TUI (like `claude`). A first word that isn't a
+// command is taken as the initial prompt: snugcode "explain this repo".
 const cmd = args[0] && COMMAND_NAMES.includes(args[0]) ? args.shift() : 'tui';
 const flags = {};
 for (let i = 0; i < args.length; i++) {
@@ -73,27 +73,27 @@ function openBrowser(url) {
 
 async function pickModel(models, label, def) {
   if (flags[label]) return flags[label];
-  // OpenRouter & router besar punya ratusan model: tampilkan sebagian, nama lain tetap bisa diketik.
+  // OpenRouter & big routers have hundreds of models: show some, other names can still be typed.
   models.slice(0, 40).forEach((m, i) => console.log(c.d(String(i + 1).padStart(3)) + '  ' + m));
-  if (models.length > 40) console.log(c.d(`  … ${models.length - 40} model lain (ketik namanya)`));
-  const a = await ask(`Pilih ${label === 'model' ? 'model utama' : 'model kecil (tugas ringan)'} (nomor atau nama)`, def);
+  if (models.length > 40) console.log(c.d(`  … ${models.length - 40} more models (type the name)`));
+  const a = await ask(`Pick the ${label === 'model' ? 'main model' : 'small model (light tasks)'} (number or name)`, def);
   return /^\d+$/.test(a) ? models[+a - 1] : a;
 }
 
 async function askPin() {
   if (flags.pin) {
-    if (!PIN_RE.test(String(flags.pin))) throw new Error('PIN harus 6–12 karakter huruf/angka.');
+    if (!PIN_RE.test(String(flags.pin))) throw new Error('The PIN must be 6–12 letters/digits.');
     return String(flags.pin);
   }
   for (;;) {
-    const a = await ask('Buat PIN (6–12 huruf/angka, mis. moon42) untuk memasangkan HP', '', { hidden: true });
+    const a = await ask('Create a PIN (6–12 letters/digits, e.g. moon42) to pair your phone', '', { hidden: true });
     if (!PIN_RE.test(a)) {
-      console.log(c.r('PIN harus 6–12 karakter huruf/angka.'));
+      console.log(c.r('The PIN must be 6–12 letters/digits.'));
       continue;
     }
-    const b = await ask('Ulangi PIN', '', { hidden: true });
+    const b = await ask('Repeat the PIN', '', { hidden: true });
     if (normalizePin(a) === normalizePin(b)) return a;
-    console.log(c.r('PIN tidak sama.'));
+    console.log(c.r('The PINs don\'t match.'));
   }
 }
 
@@ -101,20 +101,20 @@ async function setup() {
   ensureDirs();
   const cfg = loadConfig();
   const sec = loadSecrets();
-  console.log(c.b('\nsnugcode setup') + c.d(`  (data disimpan di ${HOME})\n`));
+  console.log(c.b('\nsnugcode setup') + c.d(`  (data stored in ${HOME})\n`));
 
-  // 1. Model: API key apa pun (official / router / endpoint sendiri), jenisnya dideteksi otomatis.
+  // 1. Model: any API key (official / router / your own endpoint), its type detected automatically.
   migrateLegacy(cfg, sec);
   console.log(c.b('1) Model & API key'));
-  console.log(c.d('   Tempel API key: Anthropic (sk-ant-api…), OpenAI, Gemini (AIza…), OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq,'));
-  console.log(c.d('   atau key router (9router, OmniRoute, LiteLLM, …) beserta URL-nya. Login ChatGPT: dari aplikasi HP → Model & API key.'));
+  console.log(c.d('   Paste an API key: Anthropic (sk-ant-api…), OpenAI, Gemini (AIza…), OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq,'));
+  console.log(c.d('   or a router key (9router, OmniRoute, LiteLLM, …) with its URL. ChatGPT login: from the phone app → Models & API keys.'));
   const have = hasConnections(sec);
   let models;
   for (;;) {
-    const key = flags.key || (await ask('API key', have ? '(tetap)' : '', { hidden: true }));
-    if (key === '(tetap)' && have) break;
+    const key = flags.key || (await ask('API key', have ? '(keep)' : '', { hidden: true }));
+    if (key === '(keep)' && have) break;
     let url = flags.router || flags.url || '';
-    if (!url && key && !keyCandidates(key).length && !flags.key) url = await ask('URL router / endpoint (key ini bukan key official yang dikenal)', cfg.routerUrl || DEFAULT_ROUTER_URL);
+    if (!url && key && !keyCandidates(key).length && !flags.key) url = await ask('Router / endpoint URL (this key isn\'t a known official key)', cfg.routerUrl || DEFAULT_ROUTER_URL);
     else if (!url && key && !keyCandidates(key).length) url = cfg.routerUrl || DEFAULT_ROUTER_URL;
     try {
       const det = await detectConnection({ key, url });
@@ -122,7 +122,7 @@ async function setup() {
       const id = putConnection(sec, conn);
       mirrorLegacy(cfg, sec);
       const fmt = Object.entries(conn.formats || {}).filter(([, v]) => v).map(([k]) => k).join(', ');
-      console.log(c.g(`✓ ${conn.label}: ${list.length} model`) + c.d(` · format ${fmt || '-'} · koneksi "${id}"`));
+      console.log(c.g(`✓ ${conn.label}: ${list.length} models`) + c.d(` · format ${fmt || '-'} · connection "${id}"`));
       models = list.map((m) => m.id);
       break;
     } catch (e) {
@@ -133,50 +133,50 @@ async function setup() {
   if (models?.length) {
     const { defaultModel } = await import('./server.js');
     const def = models.includes(cfg.model) ? cfg.model : defaultModel(models);
-    // Non-interaktif (--key tanpa --model): model default dipilih otomatis.
+    // Non-interactive (--key without --model): the default model is picked automatically.
     cfg.model = flags.key && !flags.model ? def : await pickModel(models, 'model', def);
-    // Subagen selalu memakai model ringan dari koneksi yang sama (otomatis per model utama).
+    // Subagents always use the light model from the same connection (automatic per main model).
     delete cfg.smallModel;
     const light = lightModel(cfg.model, models);
     const conn = allConnections(sec)[splitRef(cfg.model).conn];
     const route = conn && engineFor(conn, splitRef(cfg.model).id);
-    console.log(c.d(`  harness: ${route ? ENGINE_LABEL[route.engine] : '-'} · model ringan (subagen): ${light.kind === 'main' ? 'model utama' : light.id}`));
+    console.log(c.d(`  harness: ${route ? ENGINE_LABEL[route.engine] : '-'} · light model (subagents): ${light.kind === 'main' ? 'main model' : light.id}`));
   }
 
-  // 2. Semua pertanyaan dulu, supaya langkah login bisa diselesaikan sekaligus.
-  console.log(c.b('\n2) GitHub (untuk clone, push, dan PR)'));
+  // 2. All questions first, so the login steps can be completed in one go.
+  console.log(c.b('\n2) GitHub (for clone, push, and PRs)'));
   let githubMode = flags.github || (flags['github-token'] ? 'token' : flags['skip-github'] ? 'skip' : null);
   if (!githubMode) {
     const opts = [];
-    if (GITHUB_CLIENT_ID) opts.push(['Login lewat browser / HP (disarankan)', 'device']);
-    opts.push(['Pakai login git yang sudah ada di PC ini (Git Credential Manager / GitHub Desktop)', 'cred']);
-    opts.push(['Tempel Personal Access Token', 'pat']);
-    if (sec.githubToken) opts.push(['Tetap pakai token yang tersimpan', 'keep']);
+    if (GITHUB_CLIENT_ID) opts.push(['Sign in via browser / phone (recommended)', 'device']);
+    opts.push(['Use the git login already on this PC (Git Credential Manager / GitHub Desktop)', 'cred']);
+    opts.push(['Paste a Personal Access Token', 'pat']);
+    if (sec.githubToken) opts.push(['Keep using the saved token', 'keep']);
     opts.forEach(([l], i) => console.log(`  ${i + 1}. ${l}`));
-    githubMode = opts[(+(await ask('Pilihan', sec.githubToken ? String(opts.length) : '1')) || 1) - 1]?.[1] || 'skip';
+    githubMode = opts[(+(await ask('Choice', sec.githubToken ? String(opts.length) : '1')) || 1) - 1]?.[1] || 'skip';
   }
   if (githubMode === 'token') sec.githubToken = flags['github-token'];
   else if (githubMode === 'pat') sec.githubToken = await ask('Token (scope: repo, workflow)', '', { hidden: true });
   else if (githubMode === 'cred') {
     sec.githubToken = await gitCredentialToken();
-    if (!sec.githubToken) console.log(c.r('✗ Tidak ada kredensial GitHub tersimpan di git.'));
+    if (!sec.githubToken) console.log(c.r('✗ No GitHub credentials stored in git.'));
   } else if (githubMode === 'skip') delete sec.githubToken;
 
   console.log(c.b('\n3) PC & PIN'));
-  cfg.relayUrl = (flags.relay || (DEFAULT_RELAY_URL && !cfg.relayUrl ? DEFAULT_RELAY_URL : await ask('URL relay', cfg.relayUrl || DEFAULT_RELAY_URL))).replace(/\/+$/, '');
-  cfg.machineName = flags.name || (await ask('Nama PC ini', cfg.machineName || os.hostname()));
-  const relink = !sec.machineToken || cfg.linkedRelay !== cfg.relayUrl || flags.relink || (!flags.name && (await ask('Tautkan ulang PC ke akun? (y/n)', 'n')) === 'y');
+  cfg.relayUrl = (flags.relay || (DEFAULT_RELAY_URL && !cfg.relayUrl ? DEFAULT_RELAY_URL : await ask('Relay URL', cfg.relayUrl || DEFAULT_RELAY_URL))).replace(/\/+$/, '');
+  cfg.machineName = flags.name || (await ask('Name of this PC', cfg.machineName || os.hostname()));
+  const relink = !sec.machineToken || cfg.linkedRelay !== cfg.relayUrl || flags.relink || (!flags.name && (await ask('Relink this PC to your account? (y/n)', 'n')) === 'y');
   let pin = null;
-  if (!sec.prs || relink || flags.pin || (await ask('Ganti PIN? (y/n)', 'n')) === 'y') pin = await askPin();
+  if (!sec.prs || relink || flags.pin || (await ask('Change the PIN? (y/n)', 'n')) === 'y') pin = await askPin();
 
-  // 4. Login: tautkan PC + (opsional) GitHub device flow, ditampilkan bersamaan.
+  // 4. Login: link the PC + (optionally) the GitHub device flow, shown together.
   const tasks = [];
   const steps = [];
   if (relink) {
     const r = await fetch(cfg.relayUrl + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: cfg.machineName }) });
-    if (!r.ok) throw new Error('Relay tidak bisa dihubungi: ' + r.status);
+    if (!r.ok) throw new Error('Can\'t reach the relay: ' + r.status);
     const { code, url } = await r.json();
-    steps.push(`Tautkan PC ke akun GitHub-mu — buka:\n     ${c.b(url)}\n     pastikan halaman itu menampilkan kode ${c.b(code)}`);
+    steps.push(`Link this PC to your GitHub account — open:\n     ${c.b(url)}\n     and make sure that page shows the code ${c.b(code)}`);
     tasks.push(
       (async () => {
         for (;;) {
@@ -188,10 +188,10 @@ async function setup() {
             cfg.relayLogin = p.login;
             cfg.linkedRelay = cfg.relayUrl;
             sec.devices = {};
-            console.log(c.g(`✓ PC tertaut ke akun @${p.login}`));
+            console.log(c.g(`✓ PC linked to @${p.login}`));
             return;
           }
-          if (p.status === 'expired') throw new Error('Link penautan kedaluwarsa, ulangi setup.');
+          if (p.status === 'expired') throw new Error('The link expired, run setup again.');
         }
       })(),
     );
@@ -201,17 +201,17 @@ async function setup() {
     const shown = new Promise((res) => (announce = res));
     tasks.push(
       deviceFlowLogin(GITHUB_CLIENT_ID, (code, uri) => {
-        steps.push(`Login GitHub untuk PC ini — buka ${c.b(uri)}\n     lalu masukkan kode: ${c.b(code)}`);
+        steps.push(`Sign in to GitHub for this PC — open ${c.b(uri)}\n     and enter the code: ${c.b(code)}`);
         announce();
       }).then((t) => (sec.githubToken = t)),
     );
     await shown;
   }
   if (steps.length) {
-    console.log(c.b('\n4) Selesaikan dari browser (boleh dari HP):'));
+    console.log(c.b('\n4) Finish in your browser (your phone works too):'));
     steps.forEach((s, i) => console.log(`  ${i + 1}. ${s}`));
     if (!flags['no-browser'] && relink) openBrowser(steps[0].match(/https?:\/\/\S+/)[0].replace(/\x1b\[[0-9;]*m/g, ''));
-    console.log(c.d('  Menunggu…'));
+    console.log(c.d('  Waiting…'));
     await Promise.all(tasks);
   }
 
@@ -222,10 +222,10 @@ async function setup() {
       cfg.githubId = me.id;
       console.log(c.g(`✓ GitHub: @${me.login}`));
     } catch (e) {
-      console.log(c.r('✗ Token GitHub tidak valid: ' + e.message));
+      console.log(c.r('✗ Invalid GitHub token: ' + e.message));
       delete sec.githubToken;
     }
-  } else console.log(c.y('! Tanpa GitHub: hanya repo publik, tanpa push.'));
+  } else console.log(c.y('! Without GitHub: public repos only, no push.'));
 
   if (pin) {
     sec.prs = Buffer.from(await pinToPrs(pin, cfg.machineId)).toString('hex');
@@ -235,38 +235,38 @@ async function setup() {
   saveConfig(cfg);
   saveSecrets(sec);
   rl?.close();
-  console.log(c.g('\n✓ Setup selesai.') + ` Jalankan ${c.b('snugcode start')} (atau ${c.b('snugcode autostart on')}), lalu buka ${c.b(cfg.relayUrl + '/agent/')} di HP.\n`);
+  console.log(c.g('\n✓ Setup complete.') + ` Run ${c.b('snugcode start')} (or ${c.b('snugcode autostart on')}), then open ${c.b(cfg.relayUrl + '/agent/')} on your phone.\n`);
 }
 
 async function resetPin() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  if (!cfg.machineId) throw new Error('Belum setup.');
+  if (!cfg.machineId) throw new Error('Not set up yet.');
   const pin = await askPin();
   sec.prs = Buffer.from(await pinToPrs(pin, cfg.machineId)).toString('hex');
   resetPinLock(sec);
   saveSecrets(sec);
   rl?.close();
-  console.log(c.g('✓ PIN diganti dan kunci dibuka. (Daemon yang sedang berjalan perlu di-restart.)'));
+  console.log(c.g('✓ PIN changed and unlocked. (A running daemon needs a restart.)'));
 }
 
 function devices() {
   const sec = loadSecrets();
   const list = Object.entries(sec.devices);
-  if (!list.length) return console.log('Belum ada HP yang dipasangkan.');
-  for (const [id, d] of list) console.log(`${c.b(id)}  ${d.name}  ${c.d('terakhir: ' + new Date(d.lastSeen).toLocaleString())}`);
+  if (!list.length) return console.log('No phones paired yet.');
+  for (const [id, d] of list) console.log(`${c.b(id)}  ${d.name}  ${c.d('last seen: ' + new Date(d.lastSeen).toLocaleString())}`);
 }
 
 function revoke(id) {
   const sec = loadSecrets();
   if (id === 'all') sec.devices = {};
-  else if (!sec.devices[id]) throw new Error('ID tidak ditemukan');
+  else if (!sec.devices[id]) throw new Error('ID not found');
   else delete sec.devices[id];
   saveSecrets(sec);
-  console.log(c.g('✓ Dicabut. (Restart daemon agar koneksi aktif langsung terputus.)'));
+  console.log(c.g('✓ Revoked. (Restart the daemon to drop active connections right away.)'));
 }
 
-// ---------- proses latar belakang ----------
+// ---------- background process ----------
 const PID_FILE = path.join(HOME, 'daemon.pid');
 const LOG_FILE = path.join(HOME, 'daemon.log');
 
@@ -282,14 +282,14 @@ function runningPid() {
 
 async function stop() {
   const pid = runningPid();
-  if (!pid) return console.log('Daemon tidak sedang berjalan.');
+  if (!pid) return console.log('The daemon is not running.');
   const { stopDaemon } = await import('./tui.js');
   await stopDaemon(pid);
   fs.rmSync(PID_FILE, { force: true });
-  console.log(c.g(`✓ Daemon (pid ${pid}) dihentikan.`));
+  console.log(c.g(`✓ Daemon (pid ${pid}) stopped.`));
 }
 
-// Jalankan daemon terlepas dari terminal ini (tetap hidup walau terminal ditutup).
+// Run the daemon detached from this terminal (stays alive even if the terminal closes).
 function spawnDetached() {
   const p = spawn(process.execPath, [CLI, 'start', '--log'], { detached: true, stdio: 'ignore', windowsHide: true });
   p.unref();
@@ -299,44 +299,44 @@ function spawnDetached() {
 function autostart() {
   const mode = args.find((a) => !a.startsWith('--')) || 'on';
   if (mode === 'on' && CLI.includes('_npx')) {
-    console.log(c.y('! Kamu menjalankan lewat npx. Untuk autostart, pasang global dulu agar path-nya tetap:'));
-    console.log(`    npm i -g ${PACKAGE_SPEC}   lalu   snugcode autostart on`);
+    console.log(c.y('! You\'re running via npx. For autostart, install globally first so the path stays fixed:'));
+    console.log(`    npm i -g ${PACKAGE_SPEC}   then   snugcode autostart on`);
   }
   if (mode === 'off') {
     disableAutostart();
-    return console.log(c.g('✓ Autostart dimatikan.'));
+    return console.log(c.g('✓ Autostart disabled.'));
   }
   const file = writeAutostart(CLI, process.execPath);
-  console.log(c.g('✓ Autostart aktif: ') + file);
+  console.log(c.g('✓ Autostart enabled: ') + file);
 
-  // Nyalakan sekarang juga bila belum berjalan.
+  // Start it right now if it isn't running.
   if (!runningPid()) {
     if (process.platform === 'linux') spawnSync('systemctl', ['--user', 'start', AUTOSTART_UNIT]);
     else if (process.platform === 'darwin') spawnSync('launchctl', ['load', autostartFilePath()]);
     else spawnDetached();
-    console.log(c.g('✓ Daemon dijalankan di latar belakang.') + c.d(` Log: ${LOG_FILE}`));
-  } else console.log(c.d('Daemon sudah berjalan.'));
+    console.log(c.g('✓ Daemon started in the background.') + c.d(` Log: ${LOG_FILE}`));
+  } else console.log(c.d('The daemon is already running.'));
 }
 
 async function start() {
   const cfg = loadConfig();
   const sec = loadSecrets();
-  // Runner cloud dikonfigurasi dari HP: key 9router boleh belum ada saat start pertama.
+  // Cloud runners are configured from the phone: the model key may not exist yet on the first start.
   if (isCloud(cfg) ? !cfg.relayUrl || !sec.machineToken : !cfg.relayUrl || !sec.machineToken || !hasConnections(sec) || !sec.prs) {
-    if (isCloud(cfg)) throw new Error('Runner belum dikonfigurasi. Jalankan `snugcode cloud` dengan SNUGCODE_MACHINE_TOKEN.');
-    console.log(c.y('Belum setup. Menjalankan setup dulu…\n'));
+    if (isCloud(cfg)) throw new Error('The runner isn\'t configured yet. Run `snugcode cloud` with SNUGCODE_MACHINE_TOKEN.');
+    console.log(c.y('Not set up yet. Running setup first…\n'));
     await setup();
     return start();
   }
   ensureDirs();
   const other = runningPid();
   if (other && other !== process.pid) {
-    console.log(c.y(`Daemon sudah berjalan (pid ${other}). Hentikan dengan `) + c.b('snugcode stop'));
+    console.log(c.y(`The daemon is already running (pid ${other}). Stop it with `) + c.b('snugcode stop'));
     process.exit(1);
   }
   fs.writeFileSync(PID_FILE, String(process.pid));
   process.on('exit', () => runningPid() === process.pid && fs.rmSync(PID_FILE, { force: true }));
-  // Selalu sinkronkan skrip autostart jika autostart pernah diaktifkan pada sistem ini
+  // Always sync the autostart script if autostart was ever enabled on this system
   if (!isCloud(cfg)) syncAutostart(CLI, process.execPath);
   if (flags.log) {
     const out = fs.createWriteStream(LOG_FILE, { flags: 'a' });
@@ -346,11 +346,11 @@ async function start() {
   }
   const { Daemon } = await import('./server.js');
   console.log(c.b('snugcode') + c.d(` — ${cfg.machineName} · model ${cfg.model} · relay ${cfg.relayUrl}`));
-  if (pinLockedUntil(sec)) console.log(c.r(`! Pairing terkunci sampai ${new Date(pinLockedUntil(sec)).toLocaleTimeString()} karena PIN salah berkali-kali. \`snugcode pin\` membukanya sekarang.`));
+  if (pinLockedUntil(sec)) console.log(c.r(`! Pairing is locked until ${new Date(pinLockedUntil(sec)).toLocaleTimeString()} after too many wrong PINs. \`snugcode pin\` unlocks it now.`));
   const d = new Daemon(cfg);
   d.start();
-  // Di bawah supervisor runner cloud, berhenti karena sinyal bukan "berhenti sengaja" (exit 0): keluar
-  // dengan 128+sinyal, supervisor yang memutuskan menyalakannya lagi (mis. `pkill node` dari agen).
+  // Under the cloud runner supervisor, stopping by signal isn't an "intentional stop" (exit 0): exit
+  // with 128+signal, the supervisor decides whether to start it again (e.g. `pkill node` from the agent).
   const bye = (sig) => Promise.resolve(d.stop()).finally(() => process.exit(process.env.SNUGCODE_SUPERVISED === '1' ? 128 + (os.constants.signals[sig] || 15) : 0));
   process.on('SIGINT', bye);
   process.on('SIGTERM', bye);
@@ -375,41 +375,41 @@ function status() {
   });
 }
 
-// secrets.json terenkripsi dengan kunci di keychain OS (lihat daemon/keychain.js). Daemon yang sedang
-// berjalan ikut menyimpan dalam mode baru pada penulisan berikutnya; tidak perlu restart.
+// secrets.json encrypted with a key in the OS keychain (see daemon/keychain.js). A running daemon
+// saves in the new mode on its next write; no restart needed.
 async function keychain() {
   const sub = args.find((a) => !a.startsWith('-')) || 'status';
   if (sub === 'status') {
-    console.log(secretsSealed() ? c.g('✓ secrets.json terenkripsi, kuncinya di keychain OS') : c.d('secrets.json tidak terenkripsi (izin file 600). Aktifkan: snugcode keychain on'));
+    console.log(secretsSealed() ? c.g('✓ secrets.json is encrypted, its key is in the OS keychain') : c.d('secrets.json is not encrypted (file mode 600). Enable: snugcode keychain on'));
     return;
   }
-  if (sub !== 'on' && sub !== 'off') throw new Error('Pakai: snugcode keychain on | off | status');
+  if (sub !== 'on' && sub !== 'off') throw new Error('Usage: snugcode keychain on | off | status');
   const r = setKeychain(sub === 'on');
-  if (sub === 'on') console.log(r === 'sudah aktif' ? c.d('Keychain sudah aktif.') : c.g(`✓ secrets.json dienkripsi; kuncinya disimpan di ${r}.`) + c.d('\n  Tanpa keychain itu (mis. login lewat SSH saat keychain terkunci) daemon tidak bisa membaca secrets.'));
-  else console.log(r === 'sudah mati' ? c.d('Keychain memang tidak aktif.') : c.g('✓ secrets.json kembali tidak terenkripsi (izin file 600); kunci dihapus dari keychain.'));
+  if (sub === 'on') console.log(r === 'already on' ? c.d('The keychain is already on.') : c.g(`✓ secrets.json encrypted; its key is stored in ${r}.`) + c.d('\n  Without that keychain (e.g. signing in over SSH while it\'s locked) the daemon can\'t read secrets.'));
+  else console.log(r === 'already off' ? c.d('The keychain is already off.') : c.g('✓ secrets.json is unencrypted again (file mode 600); the key was removed from the keychain.'));
 }
 
-// Login ulang GitHub saja (mis. token dicabut), tanpa mengulang seluruh setup.
+// Re-login to GitHub only (e.g. a revoked token), without redoing the whole setup.
 async function login() {
-  if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID belum diatur.');
-  // Daemon berjalan: login lewat daemon, token langsung berlaku tanpa restart.
+  if (!GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID is not set.');
+  // Daemon running: sign in through the daemon, the token applies right away without a restart.
   if (runningPid()) {
     try {
       const { loginViaDaemon } = await import('./tui.js');
       return await loginViaDaemon({ openBrowser: !flags['no-browser'] });
     } catch (e) {
-      if (!/ECONNREFUSED|ENOENT|tidak menjawab|token lokal/.test(e.message)) throw e;
-      // Daemon versi lama tanpa kanal lokal: lanjut cara lama (restart daemon).
+      if (!/ECONNREFUSED|ENOENT|tidak menjawab|token lokal|not answering|local token/.test(e.message)) throw e;
+      // An old daemon without a local channel: fall back to the old way (restart the daemon).
     }
   }
-  console.log(c.b('Login GitHub untuk PC ini') + c.d(' (clone, push, PR)'));
+  console.log(c.b('Sign in to GitHub for this PC') + c.d(' (clone, push, PRs)'));
   const token = await deviceFlowLogin(GITHUB_CLIENT_ID, (code, uri) => {
-    console.log(`  Buka ${c.b(uri)}\n  lalu masukkan kode ${c.b(code)}`);
+    console.log(`  Open ${c.b(uri)}\n  and enter the code ${c.b(code)}`);
     if (!flags['no-browser']) openBrowser(uri);
-    console.log(c.d('  Menunggu…'));
+    console.log(c.d('  Waiting…'));
   });
   const me = await gh(token, 'GET', '/user');
-  // Daemon menyimpan secrets di memori: hentikan dulu agar token baru tidak tertimpa.
+  // The daemon keeps secrets in memory: stop it first so the new token isn't overwritten.
   const pid = runningPid();
   if (pid) await (await import('./tui.js')).stopDaemon(pid);
   const cfg = loadConfig();
@@ -422,18 +422,18 @@ async function login() {
   console.log(c.g(`✓ GitHub: @${me.login}`));
   if (pid) {
     spawnDetached();
-    console.log(c.g('✓ Daemon dinyalakan ulang dengan token baru.'));
+    console.log(c.g('✓ Daemon restarted with the new token.'));
   }
 }
 
-// `snugcode connect <api key> [--url URL]` · `snugcode connect chatgpt` · `snugcode connect` (daftar).
-// Daemon berjalan: lewat daemon (langsung berlaku). Tidak berjalan: ditulis ke secrets.json.
+// `snugcode connect <api key> [--url URL]` · `snugcode connect chatgpt` · `snugcode connect` (list).
+// Daemon running: through the daemon (applies immediately). Not running: written to secrets.json.
 async function connect() {
   const arg = args.find((a) => !a.startsWith('-'));
   const url = flags.url || flags.router || undefined;
   const pid = runningPid();
   if (arg === 'chatgpt') {
-    if (!pid) throw new Error('Login ChatGPT berjalan lewat daemon: jalankan `snugcode start` (atau autostart) dulu, lalu ulangi.');
+    if (!pid) throw new Error('ChatGPT login runs through the daemon: run `snugcode start` (or autostart) first, then try again.');
     const { chatgptLoginViaDaemon } = await import('./tui.js');
     return chatgptLoginViaDaemon({ openBrowser: !flags['no-browser'] });
   }
@@ -441,14 +441,14 @@ async function connect() {
     const sec = loadSecrets();
     migrateLegacy(loadConfig(), sec);
     const list = Object.values(allConnections(sec)).map(connSummary);
-    if (!list.length) return console.log(c.y('Belum ada model tersambung.') + c.d(' snugcode connect <api key> [--url URL] · snugcode connect chatgpt'));
+    if (!list.length) return console.log(c.y('No models connected yet.') + c.d(' snugcode connect <api key> [--url URL] · snugcode connect chatgpt'));
     for (const x of list) console.log(`${c.b(x.id.padEnd(10))} ${x.label}${x.key ? c.d(' ' + x.key) : ''}${x.account?.email ? c.d(' ' + x.account.email) : ''}${x.url ? c.d(' · ' + x.url) : ''}`);
     return;
   }
   if (pid) {
     const { daemonCall } = await import('./tui.js');
     const r = await daemonCall('connAdd', { key: arg, url });
-    return console.log(c.g(`✓ ${r.conn.label}: ${r.models} model`) + c.d(` · koneksi "${r.conn.id}" · model default ${r.info.model || '-'}`));
+    return console.log(c.g(`✓ ${r.conn.label}: ${r.models} models`) + c.d(` · connection "${r.conn.id}" · default model ${r.info.model || '-'}`));
   }
   const cfg = loadConfig();
   const sec = loadSecrets();
@@ -462,12 +462,12 @@ async function connect() {
   }
   saveSecrets(sec);
   saveConfig(cfg);
-  console.log(c.g(`✓ ${conn.label}: ${models.length} model`) + c.d(` · koneksi "${id}" · model default ${cfg.model}`));
+  console.log(c.g(`✓ ${conn.label}: ${models.length} models`) + c.d(` · connection "${id}" · default model ${cfg.model}`));
 }
 
 async function disconnect() {
   const id = args.find((a) => !a.startsWith('-'));
-  if (!id) throw new Error('Pakai: snugcode disconnect <id koneksi>  (lihat `snugcode connect`)');
+  if (!id) throw new Error('Usage: snugcode disconnect <connection id>  (see `snugcode connect`)');
   if (runningPid()) {
     const { daemonCall } = await import('./tui.js');
     await daemonCall(id === 'chatgpt' ? 'chatgptLogout' : 'connRemove', { id });
@@ -475,14 +475,14 @@ async function disconnect() {
     const cfg = loadConfig();
     const sec = loadSecrets();
     migrateLegacy(cfg, sec);
-    if (!sec.connections?.[id]) throw new Error('Koneksi tidak ditemukan: ' + id);
+    if (!sec.connections?.[id]) throw new Error('Connection not found: ' + id);
     delete sec.connections[id];
     mirrorLegacy(cfg, sec);
     if (splitRef(cfg.model || '').conn === id) cfg.model = '';
     saveSecrets(sec);
     saveConfig(cfg);
   }
-  console.log(c.g('✓ Koneksi dihapus: ' + id));
+  console.log(c.g('✓ Connection removed: ' + id));
 }
 
 function isSetUp() {
@@ -493,7 +493,7 @@ function isSetUp() {
 
 async function tui() {
   if (!isSetUp()) {
-    console.log(c.y('Belum setup. Menjalankan setup dulu…\n'));
+    console.log(c.y('Not set up yet. Running setup first…\n'));
     await setup();
   }
   const { runTui } = await import('./tui.js');
@@ -504,52 +504,52 @@ async function tui() {
 async function cliRestart() {
   const pid = runningPid();
   if (!pid) {
-    console.log(c.y('Daemon tidak sedang berjalan. Menjalankan daemon baru…'));
+    console.log(c.y('The daemon is not running. Starting a new daemon…'));
     const newPid = spawnDetached();
-    return console.log(c.g(`✓ Daemon dijalankan (pid ${newPid}).`));
+    return console.log(c.g(`✓ Daemon started (pid ${newPid}).`));
   }
   await (await import('./tui.js')).stopDaemon(pid);
   fs.rmSync(PID_FILE, { force: true });
   const newPid = spawnDetached();
-  console.log(c.g(`✓ Daemon di-restart (pid ${newPid}).`));
+  console.log(c.g(`✓ Daemon restarted (pid ${newPid}).`));
 }
 
 async function cliUpdate() {
   const cfg = loadConfig();
   const sec = loadSecrets();
   if (flags.channel) {
-    if (!['stable', 'main'].includes(flags.channel)) throw new Error('Kanal: stable (rilis bertag) atau main (commit terbaru).');
+    if (!['stable', 'main'].includes(flags.channel)) throw new Error('Channel: stable (tagged releases) or main (latest commit).');
     cfg.updateChannel = flags.channel;
     saveConfig(cfg);
-    console.log(c.g(`✓ Kanal pembaruan: ${flags.channel}`));
+    console.log(c.g(`✓ Update channel: ${flags.channel}`));
   }
   if (flags.rollback) {
     const wasRunning = await stopAndWait();
-    console.log(c.d(`Mengembalikan ke ${cfg.previousSpec || '(tidak ada)'}…`));
+    console.log(c.d(`Rolling back to ${cfg.previousSpec || '(none)'}…`));
     try {
       const r = await performRollback(cfg);
-      console.log(c.g(`✓ Kembali ke versi sebelumnya (${r.commit}).`));
+      console.log(c.g(`✓ Back to the previous version (${r.commit}).`));
     } finally {
-      if (wasRunning) console.log(c.g(`✓ Daemon dijalankan lagi (pid ${spawnDetached()}).`));
+      if (wasRunning) console.log(c.g(`✓ Daemon started again (pid ${spawnDetached()}).`));
     }
     return;
   }
-  console.log(c.b('Memeriksa pembaruan snugcode…') + c.d(` (kanal ${updateChannel(cfg)})`));
+  console.log(c.b('Checking for snugcode updates…') + c.d(` (channel ${updateChannel(cfg)})`));
   const st = await checkUpdate(cfg, sec);
   if (!st.updateAvailable && !flags.force) {
-    console.log(c.g('✓ snugcode sudah versi terbaru') + c.d(` (${st.currentCommit})`));
+    console.log(c.g('✓ snugcode is up to date') + c.d(` (${st.currentCommit})`));
     return;
   }
-  console.log(c.y('Ada pembaruan: ') + `${c.b(st.latestCommit)}${st.latestMessage ? ' — ' + st.latestMessage : ''}`);
-  // Hentikan daemon dulu (beserta claude.exe di sesinya) agar file tidak terkunci saat npm memasang.
+  console.log(c.y('Update available: ') + `${c.b(st.latestCommit)}${st.latestMessage ? ' — ' + st.latestMessage : ''}`);
+  // Stop the daemon first (with the claude.exe of its sessions) so files aren't locked while npm installs.
   const wasRunning = await stopAndWait();
-  if (wasRunning) console.log(c.d('Daemon dihentikan sementara untuk update.'));
-  console.log(c.d('Memasang pembaruan…'));
+  if (wasRunning) console.log(c.d('Daemon stopped temporarily for the update.'));
+  console.log(c.d('Installing the update…'));
   try {
     const r = await performUpdate(cfg, sec);
-    console.log(c.g(`✓ Pembaruan berhasil dipasang (${r.commit}).`));
+    console.log(c.g(`✓ Update installed (${r.commit}).`));
   } finally {
-    if (wasRunning) console.log(c.g(`✓ Daemon dijalankan lagi (pid ${spawnDetached()}).`));
+    if (wasRunning) console.log(c.g(`✓ Daemon started again (pid ${spawnDetached()}).`));
   }
 }
 
@@ -557,10 +557,10 @@ async function stopAndWait() {
   const pid = runningPid();
   if (!pid) return false;
   await (await import('./tui.js')).stopDaemon(pid);
-  // Windows: matikan juga claude.exe anak daemon (/T) yang mungkin tertinggal, tanpa menyentuh claude.exe lain.
+  // Windows: also kill the daemon's child claude.exe (/T) that may linger, without touching other claude.exe.
   if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
   fs.rmSync(PID_FILE, { force: true });
-  // Proses claude.exe anak daemon bisa tertinggal sebentar setelah daemon mati.
+  // The daemon's child claude.exe can linger briefly after the daemon dies.
   await new Promise((r) => setTimeout(r, 1500));
   return true;
 }
@@ -569,59 +569,59 @@ async function cliClean() {
   const { cleanupWorkspaces } = await import('./cleaner.js');
   const { readSessionIndex } = await import('./config.js');
   const idx = readSessionIndex();
-  // Daftar sesi tidak terbaca = semua worktree akan terlihat "yatim": jangan hapus apa pun.
+  // Unreadable session list = every worktree would look "orphaned": delete nothing.
   if (!idx.ok) {
-    console.log(c.r('✗ sessions/index.json tidak terbaca; pembersihan dibatalkan agar worktree tidak terhapus.'));
+    console.log(c.r('✗ sessions/index.json is unreadable; cleanup cancelled so no worktree gets deleted.'));
     return;
   }
-  console.log(c.b('Memindai workspaces PC untuk folder yatim…'));
+  console.log(c.b('Scanning PC workspaces for orphaned folders…'));
   const r = await cleanupWorkspaces(idx.list, { minAgeMs: 0, repoTtlMs: 0 });
   const wtCount = r.removedWorktrees.length;
   const repoCount = r.removedRepos.length;
   const logCount = r.removedLogs.length;
   if (wtCount === 0 && repoCount === 0 && logCount === 0) {
-    console.log(c.g('✓ Workspace bersih. Tidak ada folder atau repositori yatim.'));
+    console.log(c.g('✓ Workspace is clean. No orphaned folders or repositories.'));
   } else {
-    if (wtCount > 0) console.log(c.g(`✓ Dihapus ${wtCount} worktree yatim:`), r.removedWorktrees.map((w) => path.basename(w)).join(', '));
-    if (repoCount > 0) console.log(c.g(`✓ Dihapus ${repoCount} repositori tak terpakai:`), r.removedRepos.map((r) => path.basename(r)).join(', '));
-    if (logCount > 0) console.log(c.g(`✓ Dihapus ${logCount} file log basi:`), r.removedLogs.join(', '));
+    if (wtCount > 0) console.log(c.g(`✓ Removed ${wtCount} orphaned worktree(s):`), r.removedWorktrees.map((w) => path.basename(w)).join(', '));
+    if (repoCount > 0) console.log(c.g(`✓ Removed ${repoCount} unused repositor${repoCount === 1 ? 'y' : 'ies'}:`), r.removedRepos.map((r) => path.basename(r)).join(', '));
+    if (logCount > 0) console.log(c.g(`✓ Removed ${logCount} stale log file(s):`), r.removedLogs.join(', '));
   }
 }
 
 function help() {
-  console.log(`${c.b('snugcode')} — coding agent di PC-mu, dari terminal & HP
+  console.log(`${c.b('snugcode')} — a coding agent on your PC, from the terminal & your phone
 
-  ${c.g('snugcode')}                 buka UI terminal (folder repo ini jadi sesinya)
-  ${c.g('snugcode --computer')}      buka mode komputer (agen dengan akses seluruh PC)
-  ${c.g('snugcode "prompt"')}        buka UI dan langsung kirim prompt
-  ${c.g('snugcode --pick')}          pilih sesi (termasuk sesi dari HP)
+  ${c.g('snugcode')}                 open the terminal UI (this repo folder becomes the session)
+  ${c.g('snugcode --computer')}      open computer mode (an agent with access to the whole PC)
+  ${c.g('snugcode "prompt"')}        open the UI and send a prompt right away
+  ${c.g('snugcode --pick')}          pick a session (including sessions from the phone)
 
-  snugcode setup            setup / ubah konfigurasi
-  snugcode login            login ulang GitHub (token dicabut/kedaluwarsa)
-  snugcode connect <key>    sambungkan API key model (jenis dideteksi otomatis; --url untuk router/endpoint)
-  snugcode connect chatgpt  login ChatGPT (model GPT lewat Codex);  snugcode connect = daftar koneksi
-  snugcode disconnect <id>  hapus koneksi model
-  snugcode autostart on     jalankan daemon di latar belakang + saat login
-  snugcode start | stop     jalankan / hentikan daemon
-  snugcode restart          restart daemon di latar belakang
-  snugcode update           periksa & pasang pembaruan (rilis bertag; --channel main|stable)
-  snugcode update --rollback  kembali ke versi sebelum pembaruan terakhir
-  snugcode clean            pindai & bersihkan worktree / repo yatim
-  snugcode pin              ganti PIN / buka kunci
-  snugcode devices          HP yang terpasang;  snugcode revoke <id|all>
-  snugcode status           ringkasan konfigurasi
-  snugcode keychain on|off  enkripsi secrets.json dengan kunci di keychain OS (macOS/Windows/Linux desktop)
-  snugcode cloud            runner cloud tanpa PC (Codespaces/Docker), dikonfigurasi lewat env & HP`);
+  snugcode setup            set up / change configuration
+  snugcode login            sign in to GitHub again (token revoked/expired)
+  snugcode connect <key>    connect a model API key (type auto-detected; --url for a router/endpoint)
+  snugcode connect chatgpt  ChatGPT login (GPT models via Codex);  snugcode connect = list connections
+  snugcode disconnect <id>  remove a model connection
+  snugcode autostart on     run the daemon in the background + at login
+  snugcode start | stop     start / stop the daemon
+  snugcode restart          restart the background daemon
+  snugcode update           check & install updates (tagged releases; --channel main|stable)
+  snugcode update --rollback  go back to the version before the last update
+  snugcode clean            scan & clean up orphaned worktrees / repos
+  snugcode pin              change the PIN / unlock
+  snugcode devices          paired phones;  snugcode revoke <id|all>
+  snugcode status           configuration summary
+  snugcode keychain on|off  encrypt secrets.json with a key in the OS keychain (macOS/Windows/Linux desktop)
+  snugcode cloud            cloud runner without a PC (Codespaces/Docker), configured via env & the phone`);
 }
 
-// ---------- runner cloud ----------
-// Isi konfigurasi dari env (idempoten), lalu jalankan daemon di bawah supervisor: restart/update dari
-// HP (exit 75), crash, dan sinyal yang mengenai daemon saja menyalakannya lagi; exit 0 (menganggur /
-// `snugcode stop`) dan SIGTERM ke supervisor menghentikannya — container ikut berhenti.
-// --no-supervise: jalankan daemon langsung di proses ini.
+// ---------- cloud runner ----------
+// Fill config from env (idempotent), then run the daemon under a supervisor: restarts/updates from the
+// phone (exit 75), crashes, and signals hitting only the daemon start it again; exit 0 (idle /
+// `snugcode stop`) and SIGTERM to the supervisor stop it — the container stops too.
+// --no-supervise: run the daemon directly in this process.
 async function cloud() {
   ensureDirs();
-  // Dibaca sebelum env rahasia dibuang (scrubSecretEnv).
+  // Read before the secret env is scrubbed (scrubSecretEnv).
   const apiKey = process.env.SNUGCODE_API_KEY || '';
   const apiUrl = process.env.SNUGCODE_API_URL || '';
   const { bootstrapCloud, reportStatus, supervisorIgnoresTerm } = await import('./runner.js');
@@ -631,7 +631,7 @@ async function cloud() {
   try {
     boot = await bootstrapCloud(process.env, cfg, sec);
   } catch (e) {
-    await reportStatus(process.env, 'error', 'Konfigurasi runner gagal: ' + e.message);
+    await reportStatus(process.env, 'error', 'Runner configuration failed: ' + e.message);
     throw e;
   }
   const { relinked, warnings } = boot;
@@ -639,9 +639,9 @@ async function cloud() {
   saveSecrets(sec);
   scrubSecretEnv();
   console.log(c.b('snugcode cloud') + c.d(` — ${cfg.machineName} · @${cfg.relayLogin || '?'} · ${cfg.runner?.provider}${cfg.runner?.name ? ' ' + cfg.runner.name : ''} · data ${HOME}`));
-  if (relinked) console.log(c.g('✓ Runner ditautkan ke mesin ' + cfg.machineId));
+  if (relinked) console.log(c.g('✓ Runner linked to machine ' + cfg.machineId));
   for (const w of warnings) console.log(c.y('! ' + w));
-  // SNUGCODE_API_KEY (+ SNUGCODE_API_URL): koneksi model apa pun, dideteksi seperti dari HP.
+  // SNUGCODE_API_KEY (+ SNUGCODE_API_URL): any model connection, detected the same way as from the phone.
   if (apiKey && sec.envApplied?.apiKey !== apiKey.slice(-12) + '|' + apiUrl) {
     try {
       const { models: _m, ...conn } = await detectConnection({ key: apiKey, url: apiUrl });
@@ -650,21 +650,21 @@ async function cloud() {
       sec.envApplied = { ...sec.envApplied, apiKey: apiKey.slice(-12) + '|' + apiUrl };
       saveSecrets(sec);
       saveConfig(cfg);
-      console.log(c.g('✓ Koneksi model dari SNUGCODE_API_KEY: ' + conn.label));
+      console.log(c.g('✓ Model connection from SNUGCODE_API_KEY: ' + conn.label));
     } catch (e) {
-      console.log(c.y('! SNUGCODE_API_KEY diabaikan: ' + e.message));
+      console.log(c.y('! SNUGCODE_API_KEY ignored: ' + e.message));
     }
   }
-  if (!hasConnections(sec)) console.log(c.y('! Belum ada model tersambung: buka aplikasi di HP → Pengaturan → Model & API key.'));
-  // Container yang dinyalakan ulang memakai PID kecil yang sama lagi: daemon.pid dari sesi lalu bisa
-  // menunjuk proses lain yang kebetulan hidup. Anggap berjalan hanya bila itu memang daemon snugcode.
+  if (!hasConnections(sec)) console.log(c.y('! No model connected yet: open the app on your phone → Settings → Models & API keys.'));
+  // A restarted container reuses the same small PIDs: daemon.pid from the last run may
+  // point at another process that happens to be alive. Only treat it as running if it really is the snugcode daemon.
   const other = runningPid();
   if (other && other !== process.pid) {
     let ours = true;
     try {
       ours = fs.readFileSync(`/proc/${other}/cmdline`, 'utf8').includes('cli.js');
     } catch {}
-    if (ours) return console.log(c.d(`Daemon sudah berjalan (pid ${other}).`));
+    if (ours) return console.log(c.d(`The daemon is already running (pid ${other}).`));
     fs.rmSync(PID_FILE, { force: true });
   }
   if (flags['no-supervise'] || process.env.SNUGCODE_SUPERVISED === '1') return start();
@@ -680,7 +680,7 @@ async function cloud() {
       if (Date.now() - t0 > 60_000) backoff = 1000;
       const wait = code === RESTART_EXIT_CODE ? 300 : backoff;
       if (code !== RESTART_EXIT_CODE) {
-        console.log(c.y(`! daemon berhenti (${signal || 'exit ' + code}); dinyalakan lagi dalam ${Math.round(wait / 1000)} detik`));
+        console.log(c.y(`! daemon stopped (${signal || 'exit ' + code}); restarting in ${Math.round(wait / 1000)} seconds`));
         backoff = Math.min(backoff * 2, 30_000);
       }
       setTimeout(run, wait);
@@ -688,10 +688,10 @@ async function cloud() {
   };
   const stop = (sig) => ((stopping = true), child?.exitCode === null ? child.kill(sig) : process.exit(0));
   process.on('SIGINT', stop);
-  // Codespaces: tidak ada yang menyalakan runner lagi selama codespace masih menyala (postStartCommand
-  // hanya saat start), jadi SIGTERM nyasar (`pkill node`, `killall node` dari agen/terminal) diabaikan.
-  // Codespace yang dihentikan tetap mematikan semuanya (SIGKILL). Berhenti sengaja: `snugcode stop`.
-  if (supervisorIgnoresTerm(cfg)) process.on('SIGTERM', () => console.log(c.y('! SIGTERM diabaikan: runner Codespaces tetap berjalan (hentikan dari aplikasi atau `snugcode stop`).')));
+  // Codespaces: nothing starts the runner again while the codespace is still running (postStartCommand
+  // only on start), so a stray SIGTERM (`pkill node`, `killall node` from the agent/terminal) is ignored.
+  // Stopping the codespace still kills everything (SIGKILL). Intentional stop: `snugcode stop`.
+  if (supervisorIgnoresTerm(cfg)) process.on('SIGTERM', () => console.log(c.y('! SIGTERM ignored: the Codespaces runner keeps running (stop it from the app or with `snugcode stop`).')));
   else process.on('SIGTERM', stop);
   run();
 }

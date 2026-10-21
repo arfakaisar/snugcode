@@ -1,4 +1,4 @@
-// Layar git: status, diff, commit, push, Pull Request.
+// Git screen: status, diff, commit, push, Pull Request.
 import { app } from './state.js';
 import { busyButton, h, haptic, ic, loading, toast, ui } from './dom.js';
 import { progress } from './progress.js';
@@ -7,8 +7,8 @@ import { showFile } from './files.js';
 // ---------- Git ----------
 export async function showGit() {
   const s = app.current.session;
-  const body = h('div', {}, loading('Memuat status git…'));
-  ui.sheet(ui.head('Git', { sub: s.computer ? 'Komputer' : s.repo }), body);
+  const body = h('div', {}, loading('Loading git status…'));
+  ui.sheet(ui.head('Git', { sub: s.computer ? 'Computer' : s.repo }), body);
   let st;
   try {
     st = await app.conn.call('status', { id: s.id });
@@ -19,18 +19,18 @@ export async function showGit() {
     return body.replaceChildren(
       h('div', { class: 'empty' },
         h('div', { class: 'emptyart' }, ic('branch')),
-        h('b', {}, 'Bukan repository git'),
-        'Folder kerja sesi ini bukan git repository. Fitur commit, push, dan PR membutuhkan git repo.',
+        h('b', {}, 'Not a git repository'),
+        'This session’s working folder isn’t a git repository. Commit, push, and PRs need a git repo.',
       ),
     );
   }
   app.current.refreshGit?.();
-  const msg = h('input', { class: 'field', placeholder: 'Pesan commit…', autocapitalize: 'sentences', enterkeyhint: 'done' });
+  const msg = h('input', { class: 'field', placeholder: 'Commit message…', autocapitalize: 'sentences', enterkeyhint: 'done' });
   const err = h('div', { class: 'err' });
   const act = (content, fn, cls = 'btn') => {
     const b = h('button', { class: cls }, ...content);
     b.onclick = async () => {
-      const done = busyButton(b, 'Memproses…');
+      const done = busyButton(b, 'Working…');
       err.textContent = '';
       try {
         await fn();
@@ -44,37 +44,37 @@ export async function showGit() {
   };
   const stCls = (code) => (code.includes('?') || code.includes('A') ? 'A' : code.includes('D') ? 'D' : code.includes('R') ? 'R' : 'M');
   const stTxt = (code) => (code.includes('?') ? 'A' : code.trim()[0] || 'M');
-  const sync = st.hasUpstream ? (st.ahead || st.behind ? `↑${st.ahead} · ↓${st.behind}` : 'sinkron dengan GitHub') : st.ahead ? `${st.ahead} commit belum di GitHub` : 'belum ada di GitHub';
+  const sync = st.hasUpstream ? (st.ahead || st.behind ? `↑${st.ahead} · ↓${st.behind}` : 'in sync with GitHub') : st.ahead ? `${st.ahead} commit${st.ahead === 1 ? '' : 's'} not on GitHub yet` : 'not on GitHub yet';
   body.replaceChildren(
     h('div', { class: 'gitsum' },
       h('span', { class: 'gi' }, ic('branch')),
       h('span', { class: 'grow' }, h('b', {}, st.branch), h('span', { class: 'dim small' }, sync)),
-      h('span', { class: 'dstat big' }, st.files.length ? `${st.files.length} file` : '✓ bersih'),
+      h('span', { class: 'dstat big' }, st.files.length ? `${st.files.length} file${st.files.length === 1 ? '' : 's'}` : '✓ clean'),
     ),
-    h('div', { class: 'label' }, 'Perubahan', h('span', { class: 'count' }, st.files.length)),
+    h('div', { class: 'label' }, 'Changes', h('span', { class: 'count' }, st.files.length)),
     st.files.length
       ? h('div', { class: 'files' }, ...st.files.map((f, i) => h('div', { class: 'f', style: `--i:${Math.min(i, 12)}` }, h('span', { class: 'st ' + stCls(f.st) }, stTxt(f.st)), h('span', { class: 'p' }, '‎' + f.path))))
-      : h('div', { class: 'dim small' }, 'Tidak ada perubahan yang belum di-commit.'),
-    st.files.length ? h('div', { style: 'margin-top:10px' }, act([ic('diff'), 'Lihat diff'], showDiff)) : null,
+      : h('div', { class: 'dim small' }, 'No uncommitted changes.'),
+    st.files.length ? h('div', { style: 'margin-top:10px' }, act([ic('diff'), 'View diff'], showDiff)) : null,
     st.files.length
       ? h('div', {}, h('div', { class: 'label' }, 'Commit'), h('div', { class: 'inline' }, msg, act([ic('commit'), 'Commit'], async () => {
-          if (!msg.value.trim()) throw new Error('Isi pesan commit.');
+          if (!msg.value.trim()) throw new Error('Enter a commit message.');
           const c = await app.conn.call('commit', { id: s.id, message: msg.value });
           toast('Commit ' + c);
           haptic(15);
           showGit();
         }, 'btn primary')))
       : null,
-    h('div', { class: 'label' }, 'Kirim ke GitHub'),
+    h('div', { class: 'label' }, 'Send to GitHub'),
     h('div', { class: 'btnrow' },
       act([ic('push'), 'Push'], async () => {
-        if (!(await ui.confirm({ title: 'Push ke GitHub?', text: `Branch ${st.branch} dikirim ke origin.`, ok: 'Push', icon: 'push', stay: true }))) return;
-        const p = progress('git-push', [{ id: 'push', label: `Push ${st.branch} ke GitHub`, est: 6 }]);
+        if (!(await ui.confirm({ title: 'Push to GitHub?', text: `Branch ${st.branch} will be pushed to origin.`, ok: 'Push', icon: 'push', stay: true }))) return;
+        const p = progress('git-push', [{ id: 'push', label: `Pushing ${st.branch} to GitHub`, est: 6 }]);
         ui.sheet(ui.head('Git', { sub: s.repo }), p.el);
         try {
           await app.conn.call('push', { id: s.id });
           p.done();
-          toast('Push berhasil');
+          toast('Pushed');
           haptic(20);
         } catch (x) {
           p.fail(x.message);
@@ -85,31 +85,31 @@ export async function showGit() {
       act([ic('pr'), 'Pull Request'], () => showPR(st)),
     ),
     err,
-    st.log.length ? h('div', {}, h('div', { class: 'label' }, 'Commit terakhir'), h('div', { class: 'log' }, ...st.log.map((l) => h('div', {}, h('span', { class: 'h' }, l.slice(0, 7)), l.slice(8))))) : null,
+    st.log.length ? h('div', {}, h('div', { class: 'label' }, 'Recent commits'), h('div', { class: 'log' }, ...st.log.map((l) => h('div', {}, h('span', { class: 'h' }, l.slice(0, 7)), l.slice(8))))) : null,
   );
 }
 
 export function showPR(st) {
   const s = app.current.session;
-  const title = h('input', { class: 'field', value: s.title || '', placeholder: 'Judul PR', autocapitalize: 'sentences' });
-  const desc = h('textarea', { class: 'field', rows: 5, placeholder: 'Deskripsi (opsional)', autocapitalize: 'sentences' });
+  const title = h('input', { class: 'field', value: s.title || '', placeholder: 'PR title', autocapitalize: 'sentences' });
+  const desc = h('textarea', { class: 'field', rows: 5, placeholder: 'Description (optional)', autocapitalize: 'sentences' });
   const err = h('div', { class: 'err' });
-  const btn = h('button', { class: 'btn primary' }, ic('pr'), 'Buat PR');
+  const btn = h('button', { class: 'btn primary' }, ic('pr'), 'Create PR');
   btn.onclick = async () => {
-    const done = busyButton(btn, 'Membuat PR…');
+    const done = busyButton(btn, 'Creating PR…');
     try {
       const pr = await app.conn.call('pr', { id: s.id, title: title.value || st.branch, body: desc.value });
       haptic(20);
-      ui.sheet(ui.head('PR dibuat', { sub: `#${pr.number}` }), h('div', { class: 'empty' }, h('div', { class: 'emptyart ok' }, ic('pr')), h('b', {}, `Pull Request #${pr.number}`), 'Siap ditinjau di GitHub.'), h('a', { class: 'btn primary', href: pr.url, target: '_blank', rel: 'noopener' }, ic('github'), 'Buka di GitHub'));
+      ui.sheet(ui.head('PR created', { sub: `#${pr.number}` }), h('div', { class: 'empty' }, h('div', { class: 'emptyart ok' }, ic('pr')), h('b', {}, `Pull Request #${pr.number}`), 'Ready for review on GitHub.'), h('a', { class: 'btn primary', href: pr.url, target: '_blank', rel: 'noopener' }, ic('github'), 'Open on GitHub'));
     } catch (e) {
       done();
-      err.textContent = e.message + (/No commits|not all refs/.test(e.message) ? ' — push dulu.' : '');
+      err.textContent = e.message + (/No commits|not all refs/.test(e.message) ? ' — push first.' : '');
     }
   };
   ui.sheet(ui.head('Pull Request', { sub: `${st.branch} → ${s.base}`, back: showGit }), title, h('div', { style: 'height:10px' }), desc, err, h('div', { class: 'sheetfoot' }, btn));
 }
 
-// Diff `git diff HEAD` per file → hunk. Path diambil dari baris +++/--- (aman untuk nama berspasi).
+// `git diff HEAD` per file → hunks. Paths come from the +++/--- lines (safe for names with spaces).
 export function parseDiff(diff) {
   const files = [];
   let cur = null;
@@ -133,7 +133,7 @@ export function parseDiff(diff) {
       else if (l.startsWith('-')) cur.del++;
     }
   }
-  // Baris kosong terakhir hasil split bukan bagian dari hunk.
+  // The trailing empty line from split isn't part of a hunk.
   for (const f of files) for (const x of f.hunks) while (x.lines.length && x.lines.at(-1) === '') x.lines.pop();
   return files;
 }
@@ -143,7 +143,7 @@ function hunkOf(head) {
 }
 const hunkText = (x) => [x.head, ...x.lines].join('\n');
 
-// Komentar review menunggu dikirim ke agen (per sesi, bertahan saat diff dimuat ulang).
+// Review comments waiting to be sent to the agent (per session, kept when the diff reloads).
 function review() {
   const sid = app.current.session.id;
   if (app.current.review?.sid !== sid) app.current.review = { sid, items: [] };
@@ -152,25 +152,25 @@ function review() {
 
 export function reviewMessage(items) {
   const parts = items.map((c, i) => {
-    const where = c.line ? `\`${c.path}\` baris ${c.line}` : `\`${c.path}\``;
+    const where = c.line ? `\`${c.path}\` line ${c.line}` : `\`${c.path}\``;
     const code = c.code.split('\n').slice(0, 40).join('\n');
     return `${i + 1}. ${where}:\n\`\`\`diff\n${code}\n\`\`\`\n${c.text}`;
   });
-  return `Saya meninjau perubahan yang belum di-commit (git diff). Tindak lanjuti setiap komentar berikut, lalu ringkas apa yang kamu ubah:\n\n${parts.join('\n\n')}`;
+  return `I reviewed the uncommitted changes (git diff). Address each comment below, then summarize what you changed:\n\n${parts.join('\n\n')}`;
 }
 
 export async function showDiff() {
   const s = app.current.session;
-  const box = h('div', {}, loading('Memuat diff…'));
+  const box = h('div', {}, loading('Loading diff…'));
   const foot = h('div', { class: 'sheetfoot', hidden: true });
-  ui.sheet(ui.head('Diff', { sub: s.computer ? 'Komputer' : s.repo, back: showGit }), box, foot);
+  ui.sheet(ui.head('Diff', { sub: s.computer ? 'Computer' : s.repo, back: showGit }), box, foot);
   let res;
   try {
     res = await app.conn.call('diff', { id: s.id });
   } catch (e) {
     return box.replaceChildren(h('div', { class: 'err' }, e.message));
   }
-  if (res.notRepo) return box.replaceChildren(h('div', { class: 'empty' }, 'Bukan repository git.'));
+  if (res.notRepo) return box.replaceChildren(h('div', { class: 'empty' }, 'Not a git repository.'));
   const files = parseDiff(res.diff);
   const rv = review();
   const canEdit = !!app.current.info?.caps?.includes('revert');
@@ -178,10 +178,10 @@ export async function showDiff() {
   const syncFoot = () => {
     foot.hidden = !rv.items.length;
     if (!rv.items.length) return;
-    const sendBtn = h('button', { class: 'btn primary' }, ic('send'), 'Kirim ke agen');
+    const sendBtn = h('button', { class: 'btn primary' }, ic('send'), 'Send to agent');
     sendBtn.onclick = async () => {
-      if (app.current.running) return toast('Tunggu agen selesai (atau Stop) dulu.', true);
-      const done = busyButton(sendBtn, 'Mengirim…');
+      if (app.current.running) return toast('Wait for the agent to finish (or Stop) first.', true);
+      const done = busyButton(sendBtn, 'Sending…');
       try {
         await app.conn.call('send', { id: s.id, text: reviewMessage(rv.items) });
         rv.items = [];
@@ -192,16 +192,16 @@ export async function showDiff() {
         toast(e.message, true);
       }
     };
-    foot.replaceChildren(h('div', { class: 'inline' }, h('button', { class: 'btn ghost', style: 'width:auto', onclick: () => ((rv.items = []), showDiff()) }, 'Hapus'), h('span', { class: 'grow dim small revcount' }, `${rv.items.length} komentar`), sendBtn));
+    foot.replaceChildren(h('div', { class: 'inline' }, h('button', { class: 'btn ghost', style: 'width:auto', onclick: () => ((rv.items = []), showDiff()) }, 'Clear'), h('span', { class: 'grow dim small revcount' }, `${rv.items.length} comment${rv.items.length === 1 ? '' : 's'}`), sendBtn));
   };
 
   const revert = async (f, hk) => {
-    const what = hk ? 'hunk ini' : f.isNew ? 'file baru ini (file dihapus)' : 'semua perubahan file ini';
-    if (!(await ui.confirm({ title: 'Batalkan perubahan?', text: `${what[0].toUpperCase() + what.slice(1)} di ${f.path} dikembalikan ke versi commit terakhir.`, ok: 'Batalkan perubahan', danger: true, icon: 'undo' }))) return showDiff();
+    const what = hk ? 'this hunk' : f.isNew ? 'this new file (the file is deleted)' : 'all changes to this file';
+    if (!(await ui.confirm({ title: 'Revert changes?', text: `${what[0].toUpperCase() + what.slice(1)} in ${f.path} will be reverted to the last commit.`, ok: 'Revert changes', danger: true, icon: 'undo' }))) return showDiff();
     try {
       await app.conn.call('revert', { id: s.id, path: f.path, ...(hk ? { hunk: hunkText(hk) } : {}) });
       haptic(15);
-      toast('Perubahan dibatalkan', false, 1500);
+      toast('Changes reverted', false, 1500);
     } catch (e) {
       toast(e.message, true);
     }
@@ -209,12 +209,12 @@ export async function showDiff() {
     showDiff();
   };
 
-  // Ketuk baris → kotak komentar di bawahnya. Komentar menyimpan cuplikan baris (atau seluruh hunk).
+  // Tap a line → comment box below it. Comments keep a snippet of the line (or the whole hunk).
   const commentBox = (after, f, hk, line, code) => {
     after.nextElementSibling?.classList.contains('cbox2') && after.nextElementSibling.remove();
-    const ta = h('textarea', { class: 'field', rows: 2, placeholder: line ? `Komentar untuk baris ${line}…` : 'Komentar untuk hunk ini…', autocapitalize: 'sentences' });
-    const ok = h('button', { class: 'chip on' }, 'Tambah');
-    const boxEl = h('div', { class: 'cbox2' }, ta, h('div', { class: 'btnrow' }, h('button', { class: 'chip', onclick: () => boxEl.remove() }, 'Batal'), ok));
+    const ta = h('textarea', { class: 'field', rows: 2, placeholder: line ? `Comment on line ${line}…` : 'Comment on this hunk…', autocapitalize: 'sentences' });
+    const ok = h('button', { class: 'chip on' }, 'Add');
+    const boxEl = h('div', { class: 'cbox2' }, ta, h('div', { class: 'btnrow' }, h('button', { class: 'chip', onclick: () => boxEl.remove() }, 'Cancel'), ok));
     ok.onclick = () => {
       const text = ta.value.trim();
       if (!text) return ta.focus();
@@ -227,9 +227,9 @@ export async function showDiff() {
     ta.focus();
   };
 
-  if (!files.length) return box.replaceChildren(h('div', { class: 'empty' }, 'Tidak ada perubahan.'));
+  if (!files.length) return box.replaceChildren(h('div', { class: 'empty' }, 'No changes.'));
   box.replaceChildren(
-    h('div', { class: 'dim small' }, `${files.length} file · `, h('span', { class: 'dstat' }, h('span', { class: 'a' }, '+' + files.reduce((a, f) => a + f.add, 0)), ' ', h('span', { class: 'd' }, '−' + files.reduce((a, f) => a + f.del, 0))), canEdit ? ' · ketuk baris untuk berkomentar' : ''),
+    h('div', { class: 'dim small' }, `${files.length} file${files.length === 1 ? '' : 's'} · `, h('span', { class: 'dstat' }, h('span', { class: 'a' }, '+' + files.reduce((a, f) => a + f.add, 0)), ' ', h('span', { class: 'd' }, '−' + files.reduce((a, f) => a + f.del, 0))), canEdit ? ' · tap a line to comment' : ''),
     ...files.map((f, i) => {
       const el = h('div', { class: 'difffile' + (i > 4 ? ' collapsed' : '') });
       const head = h('button', { class: 'dfh' }, h('span', { class: 'p' }, f.path), h('span', { class: 'dstat' }, h('span', { class: 'a' }, '+' + f.add), ' ', h('span', { class: 'd' }, '−' + f.del)), ic('down'));
@@ -237,17 +237,17 @@ export async function showDiff() {
       const dfb = h('div', { class: 'dfb' });
       if (canEdit) {
         dfb.append(h('div', { class: 'dfa' },
-          f.binary || f.path === '/dev/null' ? null : h('button', { class: 'chip', onclick: () => showFile(f.path) }, ic('file'), 'Buka file'),
-          h('button', { class: 'chip danger', onclick: () => revert(f) }, ic('undo'), f.isNew ? 'Hapus file baru' : 'Batalkan file'),
+          f.binary || f.path === '/dev/null' ? null : h('button', { class: 'chip', onclick: () => showFile(f.path) }, ic('file'), 'Open file'),
+          h('button', { class: 'chip danger', onclick: () => revert(f) }, ic('undo'), f.isNew ? 'Delete new file' : 'Revert file'),
         ));
       }
-      if (f.binary) dfb.append(h('span', { class: 'ctx' }, 'File biner berubah'));
+      if (f.binary) dfb.append(h('span', { class: 'ctx' }, 'Binary file changed'));
       for (const hk of f.hunks) {
         const bar = h('div', { class: 'hunk hbar' }, h('span', { class: 'grow' }, hk.head));
         if (canEdit) {
-          const cm = h('button', { class: 'hb', 'aria-label': 'Komentari hunk' }, ic('compose'));
+          const cm = h('button', { class: 'hb', 'aria-label': 'Comment on hunk' }, ic('compose'));
           cm.onclick = () => commentBox(bar, f, hk, 0, hunkText(hk));
-          const un = h('button', { class: 'hb', 'aria-label': 'Batalkan hunk' }, ic('undo'));
+          const un = h('button', { class: 'hb', 'aria-label': 'Revert hunk' }, ic('undo'));
           un.onclick = () => revert(f, hk);
           bar.append(cm, un);
         }
@@ -267,7 +267,7 @@ export async function showDiff() {
       el.append(head, dfb);
       return el;
     }),
-    res.truncated ? h('div', { class: 'dim small' }, '… diff dipotong (terlalu besar)') : '',
+    res.truncated ? h('div', { class: 'dim small' }, '… diff truncated (too large)') : '',
   );
   syncFoot();
 }

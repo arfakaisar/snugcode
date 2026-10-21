@@ -1,16 +1,16 @@
-// Notifikasi lokal & Web Push (kunci VAPID dibuat di HP, dikirim ke PC lewat E2EE).
+// Local notifications & Web Push (VAPID key made on the phone, sent to the PC over E2EE).
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { api, showLogin } from './auth.js';
 import { TEXT_SCALES, applyTextScale, applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
 
-// ---------- Notifikasi & Web Push ----------
-// Kunci VAPID dibuat di HP lalu dibagikan ke tiap PC lewat kanal E2EE: satu langganan push
-// per HP bisa dipakai semua PC-nya, dan layanan push tidak bisa membaca isi notifikasi.
+// ---------- Notifications & Web Push ----------
+// The VAPID key is made on the phone and shared with each PC over the E2EE channel: one push subscription
+// per phone serves all its PCs, and the push service can't read notification content.
 export const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 export const pushOn = () => !!store.get('vapid') && window.Notification?.permission === 'granted';
 
-// Notifikasi dari halaman sendiri hanya dipakai bila Web Push belum aktif (agar tidak dobel).
+// In-page notifications are only used when Web Push isn't active (to avoid duplicates).
 export function localNotify(title, body) {
   if (document.visibilityState !== 'visible' && !pushOn() && window.Notification?.permission === 'granted') new Notification(title, { body });
 }
@@ -22,7 +22,7 @@ export async function pushSubscription(create) {
   let sub = await reg.pushManager.getSubscription();
   if (!vapid) {
     if (!create) return null;
-    await sub?.unsubscribe(); // dibuat dengan kunci lain yang sudah hilang
+    await sub?.unsubscribe(); // made with another key that's gone
     sub = null;
     const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
     const { kty, crv, d, x, y } = await crypto.subtle.exportKey('jwk', k.privateKey);
@@ -39,17 +39,17 @@ export async function syncPush(create) {
 }
 
 export async function enableNotifications() {
-  if (!window.Notification) return toast('Browser ini tidak mendukung notifikasi', true);
+  if (!window.Notification) return toast('This browser doesn’t support notifications', true);
   const perm = await Notification.requestPermission();
-  if (perm !== 'granted') return toast('Notifikasi: ' + perm, true);
+  if (perm !== 'granted') return toast('Notifications: ' + perm, true);
   const p = await syncPush(true);
-  if (p) toast('Notifikasi aktif — tetap muncul walau aplikasi ditutup');
-  else toast(/iPhone|iPad/.test(navigator.userAgent) ? 'Tambahkan ke Home Screen dulu agar notifikasi tetap jalan saat aplikasi ditutup' : 'Notifikasi aktif saat aplikasi terbuka', false, 5000);
+  if (p) toast('Notifications on — they show up even when the app is closed');
+  else toast(/iPhone|iPad/.test(navigator.userAgent) ? 'Add to Home Screen first so notifications keep working when the app is closed' : 'Notifications on while the app is open', false, 5000);
 }
 
-// Pemilih tema (Sistem / Terang / Gelap) berbentuk segmented control dengan penanda yang bergeser.
+// Theme picker (System / Light / Dark) as a segmented control with a sliding knob.
 export function themePicker() {
-  const opts = [['system', 'auto', 'Sistem'], ['light', 'sun', 'Terang'], ['dark', 'moon', 'Gelap']];
+  const opts = [['system', 'auto', 'System'], ['light', 'sun', 'Light'], ['dark', 'moon', 'Dark']];
   const cur = () => store.get('theme') || 'system';
   const seg = h('div', { class: 'seg slide', style: `--n:${opts.length}` });
   const sync = () => {
@@ -81,7 +81,7 @@ function textScalePicker() {
 }
 
 async function logoutAll() {
-  if (!(await ui.confirm({ title: 'Keluar dari semua perangkat?', text: 'Semua HP & browser (termasuk yang ini) harus login GitHub lagi. PC dan pairing PIN tidak berubah.', ok: 'Keluar semua', danger: true, icon: 'logout', stay: true }))) return;
+  if (!(await ui.confirm({ title: 'Sign out everywhere?', text: 'Every phone & browser (including this one) will need to sign in with GitHub again. PCs and PIN pairings stay as they are.', ok: 'Sign out everywhere', danger: true, icon: 'logout', stay: true }))) return;
   try {
     await api('/api/logout-all', { method: 'POST' });
   } catch (e) {
@@ -93,39 +93,39 @@ async function logoutAll() {
   showLogin();
 }
 
-// Seberapa sering HP ini diganggu: semua kabar, atau hanya izin, pertanyaan & selesai (mengurangi kelelahan
-// notifikasi). Disimpan per HP dan dikirim ke PC yang sedang tersambung (PC lain saat berikutnya tersambung).
+// How often this phone gets pinged: every update, or only permissions, questions & completions (less
+// notification fatigue). Stored per phone and sent to the connected PC (other PCs on their next connect).
 function pushLevelPicker() {
   const cur = store.get('pushLevel') || 'all';
   const set = (level) => {
     store.set('pushLevel', level);
     syncPush(false);
-    toast(level === 'important' ? 'Notifikasi: hanya izin, pertanyaan & selesai' : 'Notifikasi: semua kabar');
+    toast(level === 'important' ? 'Notifications: only permissions, questions & completions' : 'Notifications: every update');
     ui.closeSheet();
   };
   return h('div', { class: 'menuitem', style: 'cursor:default' },
     h('span', { class: 'mi' }, ic('bell')),
-    h('span', { class: 'grow' }, h('div', { class: 't1' }, 'Kabar yang dikirim'),
-      h('div', { class: 'seg small' }, ...[['all', 'Semua'], ['important', 'Penting saja']].map(([k, label]) => h('button', { class: k === cur ? 'on' : '', onclick: () => set(k) }, label)))),
+    h('span', { class: 'grow' }, h('div', { class: 't1' }, 'What to notify'),
+      h('div', { class: 'seg small' }, ...[['all', 'Everything'], ['important', 'Important only']].map(([k, label]) => h('button', { class: k === cur ? 'on' : '', onclick: () => set(k) }, label)))),
   );
 }
 
 export function accountMenu() {
   const login = app.me?.login;
   ui.sheet(
-    ui.head('Akun & tampilan'),
-    login ? h('div', { class: 'profile' }, h('span', { class: 'meav big' }, login[0].toUpperCase()), h('div', {}, h('b', {}, '@' + login), h('div', { class: 'dim small' }, 'login lewat GitHub'))) : null,
-    h('div', { class: 'label' }, 'Tema'),
+    ui.head('Account & appearance'),
+    login ? h('div', { class: 'profile' }, h('span', { class: 'meav big' }, login[0].toUpperCase()), h('div', {}, h('b', {}, '@' + login), h('div', { class: 'dim small' }, 'signed in with GitHub'))) : null,
+    h('div', { class: 'label' }, 'Theme'),
     themePicker(),
-    h('div', { class: 'label' }, 'Ukuran teks'),
+    h('div', { class: 'label' }, 'Text size'),
     textScalePicker(),
-    h('div', { class: 'label' }, 'Perangkat ini'),
+    h('div', { class: 'label' }, 'This device'),
     h('div', { class: 'group' },
-      menuItem({ icon: 'bell', t1: 'Izinkan notifikasi', t2: 'Kabar saat agen selesai / butuh izin', onclick: enableNotifications }),
+      menuItem({ icon: 'bell', t1: 'Allow notifications', t2: 'Updates when the agent finishes / needs permission', onclick: enableNotifications }),
       pushLevelPicker(),
-      menuItem({ icon: 'logout', t1: 'Keluar', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),
-      // Login di HP/browser lain (mis. HP hilang) dicabut di relay. Pairing PC tidak berubah.
-      menuItem({ icon: 'logout', t1: 'Keluar dari semua perangkat', t2: 'Cabut login di semua HP & browser', danger: true, chev: false, onclick: logoutAll }),
+      menuItem({ icon: 'logout', t1: 'Sign out', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),
+      // Logins on other phones/browsers (e.g. a lost phone) are revoked at the relay. PC pairing is unchanged.
+      menuItem({ icon: 'logout', t1: 'Sign out everywhere', t2: 'Revoke the login on every phone & browser', danger: true, chev: false, onclick: logoutAll }),
     ),
   );
 }

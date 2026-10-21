@@ -106,34 +106,34 @@ if (exe) {
   // PIN runner dibuat HP saat membuat runner (cloud.js): HP itu memasangkan diri tanpa layar PIN.
   const P = await open([['pc.token', JSON.stringify(userToken)], ['pc.cloudpin.' + prov.mid, JSON.stringify(PIN)]]);
   await P.page.waitForSelector('text=Cloud e2e');
-  assert.match(await P.page.locator('.card.pc').first().innerText(), /runner cloud/);
+  assert.match(await P.page.locator('.card.pc').first().innerText(), /cloud runner/);
   await P.page.locator('text=Cloud e2e').first().click();
-  await P.page.waitForSelector('text=Sambungkan model', { timeout: 20000 });
-  assert.equal(await P.page.locator('text=Pasangkan HP ini').count(), 0, 'tanpa layar PIN');
+  await P.page.waitForSelector('text=Connect a model', { timeout: 20000 });
+  assert.equal(await P.page.locator('text=Pair this phone').count(), 0, 'tanpa layar PIN');
   await P.shot('1-key');
   // Key yang tidak dikenali: kolom URL router terbuka sendiri; key salah ditolak endpoint-nya.
   await P.page.fill('input[aria-label="API key"]', 'salah');
-  await P.page.waitForSelector('text=Jenis key tidak dikenali');
-  assert.ok(await P.page.locator('input[aria-label="URL router atau endpoint"]').isVisible(), 'kolom URL terbuka');
-  await P.page.fill('input[aria-label="URL router atau endpoint"]', routerUrl);
-  await P.page.locator('#sheet button', { hasText: /^Sambungkan$/ }).click();
-  await P.page.waitForSelector('text=Key ditolak');
-  await P.page.locator('#sheet:not([hidden]) [aria-label="Tutup"]').first().click();
+  await P.page.waitForSelector('text=Unrecognized key type');
+  assert.ok(await P.page.locator('input[aria-label="Router or endpoint URL"]').isVisible(), 'kolom URL terbuka');
+  await P.page.fill('input[aria-label="Router or endpoint URL"]', routerUrl);
+  await P.page.locator('#sheet button', { hasText: /^Connect$/ }).click();
+  await P.page.waitForSelector('text=/Key ditolak|rejected/i');
+  await P.page.locator('#sheet:not([hidden]) [aria-label="Close"]').first().click();
   await P.page.waitForSelector('#sheet', { state: 'hidden' });
-  await P.page.click('[aria-label="Pengaturan PC"]');
-  await P.page.waitForSelector('text=Runner cloud');
-  for (const t of ['Cloud · container', 'Model & API key (perlu)', 'Perangkat terpasang', 'PIN untuk HP lain', 'Berhenti otomatis']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
+  await P.page.click('[aria-label="PC settings"]');
+  await P.page.waitForSelector('text=Cloud runner');
+  for (const t of ['Cloud · container', 'Models & API keys (required)', 'Paired devices', 'PIN for another phone', 'Auto-stop']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
   await P.shot('2-menu');
-  await P.page.locator('#sheet').getByText('Perangkat terpasang').click();
-  await P.page.waitForSelector('text=HP ini');
+  await P.page.locator('#sheet').getByText('Paired devices').click();
+  await P.page.waitForSelector('text=this phone');
   // Hapus mesin langsung dari daftar (tombol ⋯), tanpa tersambung ke mesinnya: runner cadangan yang offline.
   await P.page.evaluate(() => localStorage.removeItem('pc.last'));
   await P.page.reload();
   await P.page.waitForSelector('.cardrow');
   const before = await P.page.locator('.cardrow').count();
   const spare = (await (await api('/api/machines')).json()).machines.find((m) => m.id !== prov.mid);
-  await P.page.locator('.cardrow', { hasText: spare.name }).filter({ hasNotText: 'online' }).first().locator('[aria-label^="Opsi"]').click();
-  await P.page.locator('#sheet').getByText('Hapus runner').first().click();
+  await P.page.locator('.cardrow', { hasText: spare.name }).filter({ hasNotText: 'online' }).first().locator('[aria-label^="Options"]').click();
+  await P.page.locator('#sheet').getByText('Remove runner').first().click();
   await P.page.waitForSelector('text=github.com/codespaces'); // tanpa izin Codespaces: codespace dihapus manual
   await P.shot('4-hapus');
   await P.page.locator('#sheet button.dangerfill').click();
@@ -143,8 +143,8 @@ if (exe) {
   // Izin Codespaces di HP ditolak GitHub (401) saat menyalakan runner: token dibuang & ada tombol hubungkan lagi.
   await P.page.route('https://api.github.com/**', (r) => r.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"Bad credentials"}' }));
   await P.page.evaluate(() => localStorage.setItem('pc.ghcs', JSON.stringify({ token: 'kedaluwarsa', login: 'x' })));
-  await P.page.locator('.cardrow', { hasText: 'tidur' }).first().locator('.card').click();
-  await P.page.waitForSelector('text=Hubungkan lagi GitHub Codespaces', { timeout: 20000 });
+  await P.page.locator('.cardrow', { hasText: 'asleep' }).first().locator('.card').click();
+  await P.page.waitForSelector('text=Reconnect GitHub Codespaces', { timeout: 20000 });
   assert.equal(await P.page.evaluate(() => localStorage.getItem('pc.ghcs')), null, 'token yang ditolak dibuang');
   await P.shot('5-hubungkan-lagi');
   await P.page.unroute('https://api.github.com/**');
@@ -169,17 +169,17 @@ if (exe) {
     await P.page.reload();
     await P.page.waitForSelector('.cardrow');
     await P.page.clock.install();
-    await P.page.locator('.cardrow', { hasText: 'tidur' }).first().locator('.card').click();
-    await P.page.waitForSelector('text=Menyalakan runner');
+    await P.page.locator('.cardrow', { hasText: 'asleep' }).first().locator('.card').click();
+    await P.page.waitForSelector('text=Starting the runner');
     const tick = async (n) => {
       for (let i = 0; i < n; i++) await P.page.clock.runFor(5000), await sleep(60);
     };
     await tick(12); // > 45 detik menyala tanpa laporan
     assert.deepEqual(calls, ['stop', 'start'], 'codespace dinyalakan ulang sekali: ' + calls);
     await tick(80); // > 6 menit setelah dinyalakan ulang, tetap tanpa laporan
-    await P.page.waitForSelector('text=runner tidak melapor');
+    await P.page.waitForSelector('text=runner isn’t reporting');
     assert.deepEqual(calls, ['stop', 'start'], 'tidak dinyalakan ulang berulang-ulang');
-    assert.ok(await P.page.getByText('Coba lagi').count(), 'tombol coba lagi');
+    assert.ok(await P.page.getByText('Try again').count(), 'tombol coba lagi');
     await P.shot('6-runner-mati');
     await P.page.unroute('https://api.github.com/**');
   }
@@ -188,9 +188,9 @@ if (exe) {
   // Akun tanpa mesin: pilihan utama "Pakai cloud", wizard meminta izin Codespaces.
   const r2 = await fetch(`${RELAY}/auth/dev/login?kind=user&login=kosong${Date.now().toString(36)}`, { redirect: 'manual' });
   const E = await open([['pc.token', JSON.stringify(decodeURIComponent(r2.headers.get('location').split('#login=')[1]))]]);
-  await E.page.waitForSelector('text=Belum ada mesin');
-  await E.page.click('text=Pakai cloud — tanpa PC');
-  await E.page.waitForSelector('text=Hubungkan GitHub Codespaces');
+  await E.page.waitForSelector('text=No machines yet');
+  await E.page.click('text=Use the cloud — no PC');
+  await E.page.waitForSelector('text=Connect GitHub Codespaces');
   await E.shot('3-wizard');
   assert.deepEqual(E.errors, []);
   await browser.close();

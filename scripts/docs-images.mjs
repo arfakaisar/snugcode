@@ -350,14 +350,14 @@ async function capturePwa(browser) {
     console.log('✔ ' + name);
   };
   const closeSheet = async () => {
-    await tap(page.locator('#sheet:not([hidden]) [aria-label="Tutup"]'));
+    await tap(page.locator('#sheet:not([hidden]) [aria-label="Close"]'));
     await page.waitForSelector('#sheet', { state: 'hidden' });
   };
   const sheet = '#sheet:not([hidden])';
 
   try {
     await page.goto(RELAY + '/agent/');
-    await page.waitForSelector('text=Login dengan GitHub');
+    await page.waitForSelector('text=Sign in with GitHub');
     await shot('login', 1400);
     await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);
     await page.reload();
@@ -384,7 +384,7 @@ async function capturePwa(browser) {
         continue;
       }
       await sleep(1300);
-      await tap(page.locator('#dock button', { hasText: 'Izinkan' }));
+      await tap(page.locator('#dock button', { hasText: 'Allow' }));
       await perm.waitForElementState('hidden').catch(() => {});
     }
     await page.waitForFunction(() => document.querySelectorAll('.donel').length >= 1, null, { timeout: 60000 });
@@ -399,18 +399,18 @@ async function capturePwa(browser) {
     await page.waitForSelector(sheet + ' >> text=Settings.jsx', { timeout: 15000 });
     await sleep(1300);
     await rec.still(() => shot('git', 200));
-    await tap(page.locator(sheet + ' button', { hasText: 'Lihat diff' }));
+    await tap(page.locator(sheet + ' button', { hasText: 'View diff' }));
     await page.waitForSelector(sheet + ' .difffile', { timeout: 15000 });
     await sleep(2200);
     await rec.still(() => shot('diff', 200));
     await page.mouse.move(195, 600);
     await page.mouse.wheel(0, 500);
     await sleep(1400);
-    await tap(page.locator(sheet + ' [aria-label="Kembali"]'));
-    await page.waitForSelector(sheet + ' input[placeholder="Pesan commit…"]');
+    await tap(page.locator(sheet + ' [aria-label="Back"]'));
+    await page.waitForSelector(sheet + ' input[placeholder="Commit message…"]');
     await sleep(500);
-    await tap(page.locator(sheet + ' input[placeholder="Pesan commit…"]'));
-    await page.locator(sheet + ' input[placeholder="Pesan commit…"]').pressSequentially('Tambahkan dark mode di pengaturan', { delay: 36 });
+    await tap(page.locator(sheet + ' input[placeholder="Commit message…"]'));
+    await page.locator(sheet + ' input[placeholder="Commit message…"]').pressSequentially('Tambahkan dark mode di pengaturan', { delay: 36 });
     await sleep(300);
     await tap(page.locator(sheet + ' button', { hasText: 'Commit' }).last());
     await page.waitForSelector(sheet + ' >> text=Tambahkan dark mode di pengaturan', { timeout: 15000 });
@@ -418,7 +418,7 @@ async function capturePwa(browser) {
     await encodeGif(browser, await rec.stop(2800), 540, 'demo-git.gif');
     await closeSheet();
 
-    await tap(page.locator('[aria-label="Ganti model"]'));
+    await tap(page.locator('[aria-label="Change model"]'));
     await page.waitForSelector(sheet + ' .model.sel');
     await shot('model');
     await closeSheet();
@@ -426,9 +426,9 @@ async function capturePwa(browser) {
     // GIF 3: Run & Preview — dev server, screenshot dari Chrome di PC, error console.
     rec.start();
     await sleep(500);
-    await tap(page.locator('[aria-label="Jalankan & preview"]'));
+    await tap(page.locator('[aria-label="Run & preview"]'));
     await sleep(900);
-    await tap(page.locator('#sheet button', { hasText: 'Jalankan' }));
+    await tap(page.locator('#sheet button', { hasText: 'Run' }));
     await page.waitForSelector('#sheet .proc.on >> text=/port \\d+/', { timeout: 90000 });
     await sleep(1500);
     await rec.still(() => shot('run', 2600));
@@ -447,7 +447,7 @@ async function capturePwa(browser) {
     await page.click('#menuBtn');
     await page.waitForSelector('#drawerPanel .dsess');
     await shot('drawer', 1000);
-    await page.locator('#drawerPanel button', { hasText: 'Beranda' }).click();
+    await page.locator('#drawerPanel button', { hasText: 'Home' }).click();
     await page.waitForSelector('#view .card.sess');
     await shot('sessions', 1500);
   } catch (e) {

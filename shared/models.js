@@ -1,14 +1,14 @@
-// Pengelompokan model: varian effort yang dipisah per ID di router
-// (mis. ag/gemini-3.8-flash-low / -medium / -high) digabung jadi satu model
-// dengan tingkat effort. 9router tidak menerima parameter effort
-// (thinkingEffortSupported=false), jadi effort = memilih ID varian.
-// Model dari koneksi lain ("anthropic:claude-opus-5-5", lihat shared/providers.js) membawa daftar
-// effort-nya sendiri (`efforts`), yang menjadi varian virtual "<ref>-<effort>".
+// Model grouping: effort variants split into separate IDs on routers
+// (e.g. ag/gemini-3.8-flash-low / -medium / -high) are merged into one model
+// with effort levels. 9router doesn't accept an effort parameter
+// (thinkingEffortSupported=false), so effort = picking the variant ID.
+// Models from other connections ("anthropic:claude-opus-5-5", see shared/providers.js) carry their own
+// effort list (`efforts`), which becomes virtual variants "<ref>-<effort>".
 import { splitRef, joinRef, connKind, PROVIDERS } from './providers.js';
 
-// Urutan dari paling hemat ke paling dalam berpikir.
+// Ordered from cheapest to deepest thinking.
 export const EFFORTS = ['minimal', 'extra-low', 'low', 'medium', 'high', 'xhigh', 'max'];
-// Non-greedy agar "-extra-low" terbaca utuh, bukan "-extra" + "low".
+// Non-greedy so "-extra-low" is read whole, not "-extra" + "low".
 const EFFORT_RE = new RegExp(`^(.+?)-(${EFFORTS.join('|')})$`);
 
 export const EFFORT_LABEL = { minimal: 'minimal', 'extra-low': 'x-low', low: 'low', medium: 'med', high: 'high', xhigh: 'x-high', max: 'max' };
@@ -17,8 +17,8 @@ export const PROVIDER_LABEL = { ag: 'Antigravity', gemini: 'Gemini API', cmc: 'C
 
 // "ag/gemini-3.8-flash-high" -> { conn: 'router', provider: 'ag', base: 'gemini-3.8-flash', effort: 'high' }
 // "anthropic:claude-opus-5-5-high" -> { conn: 'anthropic', provider: 'anthropic', base: 'claude-opus-5-5', effort: 'high' }
-// Untuk koneksi selain router lama, `provider` = koneksi dan `base` tetap memuat awalan model
-// milik endpoint itu (mis. OpenRouter "google/gemini-3-pro").
+// For connections other than the legacy router, `provider` = the connection and `base` keeps that
+// endpoint's model prefix (e.g. OpenRouter "google/gemini-3-pro").
 export function parseModelId(id) {
   const { conn, id: rest0 } = splitRef(id);
   if (conn !== 'router') {
@@ -32,32 +32,32 @@ export function parseModelId(id) {
   return m ? { conn, provider, base: m[1], effort: m[2] } : { conn, provider, base: rest, effort: null };
 }
 
-// Kunci grup (model tanpa effort) dalam bentuk referensi lengkap.
+// Group key (model without effort) as a full reference.
 const groupKey = (p) => (p.conn !== 'router' ? `${p.conn}:${p.base}` : (p.provider ? p.provider + '/' : '') + p.base);
 
-// Model yang effort-nya diatur lewat parameter native Claude Code (bukan ID varian router):
-// provider cc/, atau ID claude-* tanpa provider. Model claude-* di provider lain (mis.
-// ag/claude-opus-4-6-thinking) diteruskan apa adanya karena router-nya tidak mengenal effort.
-// Koneksi Anthropic official: model claude-*. Koneksi OpenAI/ChatGPT: effort diteruskan ke Codex.
+// Models whose effort is set via Claude Code's native parameter (not a router variant ID):
+// provider cc/, or claude-* IDs without a provider. claude-* models on other providers (e.g.
+// ag/claude-opus-4-6-thinking) are passed as-is because their router doesn't know effort.
+// Official Anthropic connection: claude-* models. OpenAI/ChatGPT connections: effort is passed to Codex.
 export const nativeEffortModel = (provider, base) =>
   provider === 'cc' || (provider === '' && base.startsWith('claude-')) || (connKind(provider) === 'anthropic' && base.startsWith('claude-')) || ['openai', 'chatgpt'].includes(connKind(provider));
 
-// Effort native yang ditawarkan slider (semuanya diterima opsi `effort` Agent SDK).
+// Native efforts offered by the slider (all accepted by the Agent SDK's `effort` option).
 const NATIVE_EFFORTS = ['low', 'medium', 'high', 'max'];
 
-// Model ringan untuk subagen (Explore, general-purpose, Plan) dan tugas utilitas Claude Code
-// (ringkasan WebFetch, dsb.). Hanya dua pilihan: Claude Haiku 5.5 atau Gemini 3.8 Flash.
-// Model utama Claude (cc/ atau claude-* tanpa provider): Haiku dulu, lalu Flash.
-// Model utama lain (ag/, gemini/, …): Flash dulu, lalu Haiku.
+// Light model for subagents (Explore, general-purpose, Plan) and Claude Code utility tasks
+// (WebFetch summaries, etc.). Only two choices: Claude Haiku 5.5 or Gemini 3.8 Flash.
+// Claude main models (cc/ or claude-* without a provider): Haiku first, then Flash.
+// Other main models (ag/, gemini/, …): Flash first, then Haiku.
 export const LIGHT_HAIKU = 'claude-haiku-5-5';
 export const LIGHT_FLASH = 'gemini-3.8-flash';
-// Varian Flash yang paling cocok untuk subagen: cukup berpikir, tetap cepat.
+// The Flash variant best suited for subagents: thinks enough, stays fast.
 const FLASH_EFFORTS = ['low', null, 'minimal', 'extra-low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
- * @param {string} mainId model utama sesi
- * @param {string[] | null} [ids] ID model di router; null = belum diketahui (pakai tebakan default)
- * @returns {{ id: string, kind: 'haiku' | 'flash' | 'main' }} kind 'main' = keduanya tidak ada di router
+ * @param {string} mainId the session's main model
+ * @param {string[] | null} [ids] model IDs on the router; null = unknown yet (use the default guess)
+ * @returns {{ id: string, kind: 'haiku' | 'flash' | 'main' }} kind 'main' = neither is on the router
  */
 export function lightModel(mainId, ids = null) {
   const main = parseModelId(mainId || '');
@@ -75,22 +75,22 @@ export function lightModel(mainId, ids = null) {
     const home = kind === 'haiku' ? 'cc' : 'ag';
     const rank = (p) => (p.provider === main.provider ? 0 : p.provider === home ? 1 : 2) * 10 + (kind === 'flash' ? FLASH_EFFORTS.indexOf(p.effort) : p.effort === null ? 0 : 1);
     const best = parsed.filter((p) => p.base === base).sort((a, b) => rank(a) - rank(b))[0];
-    // Haiku native: effort diatur per subagen (opsi `agents`), jadi pakai ID polosnya.
+    // Native Haiku: effort is set per subagent (the `agents` option), so use its plain ID.
     if (best) return { id: kind === 'haiku' ? resolveModelEffort(best.id).actualModel : best.id, kind };
   }
   return { id: resolveModelEffort(mainId).actualModel, kind: 'main' };
 }
 
-// Koneksi selain router lama: model ringan dari koneksi yang sama dan keluarga model yang sama
-// (Claude → Haiku terbaru, Gemini → Flash terbaru, GPT → *-mini terbaru, DeepSeek → *-flash/-chat).
-// Harness Codex mengatur subagennya sendiri, jadi koneksi OpenAI/ChatGPT memakai model utama.
+// Connections other than the legacy router: a light model from the same connection and the same model family
+// (Claude → latest Haiku, Gemini → latest Flash, GPT → latest *-mini, DeepSeek → *-flash/-chat).
+// The Codex harness manages its own subagents, so OpenAI/ChatGPT connections use the main model.
 const FAMILY = [
   { re: /claude/i, light: /claude-haiku/i, kind: /** @type {const} */ ('haiku') },
   { re: /gemini/i, light: /gemini-[\d.]+-flash(?!-lite|-image|-live|-tts)/i, kind: /** @type {const} */ ('flash') },
   { re: /deepseek/i, light: /deepseek-(v[\d.]+-)?(flash|chat)\b/i, kind: /** @type {const} */ ('flash') },
   { re: /glm/i, light: /glm-[\d.]+-(air|flash)/i, kind: /** @type {const} */ ('flash') },
 ];
-// Versi terbaru dulu: "gemini-3.8-flash" > "gemini-3.5-flash" (bandingkan angka per segmen).
+// Newest version first: "gemini-3.8-flash" > "gemini-3.5-flash" (compare numbers per segment).
 const versionCmp = (a, b) => b.localeCompare(a, 'en', { numeric: true });
 
 function lightForConn(main, ids) {
@@ -108,11 +108,11 @@ function lightForConn(main, ids) {
   const hits = ids.map((r) => parseModelId(r)).filter((p) => p.conn === main.conn && fam.light.test(p.base)).map((p) => p.base);
   const best = [...new Set(hits)].sort(versionCmp)[0];
   if (!best || best === main.base) return asMain;
-  // Gemini lewat proxy: effort ikut di ID (diterjemahkan jadi reasoning_effort), "low" cukup untuk subagen.
+  // Gemini via the proxy: effort is in the ID (translated to reasoning_effort), "low" is enough for subagents.
   return { id: joinRef(main.conn, kind === 'gemini' ? best + '-low' : best), kind: fam.kind };
 }
 
-// Untuk model Claude native, pisahkan ID asli router dengan virtual effort.
+// For native Claude models, separate the router's real ID from the virtual effort.
 // Contoh: "cc/claude-opus-5-5-high" -> { actualModel: "cc/claude-opus-5-5", effort: "high" }.
 export function resolveModelEffort(id) {
   if (!id) return { actualModel: '', effort: null };
@@ -123,13 +123,13 @@ export function resolveModelEffort(id) {
   return { actualModel: id, effort: null };
 }
 
-// list: [{ id, ctx?, vision?, reasoning?, efforts?, label?, engine? }] atau [string] (daemon versi lama).
-// `efforts`: tingkat effort native model ini (koneksi selain router lama), jadi varian virtual.
+// list: [{ id, ctx?, vision?, reasoning?, efforts?, label?, engine? }] or [string] (old daemon versions).
+// `efforts`: this model's native effort levels (connections other than the legacy router), as virtual variants.
 export function groupModels(list) {
   const groups = new Map();
   for (const raw of list) {
     const m = typeof raw === 'string' ? { id: raw } : raw;
-    // Model koneksi dengan daftar effort sendiri: ID-nya selalu polos (tanpa akhiran effort).
+    // Connection models with their own effort list: their ID is always plain (no effort suffix).
     const p = m.efforts ? { ...parseModelId(m.id), base: splitRef(m.id).id, effort: null } : parseModelId(m.id);
     const key = groupKey(p);
     let g = groups.get(key);
@@ -141,9 +141,9 @@ export function groupModels(list) {
     for (const lev of m.efforts || []) if (EFFORTS.includes(lev) && !g.variants.some((v) => v.effort === lev)) g.variants.push({ effort: lev, id: `${key}-${lev}`, virtual: true });
   }
   for (const g of groups.values()) {
-    // Model Claude native (cc/ atau claude-* tanpa provider):
-    // 9router tidak membagi model Claude per ID varian karena Claude memakai
-    // adaptive thinking & parameter effort native.
+    // Native Claude models (cc/ or claude-* without a provider):
+    // 9router doesn't split Claude models per variant ID because Claude uses
+    // adaptive thinking & a native effort parameter.
     if (g.conn === 'router' && nativeEffortModel(g.provider, g.name)) {
       for (const lev of NATIVE_EFFORTS) {
         if (!g.variants.some((v) => v.effort === lev)) {
@@ -151,10 +151,10 @@ export function groupModels(list) {
         }
       }
     }
-    // Model polos tanpa akhiran = pengaturan bawaan router ("auto").
+    // A plain model without a suffix = the router's default setting ("auto").
     g.auto = g.variants.find((v) => v.effort === null)?.id || null;
     g.levels = g.variants.filter((v) => v.effort).sort((a, b) => EFFORTS.indexOf(a.effort) - EFFORTS.indexOf(b.effort));
-    // Satu-satunya varian ber-effort tanpa versi polos -> bukan pilihan, cukup label tetap.
+    // A single effort variant with no plain version -> not a choice, just a fixed label.
     g.fixed = !g.auto && g.levels.length === 1 ? g.levels[0].effort : null;
     g.slider = g.levels.length > 1 || (g.levels.length === 1 && !!g.auto);
   }
@@ -165,8 +165,8 @@ export function findGroup(groups, id) {
   return groups.find((g) => g.variants.some((v) => v.id === id)) || null;
 }
 
-// Effort awal saat sebuah grup dipilih: pertahankan pilihan sekarang bila ada di grup,
-// lalu medium, lalu auto, lalu tingkat tengah.
+// Initial effort when a group is picked: keep the current choice if it's in the group,
+// then medium, then auto, then the middle level.
 export function defaultChoice(group, currentId) {
   const cur = group.variants.find((v) => v.id === currentId);
   if (cur) return cur.effort;
@@ -180,7 +180,7 @@ export function resolveId(group, effort) {
   return group.levels.find((l) => l.effort === effort)?.id || group.auto || group.levels[0].id;
 }
 
-// Label ringkas: "gemini-3.8-flash · high", "gemini-3.8-flash · auto".
+// Compact label: "gemini-3.8-flash · high", "gemini-3.8-flash · auto".
 export function modelLabel(id, { provider = false } = {}) {
   if (!id) return '';
   const p = parseModelId(id);

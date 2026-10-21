@@ -1,9 +1,9 @@
-// Subagen bawaan Claude Code didefinisikan ulang agar effort-nya rendah. Modelnya selalu model
-// ringan sesi (Claude Haiku 5.5 / Gemini 3.8 Flash, lihat lightModel di shared/models.js) lewat
-// CLAUDE_CODE_SUBAGENT_MODEL(+_FORCE); tanpa definisi ini subagen mewarisi effort model utama
-// (mis. high), jadi model kecil pun berpikir panjang.
-// Nama sama dengan subagen bawaan (Explore, general-purpose, Plan, claude) sehingga
-// menimpanya, bukan menambah daftar agen yang dikirim ke model di setiap request.
+// Claude Code's built-in subagents are redefined with low effort. Their model is always the session's
+// light model (Claude Haiku 5.5 / Gemini 3.8 Flash, see lightModel in shared/models.js) via
+// CLAUDE_CODE_SUBAGENT_MODEL(+_FORCE); without these definitions subagents inherit the main model's effort
+// (e.g. high), so even a small model thinks for a long time.
+// Same names as the built-in subagents (Explore, general-purpose, Plan, claude) so they
+// replace them instead of growing the agent list sent to the model on every request.
 
 const REPORT = 'Finish with one concise final message: the answer first, then the relevant absolute file paths (with line numbers when useful). Quote code only when the exact text matters. Never write report or summary files.';
 
@@ -34,8 +34,8 @@ export function subagents() {
       effort: 'medium',
     },
     'general-purpose': GENERAL,
-    // Dipakai Claude Code bila subagent_type kosong; deskripsi pendek agar tidak menggandakan teks
-    // general-purpose di daftar agen yang ikut setiap request.
+    // Used by Claude Code when subagent_type is empty; short description so the general-purpose
+    // text isn't duplicated in the agent list sent with every request.
     claude: { ...GENERAL, description: 'Same as general-purpose (used when no type is given).' },
   };
 }

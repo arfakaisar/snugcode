@@ -1,7 +1,7 @@
-// Terminal interaktif (PTY) dari HP: shell sungguhan di folder sesi, lewat kanal E2EE yang sama dengan
-// RPC. Terminal tetap hidup saat HP terputus (seperti tmux ringan): menyambung lagi memutar ulang
-// 256 KB output terakhir. Paket PTY (`@lydell/node-pty`, binary prebuilt) opsional; tanpanya fitur
-// ini memberi pesan yang jelas.
+// Interactive terminal (PTY) from the phone: a real shell in the session folder, over the same E2EE channel as
+// RPC. Terminals stay alive while the phone is disconnected (like a light tmux): reconnecting replays the
+// last 256 KB of output. The PTY package (`@lydell/node-pty`, prebuilt binary) is optional; without it this
+// feature gives a clear message.
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import { toolchainEnv } from './toolchain.js';
@@ -43,8 +43,8 @@ export class Terminals {
   /** @param {{ id: string, meta: { cwd: string } }} session @param {{ cols?: number, rows?: number }} [size] */
   async open(session, { cols, rows } = {}) {
     const pty = loadPty();
-    if (!pty) throw new Error('Terminal tidak tersedia di mesin ini: paket @lydell/node-pty tidak terpasang (' + ptyErr + '). Jalankan `snugcode update` atau pasang ulang snugcode.');
-    if (this.list(session.id).length >= MAX_PER_SESSION) throw new Error(`Maksimal ${MAX_PER_SESSION} terminal per sesi. Tutup salah satu dulu.`);
+    if (!pty) throw new Error('Terminal unavailable on this machine: the @lydell/node-pty package is not installed (' + ptyErr + '). Run `snugcode update` or reinstall snugcode.');
+    if (this.list(session.id).length >= MAX_PER_SESSION) throw new Error(`At most ${MAX_PER_SESSION} terminals per session. Close one first.`);
     const { file, args } = defaultShell();
     const env = await toolchainEnv('', { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', SNUGCODE_TERMINAL: '1' });
     const size = { cols: clampSize(cols, 80, 500), rows: clampSize(rows, 24, 200) };
@@ -66,7 +66,7 @@ export class Terminals {
     this.lastIo = Date.now();
     t.buf += d;
     if (t.buf.length > SCROLLBACK) {
-      // Potong di awal baris agar putar ulang tidak dimulai di tengah escape sequence.
+      // Cut at a line start so replay doesn't begin in the middle of an escape sequence.
       const cut = t.buf.indexOf('\n', t.buf.length - SCROLLBACK);
       t.buf = t.buf.slice(cut < 0 ? t.buf.length - SCROLLBACK : cut + 1);
     }
@@ -89,7 +89,7 @@ export class Terminals {
 
   get(tid) {
     const t = this.map.get(String(tid));
-    if (!t) throw new Error('Terminal sudah ditutup');
+    if (!t) throw new Error('Terminal already closed');
     return t;
   }
 
@@ -101,7 +101,7 @@ export class Terminals {
     return { tid: t.tid, title: t.title, cols: t.cols, rows: t.rows, at: t.at };
   }
 
-  // Berlangganan output; mengembalikan scrollback untuk diputar ulang (klien me-reset layarnya dulu).
+  // Subscribe to output; returns the scrollback to replay (the client resets its screen first).
   attach(tid, conn) {
     const t = this.get(tid);
     this.flush(t);
@@ -147,7 +147,7 @@ export class Terminals {
     for (const tid of [...this.map.keys()]) this.close(tid);
   }
 
-  // Ada yang dikerjakan di terminal belakangan ini (runner cloud tidak dihentikan karena menganggur).
+  // Something happened in a terminal recently (the cloud runner isn't stopped for being idle).
   active(ms = 2 * 60_000) {
     return this.map.size > 0 && Date.now() - this.lastIo < ms;
   }

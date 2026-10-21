@@ -1,72 +1,82 @@
 # Changelog
 
-Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur lengkap ada di [`master.md`](master.md).
+Notable changes to snugcode (formerly pocketcode). Full architecture & features are in [`master.md`](master.md). Entries
+for releases up to v0.4.0 are kept in their original language (Indonesian).
 
-## Belum dirilis
+## Unreleased
 
-### Baru
-- **Landing page snugcode Cloud di `snugcode.dev`; aplikasi (kini *snugcode agent*) pindah ke `snugcode.dev/agent/`.**
-  Landing page (`landing/`) berisi fitur, cara kerja, demo deploy, harga + konfigurator server, dan FAQ. Tombol
-  **Buka snugcode agent** langsung membuka agent bila sudah login; bila belum, muncul pilihan **Masuk dengan GitHub**
-  atau **Daftar akun baru** (`/auth/login?signup=1`), lalu kembali ke tujuan semula (`next=/` atau `/agent/`, hanya dua
-  path itu). Login dipakai bersama (`pc.token`, satu origin). Tidak ada yang perlu dipasang ulang: service worker tetap
-  di `/sw.js` (scope `/`) sehingga notifikasi push tetap jalan, dan aplikasi di layar utama, link notifikasi, serta
-  `#gh=`/`#import=` yang masih menuju `/` diteruskan ke `/agent/`. `install.sh`/`install.ps1` tetap di root.
+### New
+- **snugcode is now in English.** The whole product — the snugcode agent PWA, the CLI/TUI, relay pages, the landing
+  page, and the docs (`README.md`, `master.md`, `CONTRIBUTING.md`, `docs/security.md`, formerly `docs/keamanan.md`) —
+  is in English, to reach a wider audience. `README.en.md` was merged into `README.md`.
+- **Landing page redesigned for mobile.** Responsive layout and a smoother flow on phones: a lighter hero, cards and
+  pricing that fit small screens, and touch-friendly navigation.
+- **snugcode Cloud landing page at `snugcode.dev`; the app (now *snugcode agent*) moved to `snugcode.dev/agent/`.**
+  The landing page (`landing/`) has features, how it works, a deploy demo, pricing + a server configurator, and an FAQ.
+  The **Open snugcode agent** button opens the agent directly when signed in; otherwise it offers **Sign in with GitHub**
+  or **Create a new account** (`/auth/login?signup=1`), then returns to where you came from (`next=/` or `/agent/`, only
+  those two paths). The sign-in is shared (`pc.token`, same origin). Nothing needs to be reinstalled: the service worker
+  stays at `/sw.js` (scope `/`) so push notifications keep working, and home-screen apps, notification links, and
+  `#gh=`/`#import=` links that still point to `/` are forwarded to `/agent/`. `install.sh`/`install.ps1` stay at the root.
 
-### Perbaikan
-- **Runner/PC yang mati mendadak tidak lagi tampak online.** Codespace yang dihentikan langsung (atau PC yang
-  dicabut listriknya / kehilangan jaringan) tidak sempat menutup soketnya ke relay, dan Cloudflare menahan soket itu,
-  jadi mesin tampil online terus dan HP mencoba tersambung tanpa hasil. Relay kini memakai ping daemon (tiap 25
-  detik, dijawab otomatis): soket mesin tanpa ping selama 80 detik ditutup (kode 4006) dan mesin dicatat offline,
-  dicek saat daftar mesin dibuka, saat HP tersambung/mengirim pesan, dan berkala (alarm) selama ada HP yang tersambung.
-  Runner Codespaces yang dihentikan kini langsung dinyalakan lagi saat dibuka dari aplikasi.
-- **Runner Codespaces yang daemonnya mati tidak lagi macet di "menunggu snugcode tersambung…".** Daemon hanya
-  dijalankan saat codespace menyala (`postStartCommand`), jadi daemon yang mati selagi codespace tetap menyala tidak
-  pernah hidup lagi. Kini:
-  - supervisor `snugcode cloud` menyalakan lagi daemon yang terkena sinyal (mis. `pkill node` / `killall node` dari
-    agen); daemon di bawah supervisor keluar dengan 128+sinyal, bukan 0. Di Codespaces supervisor juga mengabaikan
-    SIGTERM (berhenti sengaja: `snugcode stop` atau dari aplikasi; codespace yang dihentikan tetap mematikan semuanya);
-  - aplikasi menyalakan ulang codespace sekali (stop → start) bila codespace menyala 45 detik tanpa runner tersambung
-    atau melapor, dan menampilkan error dengan petunjuk `cloud.log` (tombol *Coba lagi*) bila setelah itu runner tetap
-    diam 6 menit — sebelumnya layar menunggu tanpa batas.
-- **Ikon PWA di iPhone tidak lagi tampil sebagai huruf "S".** iOS membuat ikon huruf bila `apple-touch-icon` gagal
-  diambil saat "Add to Home Screen"; di iOS 27 pemuat lembar itu gagal mengambil ikon dari URL jaringan. Ikon 180×180
-  kini disisipkan sebagai `data:` URI di `index.html` saat build (`sizes="180x180"`), dan
-  `apple-touch-icon-precomposed.png` ikut disajikan di root untuk iOS yang mencarinya langsung. Ikon SVG dihapus dari `manifest.webmanifest` (iOS hanya bisa memakai ikon
-  PNG untuk layar utama) dan diganti PNG 180×180.
-- **PWA di iPhone (iOS 26) kini menempel ke tepi bawah dan header tidak lagi buram.** Bug WebKit 301108: dengan
-  `viewport-fit=cover` + status bar `black-translucent`, viewport aplikasi terpasang dibuat lebih pendek dari layar,
-  jadi composer melayang dengan pita kosong di bawahnya. Kini `html` setinggi layar dalam mode standalone. Efek
-  scroll-edge "Liquid Glass" iOS 26 yang memburamkan pita di bawah status bar (tidak bisa dimatikan) dihindari dengan
-  jarak atas tambahan berwarna latar solid untuk header, drawer, sheet, toast, dan terminal (hanya iOS terpasang).
-- Catatan sistem (mis. "Sandbox OS tidak tersedia") tidak lagi tampil dengan ikon ganda "◆ ◆", dan peringatan yang
-  sama tampil sekali per sesi walau daemon sempat restart.
-- **Mengetik di terminal dari HP Android kini langsung tampil.** Keyboard HP (Gboard, Samsung, SwiftKey) mengetik
-  lewat komposisi IME; xterm.js baru meneruskan kata setelah spasi/Enter (layar tampak diam saat mengetik), dan huruf
-  dengan keydown 229 di luar komposisi bisa hilang sama sekali. Di layar sentuh, perubahan isi textarea xterm kini
-  dikirim sendiri ke shell begitu terjadi sebagai selisih (`imeDelta` di `web/termkeys.js`: DEL untuk karakter yang
-  hilang + karakter baru), termasuk Backspace lewat IME, koreksi otomatis, ketik geser, dan input suara. Keyboard
-  fisik tetap ditangani xterm tanpa huruf ganda. Diuji `test/e2e-ui.mjs` (komposisi IME lewat CDP) dan unit test.
-- **PWA tidak lagi macet di "Menghubungi relay" setelah HP dibuka lagi.** Soket WebSocket yang tertahan di tahap
-  menyambung (HP baru bangun, jaringan seluler yang menelan paket) dulu tidak punya batas waktu, dan `wake()`
-  mengabaikannya, jadi layar bisa diam bermenit-menit padahal daftar PC (lewat HTTP biasa) menampilkan "online". Kini
-  tanpa jawaban relay dalam 10–30 dtk soket diganti baru, membuka aplikasi kembali langsung mengganti soket yang
-  tertahan, PC yang tidak menjawab auth dalam 20 dtk dicoba lewat kanal baru, dan layar menyambung menampilkan
-  percobaan ke berapa serta tombol **Coba sekarang**. Diuji `test/e2e-resume.mjs` (proxy yang menahan koneksi).
-- Folder data snugcode tetap tertutup di file explorer bila path-nya lewat symlink (macOS `/var` → `/private/var`).
+### Fixes
+- **Runners/PCs that die suddenly no longer look online.** A codespace that is stopped abruptly (or a PC that loses
+  power / its network) has no chance to close its socket to the relay, and Cloudflare keeps that socket open, so the
+  machine showed as online forever and the phone tried to connect in vain. The relay now uses the daemon's ping (every
+  25 seconds, answered automatically): a machine socket without a ping for 80 seconds is closed (code 4006) and the
+  machine is marked offline, checked when the machine list is opened, when a phone connects/sends a message, and
+  periodically (alarm) while a phone is connected. A stopped Codespaces runner is now started right away when it is
+  opened from the app.
+- **A Codespaces runner whose daemon died no longer gets stuck at "waiting for snugcode to connect…".** The daemon was
+  only started when the codespace started (`postStartCommand`), so a daemon that died while the codespace stayed up
+  never came back. Now:
+  - the `snugcode cloud` supervisor restarts a daemon that was hit by a signal (e.g. `pkill node` / `killall node` from
+    the agent); a supervised daemon exits with 128+signal, not 0. On Codespaces the supervisor also ignores SIGTERM
+    (deliberate stops: `snugcode stop` or from the app; stopping the codespace still shuts everything down);
+  - the app restarts the codespace once (stop → start) if it has been running for 45 seconds without the runner
+    connecting or reporting, and shows an error with a hint about `cloud.log` (a *Try again* button) if the runner is
+    still silent after 6 minutes — previously the screen waited forever.
+- **The PWA icon on iPhone no longer shows up as the letter "S".** iOS generates a letter icon when `apple-touch-icon`
+  can't be fetched during "Add to Home Screen"; on iOS 27 that sheet's loader fails to fetch icons from network URLs.
+  The 180×180 icon is now inlined as a `data:` URI in `index.html` at build time (`sizes="180x180"`), and
+  `apple-touch-icon-precomposed.png` is also served at the root for iOS versions that look for it directly. The SVG icon
+  was removed from `manifest.webmanifest` (iOS can only use PNG icons for the home screen) and replaced by a 180×180 PNG.
+- **The PWA on iPhone (iOS 26) now reaches the bottom edge and the header is no longer blurred.** WebKit bug 301108:
+  with `viewport-fit=cover` + the `black-translucent` status bar, the installed app's viewport is made shorter than the
+  screen, so the composer floated above an empty strip. `html` is now as tall as the screen in standalone mode. The iOS
+  26 "Liquid Glass" scroll-edge effect that blurs the strip under the status bar (which can't be turned off) is avoided
+  with extra top spacing in a solid background color for the header, drawer, sheets, toasts, and terminal (installed
+  iOS only).
+- System notes (e.g. "OS sandbox not available") no longer show a double "◆ ◆" icon, and the same warning is shown once
+  per session even if the daemon restarted.
+- **Typing in the terminal from an Android phone now shows up immediately.** Phone keyboards (Gboard, Samsung,
+  SwiftKey) type through IME composition; xterm.js only forwarded a word after space/Enter (the screen looked frozen
+  while typing), and letters with keydown 229 outside a composition could be lost entirely. On touch screens, changes to
+  the xterm textarea are now sent to the shell as they happen, as a diff (`imeDelta` in `web/termkeys.js`: DEL for
+  removed characters + new characters), including Backspace through the IME, autocorrect, swipe typing, and voice
+  input. Physical keyboards are still handled by xterm without doubled letters. Tested by `test/e2e-ui.mjs` (IME
+  composition through CDP) and unit tests.
+- **The PWA no longer gets stuck at "Contacting relay" after the phone is reopened.** A WebSocket stuck in the
+  connecting stage (a phone that just woke up, a mobile network swallowing packets) used to have no timeout, and
+  `wake()` ignored it, so the screen could sit still for minutes while the PC list (over plain HTTP) showed "online".
+  Now a socket without a relay answer within 10–30 s is replaced, reopening the app immediately replaces a stuck socket,
+  a PC that doesn't answer auth within 20 s is retried on a new channel, and the connecting screen shows the attempt
+  number and a **Try now** button. Tested by `test/e2e-resume.mjs` (a proxy that holds connections).
+- The snugcode data folder stays closed in the file explorer when its path goes through a symlink (macOS `/var` →
+  `/private/var`).
 
-### Peningkatan
-- **Zoom PWA dikunci seperti aplikasi native**: meta viewport `maximum-scale=1, user-scalable=no`, `touch-action:
-  pan-x pan-y` di semua elemen (cubit & ketuk-dua-kali tidak memperbesar, geser tetap jalan), dan gestur cubit Safari
-  iOS (yang mengabaikan `user-scalable`) dibatalkan di `web/ui/dom.js`.
-- **Ukuran teks** (Akun & tampilan: Kecil / Normal / Besar / Sangat besar) sebagai pengganti zoom halaman untuk
-  aksesibilitas: CSS `zoom` pada isi layar, sheet & drawer, dipasang `theme.js` sebelum render pertama (tanpa kedip).
-- **Terminal HP**: cubit dua jari mengubah ukuran huruf (8–24 px, diingat per perangkat); tombol **Tempel** (isi
-  clipboard lewat bracketed paste — menekan lama layar xterm tidak memberi menu Tempel), **Salin** (teks terpilih, atau
-  seluruh isi layar dengan baris terbungkus disambung), **Home**, dan **End**.
-- Aset terminal (`xterm.js`, `xterm.css`) diunduh saat HP menganggur begitu sesi dengan terminal dibuka, jadi membuka
-  terminal di sinyal lemah tidak lagi gagal "Gagal memuat terminal".
-- Menekan lama tombol tidak lagi menyeleksi teks atau memunculkan menu salin.
+### Improvements
+- **PWA zoom is locked like a native app**: viewport meta `maximum-scale=1, user-scalable=no`, `touch-action:
+  pan-x pan-y` on every element (pinch & double-tap don't zoom, scrolling still works), and Safari iOS pinch gestures
+  (which ignore `user-scalable`) are cancelled in `web/ui/dom.js`.
+- **Text size** (Account & appearance: Small / Normal / Large / Extra large) as a replacement for page zoom, for
+  accessibility: CSS `zoom` on the screen content, sheets & drawer, applied by `theme.js` before the first render (no flash).
+- **Phone terminal**: a two-finger pinch changes the font size (8–24 px, remembered per device); **Paste** (clipboard
+  contents through bracketed paste — long-pressing the xterm screen gives no Paste menu), **Copy** (selected text, or the
+  whole screen with wrapped lines joined), **Home**, and **End** buttons.
+- Terminal assets (`xterm.js`, `xterm.css`) are downloaded while the phone is idle as soon as a session with a terminal
+  is opened, so opening the terminal on a weak signal no longer fails with "Failed to load terminal".
+- Long-pressing buttons no longer selects text or brings up a copy menu.
 
 ## 2026-10-20 — v0.4.0: keamanan relay, koneksi tahan banting, izin bertingkat risiko, biaya sesi
 
@@ -82,7 +92,7 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 - **Perpanjangan login** (`POST /api/renew`, maks. sekali sehari dari PWA): HP yang dipakai rutin tidak lagi dipaksa
   login ulang setiap 30 hari. Token yang dicabut (logout-all) tidak bisa diperpanjang.
 - **cloudflared dipatok versi + SHA-256** (`daemon/cloudflared-version.json`), bukan `releases/latest` tanpa verifikasi.
-- **Model ancaman yang jujur** — [`docs/keamanan.md`](docs/keamanan.md): apa yang dilindungi & tidak (relay juga
+- **Model ancaman yang jujur** — [`docs/keamanan.md`](docs/security.md): apa yang dilindungi & tidak (relay juga
   menyajikan kode PWA), cara memverifikasi build, cara self-host relay. Klaim "relay tidak bisa membaca apa pun"
   di README & layar login diperjelas.
 

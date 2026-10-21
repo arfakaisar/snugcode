@@ -1,5 +1,5 @@
-// Layar sesi (percakapan dengan agen): header git/run, composer kartu dengan tombol + (lampiran,
-// mode, aksi cepat), pil mode aktif, pemilih model, dan attach ulang setelah koneksi pulih.
+// Session screen (conversation with the agent): git/run header, card composer with a + button (attachments,
+// modes, quick actions), active mode pills, model picker, and re-attach after the connection recovers.
 import * as M from '../../shared/models.js';
 import { EventCursor } from '../../shared/events.js';
 import { store } from '../conn.js';
@@ -15,30 +15,30 @@ import { deleteSession, repoName, sessionSub, showSessions, tildify } from './se
 
 const has = (m) => !!app.current.info?.caps?.includes(m);
 
-// Preset otonomi (shared/risk.js AUTONOMY): label, penjelasan, ikon.
+// Autonomy presets (shared/risk.js AUTONOMY): label, description, icon.
 const AUTONOMY_UI = {
-  ask: ['Tanya semua', 'setiap edit & perintah menunggu persetujuanmu', 'eye'],
-  balanced: ['Seimbang', 'edit langsung (bisa di-rewind), perintah ditanyakan', 'shield'],
-  trusted: ['Rutin otomatis', 'test, lint & build langsung jalan; perintah lain ditanyakan', 'flask'],
-  auto: ['Penuh', 'semua langsung jalan, kecuali push & PR', 'bolt'],
+  ask: ['Ask everything', 'every edit & command waits for your approval', 'eye'],
+  balanced: ['Balanced', 'edits apply directly (rewindable), commands ask first', 'shield'],
+  trusted: ['Routine auto', 'tests, lint & builds run right away; other commands ask', 'flask'],
+  auto: ['Full', 'everything runs right away, except push & PRs', 'bolt'],
 };
 
-// ---------- Layar: sesi ----------
+// ---------- Screen: session ----------
 export const QUICK = [
-  { icon: 'book', t1: 'Jelaskan repo ini', t2: 'struktur, cara menjalankan, bagian penting', text: 'Jelaskan struktur repo ini, cara menjalankannya, dan bagian terpentingnya. Singkat.' },
-  { icon: 'diff', t1: 'Review perubahan', t2: 'cek git diff, cari bug, ringkas', text: 'Review perubahan yang belum di-commit (git diff): cari bug atau risiko, lalu ringkas.' },
-  { icon: 'flask', t1: 'Jalankan & perbaiki test', t2: 'temukan perintah test, jalankan, perbaiki yang gagal', text: 'Temukan cara menjalankan test di repo ini, jalankan, lalu perbaiki yang gagal.' },
-  { icon: 'bug', t1: 'Perbaiki error terakhir', t2: 'lanjutkan dari output sebelumnya', text: 'Perbaiki error terakhir yang muncul di sesi ini, lalu verifikasi.' },
-  { icon: 'commit', t1: 'Commit perubahan', t2: 'tulis pesan commit yang jelas lalu commit', text: 'Lihat perubahan yang ada, tulis pesan commit yang jelas, lalu commit. Jangan push.' },
+  { icon: 'book', t1: 'Explain this repo', t2: 'structure, how to run it, key parts', text: 'Explain this repo’s structure, how to run it, and its most important parts. Keep it short.' },
+  { icon: 'diff', t1: 'Review changes', t2: 'check git diff, find bugs, summarize', text: 'Review the uncommitted changes (git diff): look for bugs or risks, then summarize.' },
+  { icon: 'flask', t1: 'Run & fix tests', t2: 'find the test command, run it, fix failures', text: 'Find how to run the tests in this repo, run them, then fix any failures.' },
+  { icon: 'bug', t1: 'Fix the last error', t2: 'continue from the previous output', text: 'Fix the last error that came up in this session, then verify.' },
+  { icon: 'commit', t1: 'Commit changes', t2: 'write a clear commit message and commit', text: 'Look at the current changes, write a clear commit message, then commit. Don’t push.' },
 ];
 export const QUICK_SH = ['git status', 'git log --oneline -n 8', 'git diff --stat', 'ls'];
 
 export const QUICK_COMPUTER = [
-  { icon: 'monitor', t1: 'Ringkas info sistem', t2: 'OS, CPU, memory, direktori aktif', text: 'Tampilkan ringkasan info sistem: OS, spesifikasi, direktori aktif, dan status lingkungan. Singkat.' },
-  { icon: 'term', t1: 'Cek proses & port', t2: 'lihat proses berjalan dan port terbuka', text: 'Cek proses yang sedang berjalan dan port yang sedang digunakan atau terbuka di komputer ini.' },
-  { icon: 'bug', t1: 'Perbaiki error terakhir', t2: 'lanjutkan dari output sebelumnya', text: 'Perbaiki error terakhir yang muncul di sesi ini, lalu verifikasi.' },
-  { icon: 'search', t1: 'Cari file di komputer', t2: 'bantu cari file atau folder tertentu', text: 'Bantu cari file atau folder di komputer ini.' },
-  { icon: 'branch', t1: 'Cek status git', t2: 'periksa repositori git di folder ini jika ada', text: 'Periksa status git di direktori ini jika merupakan git repository.' },
+  { icon: 'monitor', t1: 'System info summary', t2: 'OS, CPU, memory, current directory', text: 'Show a summary of system info: OS, specs, current directory, and environment status. Keep it short.' },
+  { icon: 'term', t1: 'Check processes & ports', t2: 'see running processes and open ports', text: 'Check the running processes and the ports in use or open on this computer.' },
+  { icon: 'bug', t1: 'Fix the last error', t2: 'continue from the previous output', text: 'Fix the last error that came up in this session, then verify.' },
+  { icon: 'search', t1: 'Find files on the computer', t2: 'help find a specific file or folder', text: 'Help me find a file or folder on this computer.' },
+  { icon: 'branch', t1: 'Check git status', t2: 'inspect the git repo in this folder, if any', text: 'Check the git status in this directory if it’s a git repository.' },
 ];
 export const QUICK_COMPUTER_SH = ['ls', 'git status', 'whoami', 'pwd'];
 
@@ -50,22 +50,22 @@ export function showSession(s) {
   if (has('termOpen')) prefetchTerminal();
   const col = h('div', { class: 'col' });
   const term = h('div', { id: 'term' }, col);
-  const wl = h('span', { class: 'wl shimmer' }, 'Berpikir…');
+  const wl = h('span', { class: 'wl shimmer' }, 'Thinking…');
   const wt = h('span', { class: 't' }, '0s');
   const working = h('div', { id: 'working', hidden: true }, mascot('think'), wl, wt);
-  const toBottom = h('button', { id: 'tobottom', hidden: true, 'aria-label': 'Ke pesan terbaru' }, ic('arrowdown'));
+  const toBottom = h('button', { id: 'tobottom', hidden: true, 'aria-label': 'Jump to latest' }, ic('arrowdown'));
   const dock = h('div', { id: 'dock' });
-  const input = h('textarea', { id: 'input', rows: 1, placeholder: s.computer ? 'Perintahkan apa saja di komputermu…' : 'Minta sesuatu ke agen…', autocapitalize: 'sentences', enterkeyhint: coarse ? 'enter' : 'send', 'aria-label': 'Pesan' });
-  const send = h('button', { id: 'send', class: 'idle', 'aria-label': 'Kirim' }, ic('send'));
-  const plusBtn = h('button', { class: 'cbtn plus', 'aria-label': 'Lampiran & alat' }, ic('plus'));
-  const modelChip = h('button', { class: 'cbtn model', 'aria-label': 'Ganti model' });
+  const input = h('textarea', { id: 'input', rows: 1, placeholder: s.computer ? 'Ask anything on your computer…' : 'Ask the agent…', autocapitalize: 'sentences', enterkeyhint: coarse ? 'enter' : 'send', 'aria-label': 'Message' });
+  const send = h('button', { id: 'send', class: 'idle', 'aria-label': 'Send' }, ic('send'));
+  const plusBtn = h('button', { class: 'cbtn plus', 'aria-label': 'Attachments & tools' }, ic('plus'));
+  const modelChip = h('button', { class: 'cbtn model', 'aria-label': 'Change model' });
   const modes = h('div', { id: 'modes', hidden: true });
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
   const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
   const thumbs = h('div', { id: 'thumbs', hidden: true });
   const gitBadge = h('span', { class: 'badge', hidden: true });
   const gitBtn = h('button', { class: 'iconbtn', 'aria-label': 'Git', title: 'Git', onclick: () => (haptic(6), showGit()) }, ic('branch'), gitBadge);
-  const runBtn = h('button', { class: 'iconbtn', 'aria-label': 'Jalankan & preview', title: 'Run & Preview', onclick: () => (haptic(6), showRun()) }, ic('play'));
+  const runBtn = h('button', { class: 'iconbtn', 'aria-label': 'Run & preview', title: 'Run & Preview', onclick: () => (haptic(6), showRun()) }, ic('play'));
   const composer = h('div', { id: 'composer' },
     h('div', { class: 'inner' },
       dock,
@@ -73,7 +73,7 @@ export function showSession(s) {
     ),
     fileIn, camIn,
   );
-  ui.set(s.title || repoName(s), { sub: sessionSub(s), menu: true, onTitle: () => sessionMenu(), titleLabel: 'Menu sesi', dot: 'on', actions: [runBtn, gitBtn] });
+  ui.set(s.title || repoName(s), { sub: sessionSub(s), menu: true, onTitle: () => sessionMenu(), titleLabel: 'Session menu', dot: 'on', actions: [runBtn, gitBtn] });
   const view = h('div', { class: 'session chat' }, term, working, toBottom, composer);
   ui.view(view);
 
@@ -82,7 +82,7 @@ export function showSession(s) {
   app.current.procs = new Map();
   app.current.preview = null;
 
-  // Composer melayang di atas percakapan: tinggi aslinya menjadi ruang kosong di bawah pesan.
+  // The composer floats over the conversation: its real height becomes empty space below the messages.
   const ro = new ResizeObserver(() => {
     if (!view.isConnected) return ro.disconnect();
     view.style.setProperty('--ch', composer.offsetHeight + 'px');
@@ -90,7 +90,7 @@ export function showSession(s) {
   });
   ro.observe(composer);
 
-  // --- run & preview: titik hidup + jumlah proses berjalan di header ---
+  // --- run & preview: live dot + running process count in the header ---
   let lastRun = '';
   app.current.syncRun = () => {
     const n = [...app.current.procs.values()].filter((p) => p.status === 'running').length;
@@ -105,22 +105,22 @@ export function showSession(s) {
     app.current.runSheet?.();
   };
 
-  // --- mode: rencana (di PC), shell (lokal), auto-izin (di PC) — ditampilkan sebagai pil aktif ---
+  // --- modes: plan (on the PC), shell (local), auto-allow (on the PC) — shown as active pills ---
   let shellMode = false;
   const renderModes = () => {
     const ss = app.current.session;
     const pill = (cls, icon, label, off) => h('button', { class: 'mode ' + cls, onclick: () => (haptic(8), Promise.resolve(off()).catch((e) => toast(e.message, true))) }, ic(icon), label, ic('x', 'mx'));
     const list = [
-      ss.plan ? pill('plan', 'list', 'Rencana', () => setPlanRemote(false)) : null,
+      ss.plan ? pill('plan', 'list', 'Plan', () => setPlanRemote(false)) : null,
       shellMode ? pill('shell', 'term', 'Shell', () => setMode(false)) : null,
-      ss.auto ? pill('auto', 'bolt', 'Auto-izin', () => setAutoRemote(false)) : null,
-      !ss.auto && ss.autoLow ? pill('auto low', 'flask', 'Rutin otomatis', () => app.conn.call('autonomy', { id: s.id, level: 'balanced' }).then((r) => (Object.assign(app.current.session, r), renderModes()))) : null,
+      ss.auto ? pill('auto', 'bolt', 'Auto-allow', () => setAutoRemote(false)) : null,
+      !ss.auto && ss.autoLow ? pill('auto low', 'flask', 'Routine auto', () => app.conn.call('autonomy', { id: s.id, level: 'balanced' }).then((r) => (Object.assign(app.current.session, r), renderModes()))) : null,
     ].filter(Boolean);
     const was = !modes.hidden;
     modes.hidden = !list.length;
     modes.replaceChildren(...list);
     if (!was && list.length) anim(modes, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 240);
-    input.placeholder = ss.plan ? 'Rencanakan apa?' : shellMode ? (ss.computer ? 'Perintah shell di PC…' : 'Perintah shell di worktree…') : (ss.computer ? 'Perintahkan apa saja di komputermu…' : 'Minta sesuatu ke agen…');
+    input.placeholder = ss.plan ? 'What should we plan?' : shellMode ? (ss.computer ? 'Shell command on the PC…' : 'Shell command in the worktree…') : (ss.computer ? 'Ask anything on your computer…' : 'Ask the agent…');
     plusBtn.classList.toggle('on', list.length > 0);
   };
   app.current.setPlan = (on) => {
@@ -130,9 +130,9 @@ export function showSession(s) {
   const setPlanRemote = async (on) => {
     try {
       app.current.setPlan((await app.conn.call('plan', { id: s.id, on })).plan);
-      toast(app.current.session.plan ? 'Mode rencana: agen menyusun rencana dulu, tanpa mengubah file' : 'Mode rencana mati');
+      toast(app.current.session.plan ? 'Plan mode: the agent drafts a plan first, without changing files' : 'Plan mode off');
     } catch (e) {
-      throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk mode rencana.') : e;
+      throw isOldDaemon(e) ? new Error('Update snugcode on the PC for plan mode.') : e;
     }
     return app.current.session.plan;
   };
@@ -140,23 +140,23 @@ export function showSession(s) {
     app.current.session.auto = on;
     renderModes();
   };
-  // Preset otonomi (daemon baru): satu pilihan bertingkat, bukan sakelar auto-izin + tinjau edit terpisah.
+  // Autonomy presets (new daemons): one tiered choice instead of separate auto-allow + review-edits switches.
   const autonomySheet = () => {
     const cur = app.current.session.autonomy || 'balanced';
     const pick = async (level) => {
       if (level === cur) return ui.closeSheet();
-      if (level === 'auto' && !(await ui.confirm({ title: 'Otonomi penuh?', text: 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (di sandbox OS bila tersedia). git push dan pembuatan PR tetap selalu meminta izin. Semua perubahan file tetap bisa di-rewind.', ok: 'Nyalakan', danger: true, icon: 'bolt' }))) return;
+      if (level === 'auto' && !(await ui.confirm({ title: 'Full autonomy?', text: 'The agent may run any shell command without asking (in an OS sandbox when available). git push and creating PRs always ask for permission. All file changes can still be rewound.', ok: 'Turn on', danger: true, icon: 'bolt' }))) return;
       try {
         Object.assign(app.current.session, await app.conn.call('autonomy', { id: s.id, level }));
         renderModes();
         ui.closeSheet();
-        toast('Otonomi: ' + AUTONOMY_UI[level][0]);
+        toast('Autonomy: ' + AUTONOMY_UI[level][0]);
       } catch (e) {
         toast(e.message, true);
       }
     };
     ui.sheet(
-      ui.head('Otonomi agen', { sub: 'Seberapa banyak agen boleh bekerja tanpa bertanya' }),
+      ui.head('Agent autonomy', { sub: 'How much the agent may do without asking' }),
       h('div', { class: 'group autonomy' },
         ...Object.entries(AUTONOMY_UI).map(([level, [t1, t2, icon]]) =>
           h('button', { class: 'menuitem' + (level === cur ? ' on' : ''), 'aria-pressed': String(level === cur), onclick: () => (haptic(8), pick(level)) },
@@ -166,13 +166,13 @@ export function showSession(s) {
           ),
         ),
       ),
-      h('p', { class: 'muted small', style: 'margin:12px 4px 0' }, 'Push ke GitHub, pembuatan PR, dan file kredensial selalu ditanyakan di semua tingkat.'),
+      h('p', { class: 'muted small', style: 'margin:12px 4px 0' }, 'Pushing to GitHub, creating PRs, and credential files always ask, at every level.'),
     );
   };
   const setAutoRemote = async (on) => {
-    if (on && !(await ui.confirm({ title: 'Nyalakan auto-izin?', text: 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya. git push dan pembuatan PR tetap selalu meminta izin.', ok: 'Nyalakan', danger: true, icon: 'bolt' }))) return false;
+    if (on && !(await ui.confirm({ title: 'Turn on auto-allow?', text: 'The agent may run any shell command without asking. git push and creating PRs always ask for permission.', ok: 'Turn on', danger: true, icon: 'bolt' }))) return false;
     setAuto((await app.conn.call('auto', { id: s.id, on })).auto);
-    if (on) toast('Auto-izin aktif');
+    if (on) toast('Auto-allow on');
     return app.current.session.auto;
   };
   const setMode = (sh) => {
@@ -182,19 +182,19 @@ export function showSession(s) {
     renderModes();
   };
 
-  // --- lampiran gambar (kamera, galeri, atau tempel dari clipboard) ---
+  // --- image attachments (camera, gallery, or paste from clipboard) ---
   let images = [];
   const renderThumbs = () => {
     thumbs.hidden = !images.length;
-    thumbs.replaceChildren(...images.map((im, i) => h('button', { class: 'thumb', style: `--i:${i}`, 'aria-label': 'Hapus gambar', onclick: () => ((images = images.filter((_, j) => j !== i)), renderThumbs(), syncSend()) }, h('img', { src: `data:${im.mime};base64,${im.data}`, alt: '' }), ic('x'))));
+    thumbs.replaceChildren(...images.map((im, i) => h('button', { class: 'thumb', style: `--i:${i}`, 'aria-label': 'Remove image', onclick: () => ((images = images.filter((_, j) => j !== i)), renderThumbs(), syncSend()) }, h('img', { src: `data:${im.mime};base64,${im.data}`, alt: '' }), ic('x'))));
   };
   const addImages = async (files) => {
     for (const f of [...files].filter((f) => f.type.startsWith('image/'))) {
-      if (images.length >= 4) return toast('Maksimal 4 gambar', true);
+      if (images.length >= 4) return toast('Up to 4 images', true);
       try {
         images.push(await compressImage(f));
       } catch {
-        toast('Gambar tidak bisa dibaca', true);
+        toast('Couldn’t read the image', true);
       }
     }
     renderThumbs();
@@ -212,7 +212,7 @@ export function showSession(s) {
   };
   toBottom.onclick = () => r.scroll(true);
 
-  // --- tombol +: lampiran, mode, aksi cepat dalam satu sheet ---
+  // --- + button: attachments, modes, quick actions in one sheet ---
   const tile = (icon, label, onclick) => h('button', { class: 'tile', onclick: () => (haptic(6), onclick()) }, h('span', { class: 'ti' }, ic(icon)), label);
   plusBtn.onclick = () => {
     haptic(6);
@@ -221,38 +221,38 @@ export function showSession(s) {
       const qkList = isComp ? QUICK_COMPUTER : QUICK;
       const qkShList = isComp ? QUICK_COMPUTER_SH : QUICK_SH;
       return ui.sheet(
-        ui.head('Lampiran & alat'),
+        ui.head('Attachments & tools'),
         h('div', { class: 'tiles' },
-          tile('camera', 'Kamera', () => (ui.closeSheet(), camIn.click())),
-          tile('image', 'Galeri', () => (ui.closeSheet(), fileIn.click())),
+          tile('camera', 'Camera', () => (ui.closeSheet(), camIn.click())),
+          tile('image', 'Gallery', () => (ui.closeSheet(), fileIn.click())),
           tile('play', 'Run', () => showRun()),
           tile('branch', 'Git', () => showGit()),
-          has('files') ? tile('folder', 'File', () => ((app.current.filesDir = ''), showFiles())) : null,
+          has('files') ? tile('folder', 'Files', () => ((app.current.filesDir = ''), showFiles())) : null,
           has('termOpen') ? tile('term', 'Terminal', () => showTerminal()) : null,
         ),
         h('div', { class: 'label' }, 'Mode'),
         h('div', { class: 'group' },
-          toggleItem({ icon: 'list', t1: 'Mode rencana', t2: 'agen membaca & menyusun rencana dulu', on: !!ss.plan, onchange: setPlanRemote }),
-          toggleItem({ icon: 'term', t1: 'Mode shell', t2: 'pesan dikirim sebagai perintah ($)', on: shellMode, onchange: (v) => (setMode(v), v) }),
+          toggleItem({ icon: 'list', t1: 'Plan mode', t2: 'the agent reads & drafts a plan first', on: !!ss.plan, onchange: setPlanRemote }),
+          toggleItem({ icon: 'term', t1: 'Shell mode', t2: 'messages are sent as commands ($)', on: shellMode, onchange: (v) => (setMode(v), v) }),
           has('autonomy')
-            ? menuItem({ icon: 'bolt', t1: 'Otonomi agen', t2: AUTONOMY_UI[ss.autonomy || 'balanced'][0] + ' · ' + AUTONOMY_UI[ss.autonomy || 'balanced'][1], onclick: autonomySheet })
-            : toggleItem({ icon: 'bolt', t1: 'Auto-izin', t2: 'tanpa bertanya, kecuali push & PR', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
-          // Bawaan: edit di worktree langsung diterapkan (bisa di-rewind); nyalakan untuk menyetujui tiap diff.
+            ? menuItem({ icon: 'bolt', t1: 'Agent autonomy', t2: AUTONOMY_UI[ss.autonomy || 'balanced'][0] + ' · ' + AUTONOMY_UI[ss.autonomy || 'balanced'][1], onclick: autonomySheet })
+            : toggleItem({ icon: 'bolt', t1: 'Auto-allow', t2: 'no asking, except push & PRs', on: !!ss.auto, danger: true, onchange: setAutoRemote }),
+          // Default: worktree edits apply directly (rewindable); turn on to approve each diff.
           'askEdits' in ss && !has('autonomy')
             ? toggleItem({
-                icon: 'diff', t1: 'Tinjau setiap edit', t2: 'Write/Edit menunggu persetujuanmu', on: !!ss.askEdits,
+                icon: 'diff', t1: 'Review every edit', t2: 'Write/Edit wait for your approval', on: !!ss.askEdits,
                 onchange: async (on) => {
                   try {
                     Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on }));
                   } catch (e) {
-                    throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk fitur ini') : e;
+                    throw isOldDaemon(e) ? new Error('Update snugcode on the PC for this feature') : e;
                   }
                   return app.current.session.askEdits;
                 },
               })
             : null,
         ),
-        h('div', { class: 'label' }, 'Aksi cepat'),
+        h('div', { class: 'label' }, 'Quick actions'),
         savedPrompts(ss, input.value.trim(), (t) => (ui.closeSheet(), quick(t))),
         h('div', { class: 'group' }, ...qkList.map((qk) => menuItem({ icon: qk.icon, t1: qk.t1, t2: qk.t2, onclick: () => (ui.closeSheet(), quick(qk.text)) }))),
         h('div', { class: 'label' }, 'Shell'),
@@ -267,16 +267,16 @@ export function showSession(s) {
   };
   setModelChip();
   const changeModel = () => {
-    if (app.current.running) return toast('Tunggu agen selesai (atau Stop) sebelum ganti model.', true);
+    if (app.current.running) return toast('Wait for the agent to finish (or Stop) before changing models.', true);
     pickModel({
-      title: 'Model sesi ini',
+      title: 'Model for this session',
       current: app.current.session.model,
       onPick: async (id) => {
         let sum;
         try {
           sum = await app.conn.call('setSessionModel', { id: s.id, model: id });
         } catch (e) {
-          throw isOldDaemon(e) ? new Error('Perbarui snugcode di PC untuk ganti model di tengah sesi.') : e;
+          throw isOldDaemon(e) ? new Error('Update snugcode on the PC to change models mid-session.') : e;
         }
         app.current.session.model = sum.model;
         setModelChip();
@@ -289,7 +289,7 @@ export function showSession(s) {
   app.current.changeModel = changeModel;
   modelChip.onclick = () => (haptic(6), changeModel());
 
-  // --- git: badge jumlah perubahan di header ---
+  // --- git: change-count badge in the header ---
   let gitT;
   let gitLast = '';
   app.current.refreshGit = () => {
@@ -314,7 +314,7 @@ export function showSession(s) {
   setAuto(!!s.auto);
   setMode(false);
 
-  // --- status berjalan + indikator kerja ---
+  // --- running status + work indicator ---
   const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   const setRunning = (on) => {
     const was = app.current.running;
@@ -323,7 +323,7 @@ export function showSession(s) {
       send.replaceChildren(ic(on ? 'stop' : 'send'));
       anim(send.firstChild, [{ transform: 'scale(.4) rotate(-90deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
     }
-    send.setAttribute('aria-label', on ? 'Hentikan' : 'Kirim');
+    send.setAttribute('aria-label', on ? 'Stop' : 'Send');
     syncSend();
     ui.dot(on ? 'busy' : 'on');
     clearInterval(app.current.workTimer);
@@ -334,7 +334,7 @@ export function showSession(s) {
       const tick = () => {
         const sec = Math.round((Date.now() - t0) / 1000);
         wt.textContent = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
-        const txt = r.permQueue.length ? 'Menunggu izinmu' : cap(r.activity || 'berpikir…');
+        const txt = r.permQueue.length ? 'Waiting for your permission' : cap(r.activity || 'thinking…');
         if (wl.textContent !== txt) wl.textContent = txt;
         working.classList.toggle('wait', r.permQueue.length > 0);
       };
@@ -353,7 +353,7 @@ export function showSession(s) {
   app.current.onEvents = (msg) => {
     if (msg.sid !== s.id) return;
     for (const e of msg.es) {
-      // Event yang sudah diterima (mis. lewat attach setelah reconnect) tidak digambar dua kali.
+      // Events already received (e.g. via attach after a reconnect) aren't drawn twice.
       if (!app.current.cursor.accept(e)) continue;
       if (e.k === 'status') setRunning(e.s === 'running');
       else if (e.k === 'proc') onProc(e);
@@ -361,7 +361,7 @@ export function showSession(s) {
       else if (e.k === 'preview') (app.current.preview = e.url ? e : null), app.current.syncRun();
       else if (e.k === 'mode') app.current.setPlan(e.plan);
       else r.add(e);
-      if (e.k === 'done') (haptic(e.ok ? 15 : 50), e.ok || toast('Agen berhenti: ' + (e.err || 'error'), true));
+      if (e.k === 'done') (haptic(e.ok ? 15 : 50), e.ok || toast('The agent stopped: ' + (e.err || 'error'), true));
     }
   };
 
@@ -408,7 +408,7 @@ export function showSession(s) {
     input.value = t;
     submit();
   };
-  // Isi composer dari layar lain (mis. "Tanya agen" di file explorer) tanpa langsung mengirim.
+  // Fill the composer from another screen (e.g. "Ask agent" in the file explorer) without sending.
   app.current.compose = (t) => {
     input.value = t + input.value;
     autosize();
@@ -418,10 +418,10 @@ export function showSession(s) {
   };
   r.suggest = QUICK;
   r.onQuick = quick;
-  if (s.computer) r.nextSteps = [['Lanjutkan', 'Lanjutkan.'], ['Ringkas hasilnya', 'Ringkas apa yang barusan dilakukan dan hasilnya.']];
+  if (s.computer) r.nextSteps = [['Continue', 'Continue.'], ['Summarize', 'Summarize what you just did and the result.']];
   send.onclick = submit;
   input.onkeydown = (e) => {
-    // HP: Enter = baris baru (kirim pakai tombol). Keyboard fisik: Enter kirim, Shift+Enter baris baru.
+    // Phone: Enter = new line (send with the button). Physical keyboard: Enter sends, Shift+Enter new line.
     if (e.key === 'Enter' && !e.isComposing && ((!coarse && !e.shiftKey) || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       submit();
@@ -437,7 +437,7 @@ export async function reattach(fresh) {
   try {
     const cursor = app.current.cursor;
     const res = await app.conn.call('attach', { id: s.id, since: fresh ? 0 : cursor.lastSeq });
-    if (fresh && res.truncated) r.line('meta', '… riwayat lama tidak ditampilkan');
+    if (fresh && res.truncated) r.line('meta', '… older history not shown');
     r.batch(() => {
       for (const e of res.events) if (cursor.accept(e)) r.add(e, true);
     });
@@ -455,8 +455,8 @@ export async function reattach(fresh) {
   }
 }
 
-// Kecilkan gambar (sisi terpanjang 1568px, JPEG) agar hemat token dan 4 gambar tetap muat satu
-// frame relay (1 MiB; payload terenkripsi membesar ±4/3 karena base64).
+// Shrink images (longest side 1568px, JPEG) to save tokens and keep 4 images within one relay
+// frame (1 MiB; the encrypted payload grows ~4/3 from base64).
 export async function compressImage(file) {
   const bmp = await createImageBitmap(file);
   const k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
@@ -469,38 +469,38 @@ export async function compressImage(file) {
     const data = cv.toDataURL('image/jpeg', q).split(',')[1];
     if (data.length < 170_000) return { mime: 'image/jpeg', data };
   }
-  throw new Error('terlalu besar');
+  throw new Error('too large');
 }
 
-// Menu sesi (ketuk judul): rincian, git/run/model, .env, hapus.
+// Session menu (tap the title): details, git/run/model, .env, delete.
 export function sessionMenu() {
   const s = app.current.session;
   const isComp = !!s.computer;
   ui.sheet(
-    ui.head(s.title || (isComp ? 'Sesi Komputer' : repoName(s)), { sub: sessionSub(s) }),
+    ui.head(s.title || (isComp ? 'Computer session' : repoName(s)), { sub: sessionSub(s) }),
     h('div', { class: 'tags', style: 'margin:0 0 14px' },
-      isComp ? h('span', { class: 'tag' }, ic('monitor'), 'komputer') : null,
+      isComp ? h('span', { class: 'tag' }, ic('monitor'), 'computer') : null,
       isComp && s.cwd ? h('span', { class: 'tag' }, tildify(s.cwd)) : null,
       !isComp ? h('span', { class: 'tag' }, ic('branch'), s.branch) : null,
       !isComp ? h('span', { class: 'tag' }, 'base ' + s.base) : null,
       h('span', { class: 'tag' }, ic('cpu'), M.modelLabel(s.model)),
       s.local ? h('span', { class: 'tag' }, ic('term'), 'terminal') : null,
     ),
-    // Jaring pengaman yang terlihat: pengguna tahu kerja agen terisolasi dan bisa dikembalikan.
-    !isComp && !s.local ? h('p', { class: 'muted small safety' }, ic('shield'), `Agen bekerja di branch ${s.branch} terpisah; branch ${s.base} tidak berubah sampai kamu merge. Setiap prompt bisa di-rewind.`) : null,
+    // A visible safety net: the user knows the agent's work is isolated and can be undone.
+    !isComp && !s.local ? h('p', { class: 'muted small safety' }, ic('shield'), `The agent works on a separate ${s.branch} branch; ${s.base} doesn’t change until you merge. Every prompt can be rewound.`) : null,
     h('div', { class: 'group' },
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
-      menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, log, preview di HP', onclick: () => showRun() }),
-      has('files') ? menuItem({ icon: 'folder', t1: 'File', t2: 'jelajah, lihat & edit file', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
-      has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'shell interaktif di ' + (isComp ? 'PC' : 'worktree'), onclick: () => showTerminal() }) : null,
-      menuItem({ icon: 'cpu', t1: 'Ganti model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
-      has('budget') ? menuItem({ icon: 'clock', t1: 'Biaya & batas', t2: `${usd(s.spent)} sesi ini · ${s.budget ? 'batas ' + usd(s.budget) : 'tanpa batas'}`, onclick: () => budgetSheet(s) }) : null,
+      menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, logs, preview on your phone', onclick: () => showRun() }),
+      has('files') ? menuItem({ icon: 'folder', t1: 'Files', t2: 'browse, view & edit files', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
+      has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'interactive shell in the ' + (isComp ? 'PC' : 'worktree'), onclick: () => showTerminal() }) : null,
+      menuItem({ icon: 'cpu', t1: 'Change model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
+      has('budget') ? menuItem({ icon: 'clock', t1: 'Cost & limit', t2: `${usd(s.spent)} this session · ${s.budget ? 'limit ' + usd(s.budget) : 'no limit'}`, onclick: () => budgetSheet(s) }) : null,
       (s.local || isComp) ? null : menuItem({
-        icon: 'save', t1: 'Simpan .env sebagai template', t2: 'dipulihkan otomatis di sesi baru repo ini',
+        icon: 'save', t1: 'Save .env as a template', t2: 'restored automatically in new sessions for this repo',
         onclick: async () => {
           try {
             const f = await app.conn.call('envSave', { id: s.id });
-            toast(f.length ? 'Disimpan: ' + f.join(', ') : 'Tidak ada file .env di worktree', !f.length);
+            toast(f.length ? 'Saved: ' + f.join(', ') : 'No .env files in the worktree', !f.length);
           } catch (e) {
             toast(e.message, true);
           }
@@ -508,57 +508,57 @@ export function sessionMenu() {
       }),
     ),
     h('div', { class: 'group' },
-      menuItem({ icon: 'home', t1: 'Kembali ke beranda', chev: false, onclick: () => (ui.closeSheet(), (ui.dir = -1), showSessions()) }),
-      menuItem({ icon: 'trash', t1: 'Hapus sesi', t2: isComp ? 'riwayat sesi di PC dihapus' : 'worktree di PC ikut dihapus', danger: true, chev: false, onclick: () => deleteSession(s) }),
+      menuItem({ icon: 'home', t1: 'Back to home', chev: false, onclick: () => (ui.closeSheet(), (ui.dir = -1), showSessions()) }),
+      menuItem({ icon: 'trash', t1: 'Delete session', t2: isComp ? 'removes the session history on the PC' : 'also removes its worktree on the PC', danger: true, chev: false, onclick: () => deleteSession(s) }),
     ),
   );
 }
 
 const usd = (v) => '$' + (+v || 0).toFixed(+v && v < 1 ? 3 : 2);
 
-// Batas biaya sesi: rem yang membuat pengguna berani memberi tugas besar. Dicek setiap giliran selesai
-// (biaya dari Agent SDK; engine Codex/Gemini tidak melaporkan biaya).
+// Session cost limit: a brake that makes users comfortable handing over big tasks. Checked after every turn
+// (cost from the Agent SDK; the Codex/Gemini engines don't report cost).
 function budgetSheet(s) {
-  const field = h('input', { class: 'field', type: 'number', inputmode: 'decimal', min: '0', step: '0.5', placeholder: 'mis. 5', value: s.budget ? String(s.budget) : '' });
+  const field = h('input', { class: 'field', type: 'number', inputmode: 'decimal', min: '0', step: '0.5', placeholder: 'e.g. 5', value: s.budget ? String(s.budget) : '' });
   const save = async (v) => {
     try {
       Object.assign(app.current.session, await app.conn.call('budget', { id: s.id, usd: +v || 0 }));
       ui.closeSheet();
-      toast(+v ? `Batas biaya sesi: ${usd(+v)}` : 'Batas biaya dimatikan');
+      toast(+v ? `Session cost limit: ${usd(+v)}` : 'Cost limit off');
     } catch (e) {
       toast(e.message, true);
     }
   };
   ui.sheet(
-    ui.head('Biaya & batas', { sub: `${usd(s.spent)} terpakai di sesi ini (perkiraan)` }),
-    h('p', { class: 'muted small', style: 'margin:0 4px 12px' }, 'Saat total biaya mencapai batas, prompt berikutnya ditahan dan kamu diberi tahu (juga peringatan di 80%). Biaya hanya tersedia untuk model yang berjalan di Claude Agent SDK.'),
+    ui.head('Cost & limit', { sub: `${usd(s.spent)} spent in this session (estimate)` }),
+    h('p', { class: 'muted small', style: 'margin:0 4px 12px' }, 'When the total cost hits the limit, the next prompt is held and you’re notified (with a warning at 80% too). Cost is only available for models running on the Claude Agent SDK.'),
     h('div', { class: 'chips', style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px' }, ...[1, 5, 20].map((v) => h('button', { class: 'btn', onclick: () => save(v) }, usd(v)))),
     field,
     h('div', { class: 'btnrow', style: 'margin-top:12px' },
-      h('button', { class: 'btn ghost', onclick: () => save(0) }, 'Tanpa batas'),
-      h('button', { class: 'btn primary', onclick: () => save(field.value) }, 'Simpan'),
+      h('button', { class: 'btn ghost', onclick: () => save(0) }, 'No limit'),
+      h('button', { class: 'btn primary', onclick: () => save(field.value) }, 'Save'),
     ),
   );
 }
 
-// Prompt tersimpan per repo (HP ini): permintaan yang sering diulang cukup satu ketukan. Teks di kotak pesan
-// bisa disimpan dari sini; tekan lama untuk menghapus.
+// Saved prompts per repo (this phone): frequent requests are one tap away. Text in the message box
+// can be saved from here; long-press to delete.
 function savedPrompts(ss, draft, run) {
   const key = 'prompts.' + (ss.computer ? 'computer' : ss.repo);
   const list = /** @type {string[]} */ (store.get(key) || []);
   const save = () => {
     store.set(key, [draft, ...list.filter((x) => x !== draft)].slice(0, 12));
-    toast('Disimpan sebagai prompt cepat');
+    toast('Saved as a quick prompt');
     ui.closeSheet();
   };
   const items = list.map((t) => {
-    const el = menuItem({ icon: 'spark', t1: t.length > 60 ? t.slice(0, 60) + '…' : t, t2: 'tersimpan · tekan lama untuk hapus', onclick: () => run(t) });
+    const el = menuItem({ icon: 'spark', t1: t.length > 60 ? t.slice(0, 60) + '…' : t, t2: 'saved · long-press to delete', onclick: () => run(t) });
     onLongPress(el, async () => {
-      if (!(await ui.confirm({ title: 'Hapus prompt tersimpan?', text: t.slice(0, 200), ok: 'Hapus', danger: true, icon: 'trash' }))) return;
+      if (!(await ui.confirm({ title: 'Delete saved prompt?', text: t.slice(0, 200), ok: 'Delete', danger: true, icon: 'trash' }))) return;
       store.set(key, (store.get(key) || []).filter((x) => x !== t));
     });
     return el;
   });
-  if (draft && !list.includes(draft)) items.push(menuItem({ icon: 'save', t1: 'Simpan teks ini sebagai prompt cepat', t2: draft.slice(0, 60), chev: false, onclick: save }));
+  if (draft && !list.includes(draft)) items.push(menuItem({ icon: 'save', t1: 'Save this text as a quick prompt', t2: draft.slice(0, 60), chev: false, onclick: save }));
   return items.length ? h('div', { class: 'group' }, ...items) : null;
 }

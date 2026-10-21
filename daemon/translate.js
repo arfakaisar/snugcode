@@ -1,19 +1,19 @@
-// Penerjemah format untuk loopback proxy: Claude Agent SDK hanya bicara Anthropic Messages API,
-// sedangkan sebagian endpoint (Gemini API, Groq, xAI, router tanpa /v1/messages) hanya punya
-// OpenAI Chat Completions. Request diterjemahkan Anthropic -> OpenAI dan stream jawabannya
-// OpenAI -> Anthropic SSE, per baris utuh (lihat proxy.js).
+// Format translator for the loopback proxy: the Claude Agent SDK only speaks the Anthropic Messages API,
+// while some endpoints (Gemini API, Groq, xAI, routers without /v1/messages) only have
+// OpenAI Chat Completions. Requests are translated Anthropic -> OpenAI and the streamed reply
+// OpenAI -> Anthropic SSE, one whole line at a time (see proxy.js).
 //
-// Endpoint yang punya format Anthropic sendiri TIDAK lewat sini (diteruskan apa adanya): penerjemahan
-// selalu kehilangan sesuatu (cache prompt eksplisit, blok thinking bertanda tangan).
+// Endpoints with their own Anthropic format do NOT go through here (forwarded as-is): translation
+// always loses something (explicit prompt caching, signed thinking blocks).
 import { randomBytes } from 'node:crypto';
 
 const EFFORT_SUFFIX = /-(minimal|low|medium|high)$/;
-// Batas output yang aman untuk hampir semua model OpenAI-compatible (Claude Code meminta 32k–64k).
+// An output limit that's safe for almost every OpenAI-compatible model (Claude Code asks for 32k–64k).
 const MAX_OUT = 32_000;
 
-// Gemini 3 mewajibkan "thought signature" dari function call dikirim balik di riwayat. Format
-// Anthropic tidak punya tempat untuknya, jadi disimpan di memori per ID tool call. Bila hilang
-// (daemon restart, sesi lama), Gemini menerima nilai pengganti resmi ini.
+// Gemini 3 requires the "thought signature" of function calls to be sent back in the history. The Anthropic
+// format has no place for it, so it's kept in memory per tool call ID. If it's lost
+// (daemon restart, old session), Gemini receives this official placeholder value.
 const signatures = new Map();
 const MAX_SIGS = 5000;
 export const GEMINI_SKIP_SIGNATURE = 'skip_thought_signature_validator';
@@ -26,7 +26,7 @@ function rememberSig(id, sig) {
 const textOf = (content) => (typeof content === 'string' ? content : Array.isArray(content) ? content.filter((b) => b?.type === 'text').map((b) => b.text).join('\n') : '');
 const imagePart = (b) => (b?.source?.type === 'base64' ? { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } } : b?.source?.type === 'url' ? { type: 'image_url', image_url: { url: b.source.url } } : null);
 
-// Gemini hanya menerima subset JSON Schema (OpenAPI 3); kata kunci lain membuat request ditolak.
+// Gemini only accepts a subset of JSON Schema (OpenAPI 3); other keywords get the request rejected.
 const GEMINI_SCHEMA_KEYS = new Set(['type', 'description', 'properties', 'required', 'items', 'enum', 'format', 'nullable', 'anyOf', 'minimum', 'maximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'pattern', 'title', 'default']);
 export function geminiSchema(s) {
   if (Array.isArray(s)) return s.map(geminiSchema);
@@ -49,7 +49,7 @@ export function geminiSchema(s) {
 /**
  * Body /v1/messages -> body /chat/completions.
  * @param {any} a body Anthropic
- * @param {{ kind?: string }} [opts] kind koneksi (gemini: skema tool & thought signature)
+ * @param {{ kind?: string }} [opts] connection kind (gemini: tool schemas & thought signatures)
  */
 export function anthropicToOpenAI(a, { kind } = {}) {
   const gemini = kind === 'gemini';
@@ -77,7 +77,7 @@ export function anthropicToOpenAI(a, { kind } = {}) {
       messages.push({ role: 'assistant', content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
       continue;
     }
-    // Pesan user: hasil tool harus langsung setelah tool_calls asisten, baru teks/gambar user.
+    // User message: tool results must come right after the assistant's tool_calls, then the user's text/images.
     const extraImages = [];
     for (const b of blocks.filter((x) => x.type === 'tool_result')) {
       const parts = Array.isArray(b.content) ? b.content : [{ type: 'text', text: typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '') }];
@@ -121,7 +121,7 @@ function usageOf(u) {
 
 const sigOf = (tc) => tc?.extra_content?.google?.thought_signature || tc?.thought_signature || null;
 
-/** Jawaban /chat/completions non-stream -> pesan Anthropic. */
+/** Non-stream /chat/completions reply -> Anthropic message. */
 export function openAIToAnthropic(j, model) {
   const ch = j.choices?.[0] || {};
   const msg = ch.message || {};
@@ -141,8 +141,8 @@ export function openAIToAnthropic(j, model) {
 }
 
 /**
- * Penerjemah stream SSE OpenAI -> SSE Anthropic. push(teks) mengembalikan teks SSE Anthropic.
- * Teks masuk harus sudah per baris utuh (proxy memecahnya per baris).
+ * Stream translator OpenAI SSE -> Anthropic SSE. push(text) returns Anthropic SSE text.
+ * Incoming text must already be whole lines (the proxy splits it per line).
  */
 export function createStreamTranslator(model) {
   let started = false;
@@ -208,7 +208,7 @@ export function createStreamTranslator(model) {
         t = { block: index, id };
         tools.set(ti, t);
       } else if (typeof open !== 'object' || open?.tool !== ti) {
-        // Argumen untuk tool yang bloknya sudah ditutup (jarang): abaikan agar urutan blok tetap sah.
+        // Arguments for a tool whose block is already closed (rare): ignore so the block order stays valid.
         continue;
       }
       rememberSig(t.id, sigOf(tc));
@@ -245,11 +245,11 @@ export function createStreamTranslator(model) {
   };
 }
 
-// Status HTTP -> tipe error Anthropic (Claude Code mencoba ulang 429/5xx/529).
+// HTTP status -> Anthropic error type (Claude Code retries 429/5xx/529).
 export function anthropicError(status, message) {
   const type = status === 400 ? 'invalid_request_error' : status === 401 ? 'authentication_error' : status === 403 ? 'permission_error' : status === 404 ? 'not_found_error' : status === 429 ? 'rate_limit_error' : status === 529 || status === 503 ? 'overloaded_error' : 'api_error';
   return { type: 'error', error: { type, message } };
 }
 
-// count_tokens tidak ada di OpenAI: perkiraan kasar (±4 karakter per token) cukup untuk Claude Code.
+// count_tokens doesn't exist in OpenAI: a rough estimate (~4 characters per token) is enough for Claude Code.
 export const estimateTokens = (body) => ({ input_tokens: Math.ceil(JSON.stringify(body?.messages || []).length / 4 + JSON.stringify(body?.system || '').length / 4 + JSON.stringify(body?.tools || []).length / 4) });

@@ -1,13 +1,13 @@
-// snugcode — Loopback proxy lokal di antara harness agen (Claude Agent SDK / Codex) dan endpoint model.
-// 1. Key asli tidak pernah masuk ke proses agen (dan Bash/perintah agen yang mewarisi env-nya):
-//    proses itu hanya memegang token lokal acak per koneksi. Proxy menukarnya dengan key asli
-//    dan meneruskan ke endpoint koneksi itu. Request tanpa token lokal yang benar (program lain
-//    di PC) ditolak 401, jadi port ini tidak bisa dipakai untuk menumpang key pengguna.
-// 2. Koneksi tanpa format Anthropic (Gemini API, Groq, …) diterjemahkan ke OpenAI Chat Completions
-//    (lihat translate.js), jadi Claude Agent SDK bisa memakai model apa pun.
-// 3. Khusus router (9router, OmniRoute, …): header SDK bawaan (user-agent claude-cli, x-app: cli)
-//    dinetralkan karena memicu injeksi parameter yang tidak valid di upstream (reasoning_effort),
-//    dan suffix `_ide` pada nama tool ("Bash_ide" -> "Bash") dihapus agar cocok dengan registri SDK.
+// snugcode — local loopback proxy between the agent harness (Claude Agent SDK / Codex) and the model endpoint.
+// 1. The real key never enters the agent process (or the agent's Bash/commands that inherit its env):
+//    that process only holds a random local token per connection. The proxy swaps it for the real key
+//    and forwards to that connection's endpoint. Requests without the right local token (other programs
+//    on the PC) get 401, so this port can't be used to ride on the user's key.
+// 2. Connections without an Anthropic format (Gemini API, Groq, …) are translated to OpenAI Chat Completions
+//    (see translate.js), so the Claude Agent SDK can use any model.
+// 3. Routers only (9router, OmniRoute, …): the SDK's default headers (user-agent claude-cli, x-app: cli)
+//    are neutralized because they trigger invalid parameter injection upstream (reasoning_effort),
+//    and the `_ide` suffix on tool names ("Bash_ide" -> "Bash") is stripped to match the SDK registry.
 import http from 'node:http';
 import https from 'node:https';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -19,12 +19,12 @@ export function stripIdeToolSuffix(text) {
   return text.replace(/"name"\s*:\s*"([a-zA-Z0-9_-]+)_ide"/g, '"name":"$1"');
 }
 
-// Hanya SSE dan JSON yang ditulis ulang; selain itu diteruskan apa adanya.
+// Only SSE and JSON are rewritten; everything else is forwarded as-is.
 const REWRITE_RE = /^(text\/event-stream|application\/(.+\+)?json)\b/i;
 
-// Penulis ulang streaming: teks diproses per baris utuh, sehingga `"name":"Bash_ide"`
-// tidak pernah terbelah di batas chunk TCP. StringDecoder menjaga karakter UTF-8
-// multi-byte yang terpotong di antara dua chunk. `map` mengubah tiap potongan baris utuh.
+// Streaming rewriter: text is processed one whole line at a time, so `"name":"Bash_ide"`
+// is never split at a TCP chunk boundary. StringDecoder keeps multi-byte UTF-8
+// characters cut between two chunks. `map` transforms each whole-line piece.
 export function createLineRewriter(map = stripIdeToolSuffix) {
   const decoder = new StringDecoder('utf8');
   let carry = '';
@@ -57,10 +57,10 @@ function agentFor(protocol) {
 /**
  * @typedef {{
  *   wire: 'anthropic' | 'openai' | 'responses' | 'gemini',
- *   base: () => string,            // anthropic/gemini: root tanpa /v1; openai/responses: base dengan /v1
- *   auth: () => Record<string, string> | null, // header otentikasi asli (dibaca tiap request)
- *   router?: boolean,              // sanitasi header & _ide (9router dan sejenisnya)
- *   kind?: string,                 // jenis koneksi (gemini: skema tool & thought signature)
+ *   base: () => string,            // anthropic/gemini: root without /v1; openai/responses: base with /v1
+ *   auth: () => Record<string, string> | null, // real auth headers (read on every request)
+ *   router?: boolean,              // sanitize headers & _ide (9router and the like)
+ *   kind?: string,                 // connection kind (gemini: tool schemas & thought signatures)
  * }} Route
  */
 
@@ -70,12 +70,12 @@ const json = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
-/** Proxy dengan banyak rute; tiap rute punya token lokal sendiri. @param {{ log?: (m: string) => void }} [o] */
+/** Proxy with many routes; each route has its own local token. @param {{ log?: (m: string) => void }} [o] */
 export function startProxy({ log = () => {} } = {}) {
   /** @type {Map<string, { route: Route, buf: Buffer }>} */
   const routes = new Map();
   const find = (req) => {
-    // Gemini CLI (SDK @google/genai) mengirim token lokal di x-goog-api-key.
+    // Gemini CLI (@google/genai SDK) sends the local token in x-goog-api-key.
     const got = String(req.headers['x-api-key'] || req.headers['x-goog-api-key'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const g = Buffer.from(got);
     for (const [, r] of routes) if (g.length === r.buf.length && timingSafeEqual(g, r.buf)) return r.route;
@@ -85,16 +85,16 @@ export function startProxy({ log = () => {} } = {}) {
   const server = http.createServer((req, res) => {
     req.socket?.setNoDelay?.(true);
     const route = find(req);
-    if (!route) return json(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'snugcode proxy: token lokal tidak valid' } });
+    if (!route) return json(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'snugcode proxy: invalid local token' } });
     if (route.wire === 'openai') return translated(route, req, res);
     passthrough(route, req, res);
   });
 
   // Anthropic -> endpoint format Anthropic, Responses API (Codex) -> endpoint OpenAI, Gemini API (Gemini CLI)
-  // -> Google: apa adanya.
+  // -> Google: as-is.
   function passthrough(route, req, res) {
     const base = route.base().replace(/\/+$/, '');
-    // Codex memanggil <base_url>/responses dengan base_url = proxy + /v1.
+    // Codex calls <base_url>/responses with base_url = proxy + /v1.
     const pathPart = route.wire === 'responses' ? req.url.replace(/^\/v1(?=\/|$)/, '') : req.url;
     const target = new URL(base + pathPart);
     const transport = target.protocol === 'https:' ? https : http;
@@ -116,7 +116,7 @@ export function startProxy({ log = () => {} } = {}) {
       if (rewrite) delete resHeaders['content-length'];
       res.writeHead(upRes.statusCode, resHeaders);
       upRes.on('error', () => res.destroy());
-      // Koneksi upstream putus sebelum selesai -> jangan biarkan agen menunggu selamanya.
+      // Upstream connection dropped before finishing -> don't let the agent wait forever.
       upRes.on('close', () => {
         if (!upRes.complete) res.destroy();
       });
@@ -130,7 +130,7 @@ export function startProxy({ log = () => {} } = {}) {
     });
     up.on('socket', (s) => s.setNoDelay?.(true));
     up.on('error', (err) => (res.headersSent ? res.destroy() : json(res, 502, anthropicError(502, 'Router proxy error: ' + err.message))));
-    // Klien (agen) membatalkan request (mis. tombol Stop) -> hentikan juga request ke endpoint.
+    // The client (agent) cancelled the request (e.g. the Stop button) -> stop the request to the endpoint too.
     res.on('close', () => {
       if (!res.writableFinished) up.destroy();
     });
@@ -146,11 +146,11 @@ export function startProxy({ log = () => {} } = {}) {
       try {
         body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
       } catch {
-        return json(res, 400, anthropicError(400, 'body bukan JSON'));
+        return json(res, 400, anthropicError(400, 'body is not JSON'));
       }
       const p = new URL(req.url, 'http://x').pathname;
       if (p.endsWith('/messages/count_tokens')) return json(res, 200, estimateTokens(body));
-      if (!p.endsWith('/messages')) return json(res, 404, anthropicError(404, 'snugcode proxy: endpoint tidak didukung untuk koneksi ini: ' + p));
+      if (!p.endsWith('/messages')) return json(res, 404, anthropicError(404, 'snugcode proxy: endpoint not supported for this connection: ' + p));
       const o = anthropicToOpenAI(body, { kind: route.kind });
       const target = new URL(route.base().replace(/\/+$/, '') + '/chat/completions');
       const transport = target.protocol === 'https:' ? https : http;
@@ -168,7 +168,7 @@ export function startProxy({ log = () => {} } = {}) {
             try {
               j = JSON.parse(text);
             } catch {}
-            const arr = Array.isArray(j) ? j[0] : j; // Gemini kadang membungkus error dalam array
+            const arr = Array.isArray(j) ? j[0] : j; // Gemini sometimes wraps errors in an array
             if (status >= 400) {
               const msg = arr?.error?.message || arr?.message || text.slice(0, 300) || 'HTTP ' + status;
               log(`! ${route.kind || 'endpoint'} ${status}: ${String(msg).slice(0, 200)}`);
@@ -207,7 +207,7 @@ export function startProxy({ log = () => {} } = {}) {
 
   return {
     server,
-    /** Daftarkan rute; mengembalikan token lokal yang dipegang proses agen. @param {Route} route */
+    /** Register a route; returns the local token held by the agent process. @param {Route} route */
     register(route, token = 'pc-local-' + randomBytes(24).toString('hex')) {
       routes.set(token, { route, buf: Buffer.from(token) });
       return token;
@@ -230,7 +230,7 @@ export function startProxy({ log = () => {} } = {}) {
   };
 }
 
-// Proxy satu router (bentuk lama, dipakai uji & alat lain): format Anthropic, header disanitasi.
+// Single-router proxy (old shape, used by tests & other tools): Anthropic format, sanitized headers.
 export function startRouterProxy(routerUrl, { getKey = () => null } = {}) {
   const p = startProxy();
   const root = routerUrl.replace(/\/+$/, '').replace(/\/v1$/, '');

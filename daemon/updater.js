@@ -1,4 +1,4 @@
-// snugcode — Pemeriksaan, pembaruan jarak jauh, dan restart daemon.
+// snugcode — update checks, remote updates, and daemon restarts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,14 +61,14 @@ export function getInstallInfo(cfg = loadConfig()) {
   };
 }
 
-// Kanal pembaruan instalasi npm: 'stable' (bawaan) = rilis GitHub bertag terbaru, 'main' = commit
-// terbaru di main. Selama repo belum punya rilis, 'stable' memakai main agar instalasi tetap mendapat
-// pembaruan. PACKAGE_SPEC yang sudah dipatok (mengandung '#') dipasang apa adanya.
+// Update channel for npm installs: 'stable' (default) = latest tagged GitHub release, 'main' = latest
+// commit on main. While the repo has no releases, 'stable' uses main so installs still get
+// updates. An already pinned PACKAGE_SPEC (containing '#') is installed as-is.
 export const updateChannel = (cfg = {}) => ((process.env.SNUGCODE_UPDATE_CHANNEL || cfg.updateChannel) === 'main' ? 'main' : 'stable');
 const pinnedSpec = () => PACKAGE_SPEC.includes('#');
 const specAt = (ref) => (pinnedSpec() ? PACKAGE_SPEC : `${PACKAGE_SPEC}#${ref}`);
 
-/** a > b untuk versi semver sederhana ("v1.2.3", pra-rilis diabaikan). */
+/** a > b for simple semver versions ("v1.2.3", pre-releases ignored). */
 export function semverGt(a, b) {
   const p = (v) => String(v).replace(/^v/, '').split(/[-+]/)[0].split('.').map((x) => parseInt(x, 10) || 0);
   const [x, y] = [p(a), p(b)];
@@ -76,7 +76,7 @@ export function semverGt(a, b) {
   return false;
 }
 
-/** Rilis terbaru di GitHub, atau null bila repo belum punya rilis. */
+/** Latest GitHub release, or null if the repo has no releases yet. */
 async function latestRelease(sec) {
   try {
     const r = await githubApi('/releases/latest', sec);
@@ -153,15 +153,15 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
 
     let currentCommit = cfg.installedCommit;
     if (!currentCommit) {
-      // npm tidak mencatat commit yang terpasang. Bandingkan waktu commit terbaru dengan
-      // waktu pemasangan paket: commit yang lebih baru berarti memang ada pembaruan.
+      // npm doesn't record the installed commit. Compare the latest commit's time with
+      // the package install time: a newer commit means there really is an update.
       const committed = Date.parse(data.commit?.committer?.date || '') || 0;
       let installed = 0;
       try {
         installed = fs.statSync(path.join(ROOT, 'package.json')).mtimeMs;
       } catch {}
       if (committed && installed && committed > installed) {
-        return { updateAvailable: true, currentCommit: 'tidak diketahui', latestCommit: remoteSha, commitsBehind: null, latestMessage, installType: 'npm' };
+        return { updateAvailable: true, currentCommit: 'unknown', latestCommit: remoteSha, commitsBehind: null, latestMessage, installType: 'npm' };
       }
       cfg.installedCommit = currentCommit = remoteSha;
       saveConfig(cfg);
@@ -197,13 +197,13 @@ export async function checkUpdate(cfg = loadConfig(), sec = {}) {
   }
 }
 
-// claude.exe berukuran ratusan MB: beri waktu cukup dan jangan telan error npm.
+// claude.exe is hundreds of MB: allow enough time and don't swallow npm errors.
 async function npmInstall(args, opts = {}) {
   try {
     await execFileAsync(npmCmd, args, { timeout: NPM_TIMEOUT, maxBuffer: 16 * 1024 * 1024, shell: process.platform === 'win32', ...opts });
   } catch (e) {
     const detail = String(e.stderr || e.message || e).trim().split('\n').slice(-8).join('\n');
-    throw new Error(`npm ${args.join(' ')} gagal${e.killed ? ' (timeout)' : ''}:\n${detail}`);
+    throw new Error(`npm ${args.join(' ')} failed${e.killed ? ' (timeout)' : ''}:\n${detail}`);
   }
 }
 
@@ -215,9 +215,9 @@ async function globalPackageRoot() {
   return ROOT;
 }
 
-// npm melewati optionalDependencies yang gagal dipasang tanpa error; pastikan binary ada.
+// npm skips optionalDependencies that fail to install without an error; make sure the binary exists.
 function verifyNativeBinary(root) {
-  if (!nativeBinaryInstalled(root)) throw new Error('Pembaruan terpasang tapi ' + missingBinaryMessage(root));
+  if (!nativeBinaryInstalled(root)) throw new Error('Update installed, but ' + missingBinaryMessage(root));
 }
 
 export async function performUpdate(cfg = loadConfig(), sec = {}) {
@@ -225,7 +225,7 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
   if (info.installType === 'git') {
     const { stdout: st } = await execFileAsync('git', ['status', '--porcelain'], { cwd: ROOT });
     if (st.trim()) {
-      throw new Error('Ada perubahan lokal di direktori git. Commit atau buang perubahan terlebih dahulu.');
+      throw new Error('There are local changes in the git directory. Commit or discard them first.');
     }
     await execFileAsync('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: ROOT, timeout: 60000 });
     await npmInstall(['install', '--omit=dev', '--include=optional'], { cwd: ROOT });
@@ -238,8 +238,8 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
     return { ok: true, commit, installType: 'git' };
   }
 
-  // Pemasangan npm global: rilis bertag (kanal stable) atau commit main yang dipatok. Commit dibaca
-  // sebelum install supaya push yang masuk selama npm berjalan tetap terdeteksi sebagai pembaruan berikutnya.
+  // Global npm install: a tagged release (stable channel) or a pinned main commit. The commit is read
+  // before installing so pushes landing while npm runs are still detected as the next update.
   const rel = updateChannel(cfg) === 'stable' && !pinnedSpec() ? await latestRelease(sec).catch(() => null) : null;
   const commit = rel
     ? null
@@ -247,16 +247,16 @@ export async function performUpdate(cfg = loadConfig(), sec = {}) {
         .then((d) => d.sha?.slice(0, 7))
         .catch(() => null);
   const spec = rel ? specAt(rel.tag) : commit ? specAt(commit) : PACKAGE_SPEC;
-  // Versi yang sedang terpasang, untuk `snugcode update --rollback` bila versi baru bermasalah.
+  // The currently installed version, for `snugcode update --rollback` if the new one misbehaves.
   const previous = cfg.installedSpec || (cfg.installedCommit && cfg.installedCommit !== 'main' ? specAt(cfg.installedCommit) : null);
   await installGlobal(spec);
   if (previous && previous !== spec) cfg.previousSpec = previous;
   cfg.installedSpec = spec;
   if (commit) cfg.installedCommit = commit;
   else if (rel) cfg.installedCommit = rel.tag;
-  else delete cfg.installedCommit; // dideteksi ulang dari waktu pemasangan
+  else delete cfg.installedCommit; // re-detected from the install time
   saveConfig(cfg);
-  return { ok: true, commit: rel?.tag || commit || 'terbaru', installType: 'npm' };
+  return { ok: true, commit: rel?.tag || commit || 'latest', installType: 'npm' };
 }
 
 async function installGlobal(spec) {
@@ -266,11 +266,11 @@ async function installGlobal(spec) {
   syncAutostart(path.join(globalRoot, 'daemon', 'cli.js'));
 }
 
-// Kembali ke versi yang terpasang sebelum pembaruan terakhir (instalasi npm saja).
+// Go back to the version installed before the last update (npm installs only).
 export async function performRollback(cfg = loadConfig()) {
-  if (getInstallInfo(cfg).installType === 'git') throw new Error('Instalasi git: kembalikan versi dengan `git checkout <commit>` di folder snugcode.');
+  if (getInstallInfo(cfg).installType === 'git') throw new Error('Git install: restore a version with `git checkout <commit>` in the snugcode folder.');
   const prev = cfg.previousSpec;
-  if (!prev) throw new Error('Belum ada versi sebelumnya yang tercatat (rollback tersedia setelah satu kali update).');
+  if (!prev) throw new Error('No previous version recorded yet (rollback is available after one update).');
   await installGlobal(prev);
   cfg.previousSpec = cfg.installedSpec || null;
   if (!cfg.previousSpec) delete cfg.previousSpec;
@@ -280,12 +280,12 @@ export async function performRollback(cfg = loadConfig()) {
   return { ok: true, commit: cfg.installedCommit, installType: 'npm' };
 }
 
-// Kode keluar yang berarti "nyalakan lagi" bagi supervisor `snugcode cloud` (lihat cli.js).
+// Exit code meaning "start again" for the `snugcode cloud` supervisor (see cli.js).
 export const RESTART_EXIT_CODE = 75;
 
 export function restartDaemon(daemon, { delay = 1000 } = {}) {
   setTimeout(async () => {
-    // Runner cloud: supervisor yang menyalakan ulang (proses terlepas akan ikut mati bersama container).
+    // Cloud runner: the supervisor restarts it (a detached process would die with the container anyway).
     if (process.env.SNUGCODE_SUPERVISED === '1') {
       try {
         await daemon?.stop();

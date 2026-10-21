@@ -1,7 +1,7 @@
-// Sesi agen: menjalankan harness agen yang paling cocok untuk model sesi — Claude Agent SDK
-// (model Claude & endpoint format Anthropic/OpenAI) atau Codex (model GPT: login ChatGPT / Responses
-// API) — mengubah pesannya menjadi event ringkas untuk HP, dan menyimpan riwayatnya. Izin,
-// checkpoint, dan tool dev snugcode sama untuk kedua engine.
+// Agent sessions: run the agent harness that best fits the session's model — the Claude Agent SDK
+// (Claude models & Anthropic/OpenAI format endpoints) or Codex (GPT models: ChatGPT login / Responses
+// API) — turn its messages into compact events for the phone, and store their history. Permissions,
+// checkpoints, and snugcode dev tools are the same for both engines.
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -30,43 +30,43 @@ const OUT_LIMIT = 4000;
 
 export { isSensitivePath, toolPaths, isRemoteWrite, suggestedRules, ruleMatches, AGENT_TOOLS, widenToolInput };
 
-// Proses claude dibiarkan hidup di antara prompt (streaming input): prompt berikutnya langsung
-// diproses tanpa spawn ulang + resume transcript. Dimatikan setelah menganggur selama ini, dan
-// paling banyak MAX_IDLE_AGENTS proses menganggur dibiarkan hidup bersamaan (hemat RAM).
+// The claude process stays alive between prompts (streaming input): the next prompt is processed
+// right away without re-spawning + resuming the transcript. It's killed after idling this long, and
+// at most MAX_IDLE_AGENTS idle processes are kept alive at once (saves RAM).
 const AGENT_IDLE_MS = 5 * 60 * 1000;
 const MAX_IDLE_AGENTS = 3;
-// Riwayat sesi yang tidak dibuka siapa pun dilepas dari memori setelah selama ini.
+// History of sessions nobody has open is released from memory after this long.
 const HISTORY_IDLE_MS = 30 * 60 * 1000;
-// Saat memuat riwayat dari .jsonl, cukup baca bagian akhirnya (yang lebih lama tetap di file).
+// When loading history from .jsonl, only its tail is read (older parts stay in the file).
 const LOAD_TAIL_BYTES = 8 * 1024 * 1024;
 
-// Tool yang tidak pernah butuh izin di sesi ini. Tool baca (Read/Glob/Grep/LS) hanya lolos tanpa
-// bertanya bila sasarannya di dalam worktree; WebFetch tidak termasuk karena bisa dipakai
-// mengirim isi file ke luar (prompt injection dari README/issue).
+// Tools that never need permission in this session. Read tools (Read/Glob/Grep/LS) only pass without
+// asking when their target is inside the worktree; WebFetch isn't included because it could be used
+// to send file contents out (prompt injection from a README/issue).
 const SAFE_TOOLS = new Set(['TodoWrite', 'Task', 'Agent', 'WebSearch', 'ToolSearch', 'BashOutput', ...SAFE_DEV_TOOLS]);
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const FILE_TOOLS = new Set([...READ_TOOLS, ...EDIT_TOOLS]);
 
-// Gambar dari HP (kamera/galeri/tempel), sudah dikompres di sisi HP agar muat satu frame relay (~1MB).
+// Images from the phone (camera/gallery/paste), already compressed phone-side to fit one relay frame (~1MB).
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 function checkImages(images) {
   if (!Array.isArray(images) || !images.length) return [];
-  if (images.length > 4) throw new Error('Maksimal 4 gambar per pesan');
-  if (images.some((i) => !IMAGE_TYPES.has(i?.mime) || typeof i.data !== 'string')) throw new Error('Format gambar tidak didukung');
-  if (images.reduce((n, i) => n + i.data.length, 0) > 700_000) throw new Error('Gambar terlalu besar');
+  if (images.length > 4) throw new Error('At most 4 images per message');
+  if (images.some((i) => !IMAGE_TYPES.has(i?.mime) || typeof i.data !== 'string')) throw new Error('Unsupported image format');
+  if (images.reduce((n, i) => n + i.data.length, 0) > 700_000) throw new Error('Images too large');
   return images.map((i) => ({ mime: i.mime, data: i.data }));
 }
 
-// Event riwayat yang disimpan di memori per sesi; yang lebih lama tetap ada di file .jsonl.
+// History events kept in memory per session; older ones remain in the .jsonl file.
 const MEM_EVENTS = 3000;
 
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
-  return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} karakter dipotong)` : s;
+  return s.length > n ? s.slice(0, n) + `\n… (${s.length - n} characters cut)` : s;
 }
 
-// "mcp__snugcode__dev_start" -> "dev_start" (tool MCP lain: "server:tool").
+// "mcp__snugcode__dev_start" -> "dev_start" (other MCP tools: "server:tool").
 const shortName = (n) => (n.startsWith('mcp__') ? n.replace(/^mcp__snugcode__/, '').replace(/^mcp__([^_]+(?:_[^_]+)*?)__/, '$1:') : n);
 
 function toolResultText(content) {
@@ -75,7 +75,7 @@ function toolResultText(content) {
   return JSON.stringify(content);
 }
 
-// Ringkasan input tool supaya muat di layar HP (path dibuat relatif ke worktree).
+// Tool input summary that fits a phone screen (paths made relative to the worktree).
 export function toolSummary(name, input = {}, cwd) {
   const s = toolSummaryRaw(name, input);
   if (!cwd || typeof s !== 'string') return s;
@@ -125,7 +125,7 @@ function toolSummaryRaw(name, input = {}) {
   }
 }
 
-// Untuk Edit/Write: kirim cuplikan perubahan agar bisa ditampilkan sebagai diff mini.
+// For Edit/Write: send a snippet of the change so it can be shown as a mini diff.
 function toolDetail(name, input = {}) {
   if (name === 'Edit') return { old: cut(input.old_string || '', 3000), new: cut(input.new_string || '', 3000) };
   if (name === 'MultiEdit') return { edits: (input.edits || []).slice(0, 10).map((e) => ({ old: cut(e.old_string, 1500), new: cut(e.new_string, 1500) })) };
@@ -138,17 +138,17 @@ export class Session extends EventEmitter {
     super();
     this.meta = meta;
     this.mgr = manager;
-    this._history = null; // dimuat dari .jsonl saat pertama dibutuhkan
+    this._history = null; // loaded from .jsonl when first needed
     this.trimmed = false;
     this._lastSeq = 0;
     this.status = 'idle';
-    this.agent = null; // proses claude yang hidup (lihat ensureAgent)
-    this.turn = null; // prompt yang sedang dikerjakan: { resolve, agent }
-    this.cpReady = null; // checkpoint prompt berjalan; tool yang mengubah file menunggunya
+    this.agent = null; // the live claude process (see ensureAgent)
+    this.turn = null; // the prompt in progress: { resolve, agent }
+    this.cpReady = null; // the running prompt checkpoint; file-changing tools wait for it
     this.perms = new Map(); // pid -> { resolve, tool, input }
-    // "Selalu izinkan" disimpan di meta agar tetap berlaku setelah daemon restart.
+    // "Always allow" is stored in meta so it still applies after a daemon restart.
     this.alwaysAllow = new Set(meta.alwaysAllow || []);
-    // Aturan izin per pola perintah ("Bash(npm test *)"), diteruskan ke Claude Code.
+    // Permission rules per command pattern ("Bash(npm test *)"), passed to Claude Code.
     this.allowRules = new Set(meta.allowRules || []);
     this.textBuf = '';
     this.textTimer = null;
@@ -158,8 +158,8 @@ export class Session extends EventEmitter {
     this.tunnel = null;
   }
 
-  // Event sesaat (log proses, screenshot, status preview): langsung ke klien, tidak masuk riwayat
-  // agar tidak menggeser percakapan dari memori dan tidak membengkakkan file .jsonl.
+  // Transient events (process logs, screenshots, preview status): straight to clients, not into history,
+  // so they don't push the conversation out of memory or bloat the .jsonl file.
   live(e) {
     this.emit('event', e);
   }
@@ -168,14 +168,14 @@ export class Session extends EventEmitter {
     this.live({ k: 'proc', ...p });
     if (p.status !== 'exited') return;
     if (this.tunnel?.name === p.name) this.closeTunnel();
-    if (!p.killed && p.code !== 0) this.mgr.notify(this, `✗ ${p.name} berhenti (exit ${p.code})`, { minor: true });
+    if (!p.killed && p.code !== 0) this.mgr.notify(this, `✗ ${p.name} stopped (exit ${p.code})`, { minor: true });
   }
 
-  // Siapkan dependency bila perlu (proses "setup"), lalu jalankan dev server.
+  // Prepare dependencies if needed (the "setup" process), then run the dev server.
   async runDev(cmd) {
     const det = detectProject(this.meta.cwd);
     const dev = String(cmd || '').trim() || det.dev;
-    if (!dev) throw new Error('Perintah dev tidak terdeteksi. Isi perintahnya, mis. "npm run dev", atau tambahkan .snugcode.json { "dev": "..." }.');
+    if (!dev) throw new Error('No dev command detected. Enter the command, e.g. "npm run dev", or add .snugcode.json { "dev": "..." }.');
     if (!cmd && det.setup && this.procs.procs.get('setup')?.status !== 'running') {
       await this.procs.start(det.setup, 'setup');
       this.procs.get('setup').done.then((code) => code === 0 && this.procs.start(dev).catch((e) => this.emitEvent({ k: 'error', d: e.message })));
@@ -189,12 +189,12 @@ export class Session extends EventEmitter {
     if (this.opening) return this.opening;
     this.opening = (async () => {
       const port = await this.procs.waitPort(name, 60000);
-      if (!port) throw new Error(`Port "${name}" belum terdeteksi. Cek log prosesnya.`);
+      if (!port) throw new Error(`Port for "${name}" not detected yet. Check the process log.`);
       const t = this.tunnel;
       if (t?.port === port && t.name === name) return this.previewInfo();
       if (t) {
-        // Tunnel yang sudah ada cukup diarahkan ke port baru: URL & cookie HP tetap berlaku,
-        // tanpa menunggu cloudflared + DNS subdomain baru (5–15 detik).
+        // An existing tunnel just gets pointed at the new port: the phone's URL & cookie stay valid,
+        // without waiting for cloudflared + DNS of a new subdomain (5–15 seconds).
         t.retarget(port);
         t.name = name;
       } else {
@@ -234,7 +234,7 @@ export class Session extends EventEmitter {
     return this._lastSeq;
   }
 
-  // Hanya bagian akhir file yang dibaca: riwayat panjang tidak perlu dimuat seluruhnya.
+  // Only the end of the file is read: long histories don't need to be loaded entirely.
   load() {
     this._history = [];
     this.trimmed = false;
@@ -274,7 +274,7 @@ export class Session extends EventEmitter {
     this.trimmed = true;
   }
 
-  // Lepaskan riwayat dari memori (dimuat ulang dari file saat dibutuhkan lagi).
+  // Release history from memory (reloaded from the file when needed again).
   unload() {
     if (!this._history || this.logStream?.writableLength) return false;
     this._history = null;
@@ -286,7 +286,7 @@ export class Session extends EventEmitter {
     if (!this.logStream) {
       this.logStream = fs.createWriteStream(this.logFile, { flags: 'a' });
       this.logStream.on('error', (err) => {
-        this.mgr.log('! gagal menulis riwayat sesi: ' + err.message);
+        this.mgr.log('! failed to write session history: ' + err.message);
         this.logStream = null;
       });
     }
@@ -301,7 +301,7 @@ export class Session extends EventEmitter {
 
   summary() {
     const m = this.meta;
-    // Di sesi lokal pengguna bisa pindah branch dari terminal; baca yang aktif sekarang.
+    // In local sessions the user may switch branches from the terminal; read the current one.
     const branch = (m.local && currentBranch(m.cwd)) || m.branch || '-';
     let engine = null;
     try {
@@ -323,9 +323,9 @@ export class Session extends EventEmitter {
     return e;
   }
 
-  // Biaya: Agent SDK melaporkan total berjalan per proses (bukan per giliran), dan proses yang melanjutkan
-  // transcript mulai dari total tersimpan. Diubah menjadi biaya giliran ini (`cost`) + total sesi (`spent`),
-  // lalu dibandingkan dengan batas biaya sesi (meta.budgetUsd). Engine tanpa biaya (Codex/Gemini) dilewati.
+  // Cost: the Agent SDK reports a running total per process (not per turn), and a process resuming a
+  // transcript starts from the stored total. Turned into this turn's cost (`cost`) + the session total (`spent`),
+  // then compared with the session budget (meta.budgetUsd). Engines without costs (Codex/Gemini) are skipped.
   account(e) {
     if (typeof e.cost !== 'number' || !(e.cost >= 0)) return;
     const m = this.meta;
@@ -339,16 +339,16 @@ export class Session extends EventEmitter {
     e.spent = m.spentUsd;
     if (m.budgetUsd > 0) {
       const ratio = m.spentUsd / m.budgetUsd;
-      if (ratio >= 1) this.mgr.notify(this, `Batas biaya sesi $${m.budgetUsd} tercapai ($${m.spentUsd.toFixed(2)}). Prompt berikutnya ditahan sampai batas dinaikkan.`);
+      if (ratio >= 1) this.mgr.notify(this, `Session budget of $${m.budgetUsd} reached ($${m.spentUsd.toFixed(2)}). The next prompt is held until the budget is raised.`);
       else if (ratio >= 0.8 && !m.budgetWarned) {
         m.budgetWarned = true;
-        this.mgr.notify(this, `Biaya sesi sudah ${Math.round(ratio * 100)}% dari batas $${m.budgetUsd}.`);
+        this.mgr.notify(this, `Session cost is at ${Math.round(ratio * 100)}% of the $${m.budgetUsd} budget.`);
       }
     }
     this.mgr.saveIndex();
   }
 
-  // Batas biaya sesi dalam USD (0 = tanpa batas). Dicek sebelum setiap prompt.
+  // Session budget in USD (0 = no limit). Checked before every prompt.
   setBudget(usd) {
     const v = Math.max(0, Math.min(10_000, Number(usd) || 0));
     this.meta.budgetUsd = v || undefined;
@@ -356,7 +356,7 @@ export class Session extends EventEmitter {
     this.mgr.saveIndex();
   }
 
-  // Delta teks dikumpulkan ~80ms agar tidak mengirim satu pesan per token.
+  // Text deltas are collected for ~80ms so we don't send one message per token.
   pushText(t) {
     this.textBuf += t;
     if (!this.textTimer) this.textTimer = setTimeout(() => this.flushText(), 80);
@@ -397,18 +397,18 @@ export class Session extends EventEmitter {
 
   since(seq) {
     const ev = this.events;
-    // Event berurutan menurut seq: cari batasnya dari belakang (umumnya hanya beberapa event baru).
+    // Events are ordered by seq: find the boundary from the end (usually only a few new events).
     let i = ev.length;
     while (i > 0 && ev[i - 1].seq > seq) i--;
     return ev.slice(i);
   }
 
-  // true bila event setelah `seq` sebagian sudah dibuang dari memori.
+  // true if some events after `seq` have already been dropped from memory.
   missingSince(seq) {
     return this.trimmed && (this.events[0]?.seq ?? 0) > seq + 1;
   }
 
-  // Konteks risiko satu permintaan izin (lihat shared/risk.js).
+  // Risk context of a single permission request (see shared/risk.js).
   permCtx(tool, input) {
     const cwd = this.meta.cwd;
     const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
@@ -428,9 +428,9 @@ export class Session extends EventEmitter {
     const rules = suggestedRules(tool, p.suggestions);
     const ctx = this.permCtx(tool, input);
     const risk = permRisk(tool, input, ctx);
-    // Cakupan tombol "Selalu" untuk ditampilkan; tidak ada untuk aksi yang tidak pernah bisa "Selalu".
+    // Scope of the "Always" button for display; absent for actions that can never be "Always".
     const always = neverAlways(tool, input) ? undefined : rules.length ? rules.map((r) => r.ruleContent).join(', ') : shortName(tool);
-    // Jaring pengaman yang terlihat: perubahan file di worktree sesi repo bisa dikembalikan (checkpoint per prompt).
+    // A visible safety net: file changes in a repo session's worktree can be undone (per-prompt checkpoint).
     const undo = !this.meta.computer && !ctx.push && !ctx.outside && (EDIT_TOOLS.has(tool) || tool === 'Bash' || tool === DEV_START) ? (EDIT_TOOLS.has(tool) ? 'file' : 'cmd') : undefined;
     return { pid, tool: shortName(tool), s: toolSummary(tool, input, this.meta.cwd), title: p.title, push: ctx.push, plan: tool === 'ExitPlanMode' || undefined, ask: tool === 'AskUserQuestion' ? input.questions : undefined, x: toolDetail(tool, input), always, risk: risk || undefined, undo };
   }
@@ -443,15 +443,15 @@ export class Session extends EventEmitter {
   }
 
   async send(text, images) {
-    if (this.status === 'running') throw new Error('Agen masih berjalan. Hentikan dulu (Stop) atau tunggu selesai.');
+    if (this.status === 'running') throw new Error('The agent is still running. Stop it first or wait for it to finish.');
     images = checkImages(images);
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
     if (this.meta.budgetUsd > 0 && (this.meta.spentUsd || 0) >= this.meta.budgetUsd)
-      throw new Error(`Batas biaya sesi ini ($${this.meta.budgetUsd}) sudah tercapai ($${this.meta.spentUsd.toFixed(2)}). Naikkan batasnya di menu sesi untuk melanjutkan.`);
-    // Model tanpa koneksi (runner baru, koneksi dihapus): pesan yang jelas sebelum prompt dicatat.
+      throw new Error(`This session's budget ($${this.meta.budgetUsd}) has been reached ($${this.meta.spentUsd.toFixed(2)}). Raise it in the session menu to continue.`);
+    // A model without a connection (new runner, connection removed): a clear message before the prompt is recorded.
     resolveRoute(this.mgr.secrets, this.meta.model);
-    if (!this.meta.title) this.meta.title = (text || 'gambar').slice(0, 80);
+    if (!this.meta.title) this.meta.title = (text || 'image').slice(0, 80);
     const u = this.emitEvent({ k: 'user', d: text, img: images.length || undefined });
     this.run(text, images, u.seq).catch((err) => {
       this.emitEvent({ k: 'error', d: String(err?.message || err) });
@@ -459,8 +459,8 @@ export class Session extends EventEmitter {
     });
   }
 
-  // Pengguna mengubah file langsung (editor / batalkan hunk di HP): dicatat di riwayat, dan agen diberi
-  // tahu di prompt berikutnya agar tidak mengedit berdasarkan isi lama.
+  // The user changed files directly (editor / reverting a hunk on the phone): recorded in history, and the agent is
+  // told on the next prompt so it doesn't edit based on stale contents.
   userChanged(what, note) {
     const line = `[snugcode] The user ${what} outside of this conversation. Re-read affected files before editing them.`;
     this.meta.note = this.meta.note ? this.meta.note + '\n' + line : line;
@@ -468,32 +468,32 @@ export class Session extends EventEmitter {
     this.emitEvent({ k: 'note', d: note });
   }
 
-  // Kembalikan semua file worktree ke kondisi sebelum prompt `seq` dijalankan.
+  // Restore every worktree file to its state before prompt `seq` ran.
   async rewindTo(seq) {
-    if (this.meta.computer) throw new Error('Checkpoint dan rewind hanya tersedia untuk sesi repository git.');
-    if (this.status === 'running') throw new Error('Hentikan agen dulu sebelum mengembalikan file.');
+    if (this.meta.computer) throw new Error('Checkpoints and rewind are only available for git repository sessions.');
+    if (this.status === 'running') throw new Error('Stop the agent before restoring files.');
     const cp = this.events.find((e) => e.k === 'cp' && e.of === seq);
     const u = this.events.find((e) => e.seq === seq);
-    if (!cp || !u) throw new Error('Checkpoint untuk prompt ini tidak ada (sudah terlalu lama).');
+    if (!cp || !u) throw new Error('There is no checkpoint for this prompt (it\'s too old).');
     const n = await rewind(this.meta.cwd, cp.tree);
-    const title = String(u.d || 'gambar').slice(0, 80);
-    // Agen tidak tahu file berubah di luar dirinya; beri tahu di prompt berikutnya.
+    const title = String(u.d || 'image').slice(0, 80);
+    // The agent doesn't know files changed outside of it; tell it on the next prompt.
     this.meta.note = `[snugcode] The user restored all files to their state before the prompt "${title}". Every change made after that point is gone. Re-read files before editing them.`;
     this.mgr.saveIndex();
-    this.emitEvent({ k: 'note', d: `↺ ${n} file dikembalikan ke sebelum "${title}"` });
+    this.emitEvent({ k: 'note', d: `↺ ${n} file(s) restored to before "${title}"` });
     return n;
   }
 
-  // Tinjau setiap edit file (Write/Edit) sebelum diterapkan. Mati (bawaan): edit di dalam worktree
-  // langsung diterapkan, karena setiap prompt punya checkpoint dan bisa di-rewind.
+  // Review every file edit (Write/Edit) before it's applied. Off (default): edits inside the worktree
+  // apply directly, since every prompt has a checkpoint and can be rewound.
   setAskEdits(on) {
     this.meta.askEdits = !!on;
     this.mgr.saveIndex();
   }
 
-  // Preset otonomi (shared/risk.js): satu pilihan menggantikan kombinasi auto-izin + tinjau edit.
+  // Autonomy preset (shared/risk.js): one choice replacing the auto-approve + edit review combination.
   setAutonomy(level) {
-    if (!AUTONOMY.includes(level)) throw new Error('Tingkat otonomi tidak dikenal');
+    if (!AUTONOMY.includes(level)) throw new Error('Unknown autonomy level');
     Object.assign(this.meta, autonomyFlags(level));
     this.mgr.saveIndex();
   }
@@ -505,10 +505,10 @@ export class Session extends EventEmitter {
     this.live({ k: 'mode', plan: !!on });
   }
 
-  // Proses claude untuk sesi ini: dipakai ulang antar prompt. Ganti model/effort diterapkan
-  // langsung ke proses yang hidup (setModel / applyFlagSettings); proses baru (melanjutkan
-  // percakapan lewat `resume`) hanya bila binary, URL, token, atau model ringan berubah.
-  // Panggilan bersamaan (pre-warm saat sesi dibuka + prompt) berbagi satu proses.
+  // The claude process for this session: reused across prompts. Model/effort changes are applied
+  // directly to the live process (setModel / applyFlagSettings); a new process (resuming the
+  // conversation via `resume`) only when the binary, URL, token, or light model changes.
+  // Concurrent calls (pre-warm when the session opens + a prompt) share one process.
   async ensureAgent() {
     while (this._ensuring) await this._ensuring.catch(() => {});
     const p = (this._ensuring = this.startAgent());
@@ -519,7 +519,7 @@ export class Session extends EventEmitter {
     }
   }
 
-  // Engine per model (engine-claude.js / engine-codex.js / engine-gemini.js); izin, checkpoint & event tetap milik sesi.
+  // Engine per model (engine-claude.js / engine-codex.js / engine-gemini.js); permissions, checkpoints & events stay with the session.
   async startAgent() {
     const route = resolveRoute(this.mgr.secrets, this.meta.model);
     if (route.engine === 'codex') return startCodexAgent(this, route);
@@ -527,46 +527,46 @@ export class Session extends EventEmitter {
     try {
       return await startGeminiAgent(this, route);
     } catch (e) {
-      // Gemini CLI tidak bisa dipasang/dijalankan (mis. npm offline): model yang sama lewat Claude Agent SDK.
+      // Gemini CLI can't be installed/run (e.g. npm offline): the same model via the Claude Agent SDK.
       if (!route.conn.formats?.openai && !route.conn.openai) throw e;
       this.mgr.log('! ' + e.message);
-      if (!this.warnedGemini) this.emitEvent({ k: 'note', d: `◆ ${e.message.slice(0, 200)} Model ini dijalankan lewat Claude Agent SDK.` });
+      if (!this.warnedGemini) this.emitEvent({ k: 'note', d: `◆ ${e.message.slice(0, 200)} This model runs through the Claude Agent SDK instead.` });
       this.warnedGemini = true;
       return startClaudeAgent(this, { ...route, engine: 'claude', wire: 'openai' });
     }
   }
 
-  // Keputusan izin untuk permintaan Codex (dipanggil CodexAgent), lihat engine-codex.js.
+  // Permission decision for Codex requests (called by CodexAgent), see engine-codex.js.
   decideCodex(kind, p) {
     return decideCodex(this, kind, p);
   }
 
-  // Keputusan izin untuk tool call Gemini CLI (dipanggil GeminiAgent), lihat engine-gemini.js.
+  // Permission decision for Gemini CLI tool calls (called by GeminiAgent), see engine-gemini.js.
   decideGemini(tc) {
     return decideGemini(this, tc);
   }
 
-  // Hook PreToolUse untuk tool yang bisa mengubah file. Berjalan juga untuk tool yang lolos lewat
-  // aturan "Selalu" (mis. Bash(git *)) tanpa melewati canUseTool, jadi di sinilah dua jaminan dijaga:
-  // checkpoint prompt sudah tersimpan, dan push / perintah yang menyentuh kredensial tetap bertanya.
+  // PreToolUse hook for tools that can change files. Also runs for tools passing via
+  // "Always" rules (e.g. Bash(git *)) without going through canUseTool, so two guarantees are kept here:
+  // the prompt checkpoint is saved, and pushes / commands touching credentials still ask.
   async beforeTool(h) {
     await this.cpReady;
     const input = /** @type {any} */ (h)?.tool_input;
-    if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'snugcode: selalu butuh persetujuan pengguna' } };
+    if (h && 'tool_name' in h && neverAlways(h.tool_name, input)) return { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), permissionDecision: /** @type {const} */ ('ask'), permissionDecisionReason: 'snugcode: always needs the user\'s approval' } };
     return {};
   }
 
-  // Hook PreToolUse Read/Grep (lihat widenToolInput). Model Claude sudah membaca & mencari secara
-  // efisien (dan paralel), jadi hanya model lain yang dilebarkan. Model dibaca saat itu juga:
-  // ganti model di proses berjalan tidak membuat proses baru.
+  // PreToolUse hook for Read/Grep (see widenToolInput). Claude models already read & search
+  // efficiently (and in parallel), so only other models are widened. The model is read on the spot:
+  // switching models in a running process doesn't create a new process.
   widenTool(h) {
     if (!h || !('tool_name' in h) || isClaudeModel(this.meta.model)) return {};
     const updatedInput = widenToolInput(h.tool_name, /** @type {any} */ (h.tool_input), this.meta.cwd);
     return updatedInput ? { hookSpecificOutput: { hookEventName: /** @type {const} */ ('PreToolUse'), updatedInput } } : {};
   }
 
-  // Sesi dibuka (HP/terminal): siapkan proses claude di latar belakang, jadi prompt pertama tidak
-  // menunggu spawn + resume transcript. Ditutup lagi bila tetap menganggur (AGENT_IDLE_MS).
+  // Session opened (phone/terminal): prepare the claude process in the background, so the first prompt doesn't
+  // wait for spawn + transcript resume. Closed again if it stays idle (AGENT_IDLE_MS).
   warm() {
     if (this.agent || this._ensuring || this.status !== 'idle') return;
     this.ensureAgent().then(
@@ -598,14 +598,14 @@ export class Session extends EventEmitter {
       agent.dead = true;
       clearTimeout(agent.idle);
       if (this.agent === agent) this.agent = null;
-      // Proses mati di tengah prompt (crash / ditutup): prompt itu selesai, sesi kembali idle.
-      // Prompt milik proses lain (mis. proses baru setelah ganti model) tidak disentuh.
+      // Process died mid-prompt (crash / closed): that prompt is finished, the session goes back to idle.
+      // Prompts belonging to another process (e.g. a new one after switching models) aren't touched.
       if (this.turn?.agent === agent) this.endTurn();
     }
   }
 
   onAgentMessage(agent, m) {
-    // Agen bisa memulai giliran sendiri (mis. notifikasi tugas latar belakang selesai).
+    // The agent may start a turn on its own (e.g. a background task completion notification).
     if (!this.turn && (m.type === 'assistant' || m.type === 'stream_event') && !m.parent_tool_use_id) {
       this.turn = { resolve() {}, agent };
       this.setStatus('running');
@@ -621,7 +621,7 @@ export class Session extends EventEmitter {
       const ev = m.event;
       if (ev.type === 'message_start') {
         agent.currentMsgId = ev.message?.id;
-        // Isi konteks = token input request terakhir (termasuk cache), untuk indikator konteks.
+        // Context usage = input tokens of the last request (including cache), for the context indicator.
         const u = ev.message?.usage;
         if (u && !m.parent_tool_use_id) this.lastCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
       } else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
@@ -639,7 +639,7 @@ export class Session extends EventEmitter {
         this.flushText();
       }
     } else if (m.type === 'assistant') {
-      if (m.parent_tool_use_id) return; // isi subagent tidak ditampilkan rinci
+      if (m.parent_tool_use_id) return; // subagent internals aren't shown in detail
       for (const b of m.message.content || []) {
         if (b.type === 'text' && !agent.streamed.has(m.message.id) && b.text) this.emitEvent({ k: 'text', d: b.text });
         if (b.type === 'tool_use') this.emitEvent({ k: 'tool', id: b.id, name: shortName(b.name), s: toolSummary(b.name, b.input, this.meta.cwd), x: toolDetail(b.name, b.input), todos: b.name === 'TodoWrite' ? todosFromInput(b.input?.todos) : undefined });
@@ -653,7 +653,7 @@ export class Session extends EventEmitter {
     } else if (m.type === 'result') {
       this.flushText();
       const u = m.usage;
-      // modelUsage juga memuat model kecil (subagen/utility); ambil milik model utama.
+      // modelUsage also includes small models (subagents/utility); take the main model's.
       const ctxMax = m.modelUsage?.[agent.model]?.contextWindow;
       const ok = m.subtype === 'success' && !m.is_error;
       this.emitEvent({
@@ -661,24 +661,24 @@ export class Session extends EventEmitter {
         ok,
         turns: m.num_turns,
         ms: m.duration_ms,
-        // cr/cw: token input yang dibaca dari / ditulis ke prompt cache (cr ≈ 0 terus = router tidak meng-cache).
+        // cr/cw: input tokens read from / written to the prompt cache (cr ≈ 0 constantly = the router doesn't cache).
         usage: u ? { in: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), out: u.output_tokens, cr: u.cache_read_input_tokens || 0, cw: u.cache_creation_input_tokens || 0 } : undefined,
         cost: m.total_cost_usd || undefined,
         ctx: ctxMax && this.lastCtx ? Math.round((this.lastCtx / ctxMax) * 100) : undefined,
         err: m.subtype !== 'success' ? m.subtype : m.is_error ? cut(m.result || '', 600) : undefined,
       });
-      this.mgr.notify(this, ok ? `✓ selesai · ${String(m.result || '').replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(m.result || m.subtype).slice(0, 140)}`);
+      this.mgr.notify(this, ok ? `✓ done · ${String(m.result || '').replace(/\s+/g, ' ').slice(0, 140)}` : `✗ stopped · ${String(m.result || m.subtype).slice(0, 140)}`);
       agent.streamed.clear();
       if (this.turn?.agent === agent) this.endTurn();
       if (!agent.dead) this.idleAgent(agent);
     }
   }
 
-  // Akhiri prompt yang berjalan: izin yang masih menunggu ditolak, status kembali idle.
+  // End the running prompt: pending permissions are denied, the status goes back to idle.
   endTurn(force = false) {
     this.clearThinking();
     this.flushText();
-    for (const p of this.perms.values()) p.resolve({ behavior: 'deny', message: 'Sesi dihentikan' });
+    for (const p of this.perms.values()) p.resolve({ behavior: 'deny', message: 'Session stopped' });
     this.perms.clear();
     const t = this.turn;
     this.turn = null;
@@ -698,12 +698,12 @@ export class Session extends EventEmitter {
   async run(prompt, images = [], userSeq) {
     this.setStatus('running');
     this.turn = { resolve() {} };
-    // Checkpoint berjalan paralel dengan start-up agen; tool yang mengubah file menunggu
-    // checkpoint ini selesai (askPermission), jadi rewind tetap mendapat kondisi sebelum prompt.
+    // The checkpoint runs in parallel with the agent's start-up; file-changing tools wait for
+    // this checkpoint to finish (askPermission), so rewind still gets the state before the prompt.
     if (userSeq && !this.meta.computer)
       this.cpReady = snapshot(this.meta.cwd).then(
         (tree) => tree && this.emitEvent({ k: 'cp', of: userSeq, tree }),
-        (e) => this.mgr.log('! checkpoint gagal: ' + e.message),
+        (e) => this.mgr.log('! checkpoint failed: ' + e.message),
       );
     if (this.meta.note) {
       prompt = this.meta.note + '\n\n' + prompt;
@@ -712,45 +712,45 @@ export class Session extends EventEmitter {
     }
     const agent = await this.ensureAgent();
     const done = new Promise((resolve) => (this.turn = { resolve, agent }));
-    // Codex/Gemini CLI tidak punya hook "tunggu sebelum tool": checkpoint harus selesai sebelum giliran dimulai.
+    // Codex/Gemini CLI have no "wait before tool" hook: the checkpoint must finish before the turn starts.
     if ((agent.kind === 'codex' || agent.kind === 'gemini') && this.cpReady) await this.cpReady;
     await agent.push({ text: prompt, images });
     return done;
   }
 
-  // Pertanyaan pilihan (AskUserQuestion) dan persetujuan rencana (ExitPlanMode) selalu
-  // menunggu pengguna, termasuk saat auto-izin aktif.
+  // Multiple-choice questions (AskUserQuestion) and plan approval (ExitPlanMode) always
+  // wait for the user, even with auto-approve on.
   /** @returns {Promise<import('@anthropic-ai/claude-agent-sdk').PermissionResult>} */
   async askPermission(tool, input, opts) {
     const cwd = this.meta.cwd;
     const allow = { behavior: /** @type {const} */ ('allow'), updatedInput: input };
     const paths = FILE_TOOLS.has(tool) ? toolPaths(tool, input, cwd) : [];
     const write = FILE_TOOLS.has(tool) && !READ_TOOLS.has(tool);
-    if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'Folder data snugcode berisi kredensial dan tidak boleh diakses agen.' };
+    if (paths.some((p) => isSensitivePath(p, { write }))) return { behavior: 'deny', message: 'The snugcode data folder holds credentials and may not be accessed by the agent.' };
     const isPush = isRemoteWrite(tool, input);
     const secretCmd = (tool === 'Bash' || tool === DEV_START) && SECRET_CMD_RE.test(input?.command || '');
     const shotUrl = tool === SCREENSHOT ? input?.url : null;
     const shotFile = shotUrl && !/^https?:/i.test(shotUrl);
-    // Konfigurasi tool di repo (.claude/, .codex/, .mcp.json, .git/) dan perintah di luar sandbox selalu bertanya.
+    // Tool config in the repo (.claude/, .codex/, .mcp.json, .git/) and commands outside the sandbox always ask.
     const protectedEdit = write && paths.some((p) => isProtectedRepoPath(p, cwd));
     const needsUser = isPush || secretCmd || shotFile || protectedEdit || escapesSandbox(tool, input) || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
-    // Mode rencana: agen menulis draf rencananya ke folder plans milik Claude (bukan worktree).
+    // Plan mode: the agent writes its plan draft to Claude's plans folder (not the worktree).
     const planFile = this.meta.plan && ['Write', 'Edit'].includes(tool) && path.resolve(String(input?.file_path || '')).startsWith(PLANS_DIR + path.sep);
     const readInside = READ_TOOLS.has(tool) && (this.meta.computer || paths.every((p) => isInside(p, cwd) || isInside(p, CLAUDE_DIR)));
     const safe = (SAFE_TOOLS.has(tool) && !(shotUrl && !isLocalUrl(shotUrl))) || readInside;
-    // Edit di dalam worktree langsung diterapkan (bisa di-rewind), kecuali mode tinjau edit / rencana.
+    // Edits inside the worktree apply directly (can be rewound), except in edit review / plan mode.
     const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && (this.meta.computer || paths.every((p) => isInside(p, cwd))) && !this.meta.askEdits && !this.meta.plan;
-    // Tool yang bisa mengubah file baru jalan setelah checkpoint prompt ini tersimpan.
+    // File-changing tools only run once this prompt's checkpoint is saved.
     if (!safe && this.cpReady) await this.cpReady;
-    // Auto-izin untuk Bash hanya bila proses agen ini memang berjalan dengan sandbox (atau sandbox tidak didukung).
+    // Auto-approve for Bash only if this agent process really runs with a sandbox (or sandboxing isn't supported).
     const auto = this.meta.auto && !(tool === 'Bash' && this.agent?.unsandboxedAuto);
     if (!needsUser && (planFile || safe || editInside || auto || this.alwaysAllow.has(tool))) return allow;
-    // Preset "Perintah rutin otomatis": test/lint/build tanpa rangkaian perintah lolos tanpa bertanya.
+    // The "Routine commands automatic" preset: test/lint/build without command chains pass without asking.
     if (!needsUser && this.meta.autoLow && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
     return this.requestUser(tool, input, opts);
   }
 
-  // Tanya pengguna (kartu izin di HP/terminal + notifikasi) dan tunggu jawabannya.
+  // Ask the user (permission card on the phone/terminal + notification) and wait for the answer.
   /** @returns {Promise<import('@anthropic-ai/claude-agent-sdk').PermissionResult>} */
   requestUser(tool, input, opts) {
     const pid = randomBytes(6).toString('hex');
@@ -758,19 +758,19 @@ export class Session extends EventEmitter {
       const p = { resolve, tool, input, title: opts?.title, suggestions: opts?.suggestions };
       this.perms.set(pid, p);
       this.live({ k: 'perm', ...this.permEvent(pid, p) });
-      // Isi notifikasi cukup untuk memutuskan dari layar kunci; risiko rendah/sedang bisa dijawab langsung
-      // dari tombol notifikasi (sw.js), risiko tinggi selalu membuka aplikasi.
+      // The notification has enough to decide from the lock screen; low/medium risk can be answered right
+      // from the notification buttons (sw.js), high risk always opens the app.
       const e = this.permEvent(pid, p);
-      const what = tool === 'AskUserQuestion' ? 'Agen bertanya' : tool === 'ExitPlanMode' ? 'Rencana siap ditinjau' : `Butuh izin ${e.tool}: ${String(e.s || '').split('\n')[0].slice(0, 120)}`;
+      const what = tool === 'AskUserQuestion' ? 'The agent has a question' : tool === 'ExitPlanMode' ? 'Plan ready for review' : `Needs permission for ${e.tool}: ${String(e.s || '').split('\n')[0].slice(0, 120)}`;
       this.mgr.notify(this, what, { perm: true, pid: e.risk && e.risk.level !== 'high' && !e.push ? pid : undefined, risk: e.risk?.level });
       opts?.signal?.addEventListener('abort', () => {
-        if (this.perms.delete(pid)) resolve({ behavior: 'deny', message: 'dibatalkan' });
+        if (this.perms.delete(pid)) resolve({ behavior: 'deny', message: 'cancelled' });
       });
     });
   }
 
-  // decision: 'allow' | 'always' | 'deny'. `answers` (AskUserQuestion: pertanyaan → jawaban)
-  // dan `message` (alasan tolak / revisi rencana) opsional.
+  // decision: 'allow' | 'always' | 'deny'. `answers` (AskUserQuestion: question → answer)
+  // and `message` (deny reason / plan revision) are optional.
   /** @param {string} pid @param {'allow' | 'always' | 'deny'} decision @param {{ answers?: Record<string, string>, message?: string }} [extra] */
   answerPermission(pid, decision, { answers, message } = {}) {
     const p = this.perms.get(pid);
@@ -780,7 +780,7 @@ export class Session extends EventEmitter {
     if (decision === 'always' && !neverAlways(p.tool, p.input)) {
       const rules = suggestedRules(p.tool, p.suggestions);
       if (rules.length) {
-        // Berlaku langsung di proses berjalan (session) dan di proses berikutnya (settings).
+        // Applies right away in the running process (session) and in later processes (settings).
         updatedPermissions = [{ type: 'addRules', rules, behavior: 'allow', destination: 'session' }];
         for (const r of rules) this.allowRules.add(ruleText(r));
         this.meta.allowRules = [...this.allowRules];
@@ -798,12 +798,12 @@ export class Session extends EventEmitter {
       s = Object.values(input.answers).join(' · ');
     }
     if (p.tool === 'ExitPlanMode') {
-      s = allow ? 'rencana disetujui' : 'rencana direvisi';
+      s = allow ? 'plan approved' : 'plan revised';
       if (allow) this.setPlan(false);
     }
     this.emitEvent({ k: 'permAnswer', pid, allow, tool: shortName(p.tool), s });
     const why = String(message || '').trim().slice(0, 4000);
-    p.resolve(allow ? { behavior: 'allow', updatedInput: input, ...(updatedPermissions ? { updatedPermissions } : {}) } : { behavior: 'deny', message: why || 'Pengguna menolak aksi ini dari HP.' });
+    p.resolve(allow ? { behavior: 'allow', updatedInput: input, ...(updatedPermissions ? { updatedPermissions } : {}) } : { behavior: 'deny', message: why || 'The user denied this action from the phone.' });
     return true;
   }
 
@@ -813,22 +813,22 @@ export class Session extends EventEmitter {
     const turn = this.turn;
     if (!agent || turn?.agent !== agent) return;
     await Promise.resolve(agent.interrupt()).catch(() => {});
-    // Normalnya agen membalas dengan `result`; bila tidak dalam 8 detik, matikan prosesnya.
+    // Normally the agent replies with `result`; if not within 8 seconds, kill its process.
     setTimeout(() => this.turn === turn && this.closeAgent(agent), 8000).unref?.();
   }
 
-  // Matikan proses claude(.exe), dev server, dan tunnel sepenuhnya, mis. sebelum update/hapus sesi.
+  // Fully kill the claude(.exe) process, dev servers, and tunnels, e.g. before updating/deleting a session.
   async close() {
     if (this.shellProc) this.shellProc.kill();
-    // Tunggu (maks. 3 detik) proses claude benar-benar keluar: di Windows claude.exe yang masih
-    // hidup mengunci file binary (update) dan file worktree (hapus sesi).
+    // Wait (max 3 seconds) until the claude process really exits: on Windows a still-running claude.exe
+    // locks the binary (update) and worktree files (session deletion).
     const exited = this.agent?.loop;
     this.closeAgent();
     this.closeTunnel();
     await Promise.all([this.procs.stopAll(), this.closeLog(), exited && Promise.race([exited, new Promise((r) => setTimeout(r, 3000))])]);
   }
 
-  // "!perintah" -> jalankan langsung di worktree (seperti ! di Claude Code).
+  // "!command" -> run directly in the worktree (like ! in Claude Code).
   async shell(cmd) {
     if (!cmd) return;
     this.emitEvent({ k: 'sh', d: cmd });
@@ -869,8 +869,8 @@ export class Session extends EventEmitter {
   }
 }
 
-// Bangun ulang daftar sesi dari worktree di disk bila index.json rusak: tanpa ini sesi (dan
-// pekerjaan yang belum di-push) hilang dari aplikasi, dan pembersih akan menganggapnya yatim.
+// Rebuild the session list from worktrees on disk if index.json is corrupted: without this, sessions (and
+// unpushed work) vanish from the app, and the cleaner would treat them as orphans.
 function recoverIndex(defaultModel) {
   const out = [];
   let repos = [];
@@ -917,26 +917,26 @@ export class SessionManager {
     this.log = log || (() => {});
     this.notify = notify || (() => {});
     this.sessions = new Map();
-    this.busyRepos = new Map(); // folder repo (huruf kecil) -> jumlah sesi yang sedang dibuat
+    this.busyRepos = new Map(); // repo folder (lowercase) -> number of sessions being created
     try {
       this.proxy = startProxy({ log: (m) => this.log(m) });
     } catch (e) {
-      this.log('! gagal memulai loopback proxy: ' + e.message);
+      this.log('! failed to start the loopback proxy: ' + e.message);
     }
-    this.routeTokens = new Map(); // `${koneksi}|${format}` -> token lokal proxy
-    this.bridges = new Map(); // token jembatan MCP (engine Codex) -> sesi
-    // Daftar model diambil di latar belakang: pemilihan model ringan subagen membacanya dari cache.
+    this.routeTokens = new Map(); // `${connection}|${format}` -> local proxy token
+    this.bridges = new Map(); // MCP bridge token (Codex engine) -> session
+    // The model list is fetched in the background: subagent light-model selection reads it from the cache.
     for (const id of Object.keys(allConnections(secrets))) knownRefs(secrets, id);
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     const idx = readSessionIndex({ quarantine: true });
     let index = idx.list;
     if (!idx.ok) {
       index = recoverIndex(config.model);
-      console.error(`! sessions/index.json rusak (disimpan sebagai index.json.broken-*); ${index.length} sesi dipulihkan dari worktree.`);
+      console.error(`! sessions/index.json is corrupted (kept as index.json.broken-*); ${index.length} session(s) recovered from worktrees.`);
     }
     for (const meta of index) if (meta?.id && meta.cwd && fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
     if (!idx.ok) this.saveIndex();
-    // Pindai dan bersihkan folder yatim secara otomatis di latar belakang
+    // Scan and clean up orphaned folders automatically in the background
     setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500).unref?.();
     this.cleanupTimer = setInterval(() => {
       this.cleanupOrphans().catch(() => {});
@@ -945,22 +945,22 @@ export class SessionManager {
     this.cleanupTimer.unref?.();
   }
 
-  // Dev server & tunnel milik sesi tidak boleh tertinggal saat daemon berhenti (di Windows
-  // proses anak tidak ikut mati bersama induknya).
+  // Sessions' dev servers & tunnels must not be left behind when the daemon stops (on Windows
+  // child processes don't die with their parent).
   close() {
     this.proxy?.close();
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     return Promise.all([...this.sessions.values()].map((s) => s.close()).concat(closeBrowser()));
   }
 
-  // Riwayat sesi yang lama tidak dibuka dilepas dari memori.
+  // History of sessions not opened for a while is released from memory.
   unloadIdle(now = Date.now()) {
     for (const s of this.sessions.values()) {
       if (s.status === 'idle' && !s.agent && !s.listenerCount('event') && now - (s.meta.updatedAt || 0) > HISTORY_IDLE_MS) s.unload();
     }
   }
 
-  // Batasi jumlah proses claude menganggur: yang paling lama tidak dipakai ditutup lebih dulu.
+  // Cap the number of idle claude processes: the least recently used are closed first.
   trimAgents() {
     const idle = [...this.sessions.values()].filter((s) => s.agent && !s.turn).sort((a, b) => b.agent.lastUsed - a.agent.lastUsed);
     for (const s of idle.slice(MAX_IDLE_AGENTS)) s.closeAgent();
@@ -976,23 +976,23 @@ export class SessionManager {
     }
   }
 
-  // Di Windows claude.exe yang masih jalan mengunci file-nya sehingga npm gagal
-  // menimpanya (dan diam-diam melewati paket binary). Tutup semua sesi dulu.
+  // On Windows a still-running claude.exe locks its file so npm fails to
+  // overwrite it (and silently skips the binary package). Close every session first.
   async stopAll({ wait = 1500 } = {}) {
     const active = [...this.sessions.values()].filter((s) => s.agent || s.shellProc || s.procs.running() || s.tunnel);
-    for (const s of active) if (s.turn || s.shellProc || s.procs.running()) s.emitEvent({ k: 'note', d: '◆ dihentikan untuk memasang pembaruan' });
+    for (const s of active) if (s.turn || s.shellProc || s.procs.running()) s.emitEvent({ k: 'note', d: '◆ stopped to install an update' });
     await Promise.all(active.map((s) => s.close()));
     if (active.length) await new Promise((r) => setTimeout(r, wait));
     return active.length;
   }
 
-  // Token lokal proxy untuk satu koneksi + format. Alamat & key dibaca dari secrets pada setiap
-  // request, jadi key yang diganti dari HP langsung berlaku tanpa membuat ulang proses agen.
+  // Local proxy token for one connection + format. The address & key are read from secrets on every
+  // request, so a key changed from the phone applies immediately without recreating agent processes.
   tokenFor(conn, wire) {
     const k = `${conn.id}|${wire}`;
     let t = this.routeTokens.get(k);
     if (t) return t;
-    if (!this.proxy) throw new Error('Loopback proxy snugcode tidak berjalan.');
+    if (!this.proxy) throw new Error('The snugcode loopback proxy is not running.');
     const id = conn.id;
     const cur = () => getConn(this.secrets, id) || conn;
     t = this.proxy.register({
@@ -1006,8 +1006,8 @@ export class SessionManager {
     return t;
   }
 
-  // Koneksi diubah/dihapus dari HP: token lamanya dicabut, proses agen yang memakainya dibuat ulang
-  // pada prompt berikutnya (kuncinya memuat token).
+  // Connection changed/removed from the phone: its old token is revoked, agent processes using it are recreated
+  // on the next prompt (their key includes the token).
   resetRouter(connId = 'router') {
     for (const [k, t] of this.routeTokens) {
       if (!k.startsWith(connId + '|')) continue;
@@ -1017,7 +1017,7 @@ export class SessionManager {
     if (getConn(this.secrets, connId)) knownRefs(this.secrets, connId);
   }
 
-  // Token jembatan MCP: hanya bisa memanggil tool dev untuk satu sesi (lihat server.js LocalConn).
+  // MCP bridge token: can only call dev tools for one session (see server.js LocalConn).
   bridgeToken(session) {
     for (const [t, s] of this.bridges) if (s === session) return t;
     const t = 'bridge-' + randomBytes(24).toString('hex');
@@ -1028,17 +1028,17 @@ export class SessionManager {
     return typeof token === 'string' ? this.bridges.get(token) || null : null;
   }
 
-  // Ada pekerjaan yang berjalan (agen, `!perintah`, dev server, atau tunnel preview)?
+  // Is any work running (agent, `!command`, dev server, or preview tunnel)?
   busy() {
     return [...this.sessions.values()].some((s) => s.status === 'running' || s.shellProc || s.procs.running() || s.tunnel);
   }
 
-  // Atomik: gagal menulis (mis. disk penuh) membiarkan index lama tetap utuh, tidak memutus alur agen.
+  // Atomic: a failed write (e.g. full disk) leaves the old index intact and doesn't break the agent flow.
   saveIndex() {
     try {
       writeJson(SESSION_INDEX, [...this.sessions.values()].map((s) => s.meta), 0o644);
     } catch (e) {
-      console.error('! gagal menyimpan daftar sesi: ' + e.message);
+      console.error('! failed to save the session list: ' + e.message);
     }
   }
 
@@ -1048,7 +1048,7 @@ export class SessionManager {
 
   get(id) {
     const s = this.sessions.get(id);
-    if (!s) throw new Error('Sesi tidak ditemukan');
+    if (!s) throw new Error('Session not found');
     return s;
   }
 
@@ -1058,7 +1058,7 @@ export class SessionManager {
       const targetCwd = path.resolve(cwd || os.homedir());
       const meta = {
         id,
-        repo: 'Komputer',
+        repo: 'Computer',
         cwd: targetCwd,
         branch: os.hostname() || 'pc',
         base: '-',
@@ -1075,7 +1075,7 @@ export class SessionManager {
       return s;
     }
     if (local) {
-      // Folder lokal dari terminal: pakai ulang sesi yang sudah ada untuk folder yang sama.
+      // Local folder from the terminal: reuse the existing session for the same folder.
       const info = await inspectLocalRepo(local);
       const existing = [...this.sessions.values()].find((s) => s.meta.local && path.resolve(s.meta.cwd).toLowerCase() === info.cwd.toLowerCase());
       if (existing) return existing;
@@ -1086,10 +1086,10 @@ export class SessionManager {
       this.saveIndex();
       return s;
     }
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('Format repo harus owner/nama');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('The repo must be in owner/name format');
     const id = randomBytes(4).toString('hex');
     branch = (branch || '').trim() || 'snug/' + id;
-    // Selama clone/worktree disiapkan, pembersih tidak boleh menyentuh repo ini.
+    // While the clone/worktree is being prepared, the cleaner must not touch this repo.
     const busyKey = repoDirName(repo).toLowerCase();
     this.busyRepos.set(busyKey, (this.busyRepos.get(busyKey) || 0) + 1);
     let s;
@@ -1104,9 +1104,9 @@ export class SessionManager {
       if (n > 0) this.busyRepos.set(busyKey, n);
       else this.busyRepos.delete(busyKey);
     }
-    // Template .env repo (disimpan dari sesi sebelumnya) agar dev server langsung bisa jalan.
+    // The repo's .env template (saved from an earlier session) so the dev server can run right away.
     const env = restoreEnv(repo, s.meta.cwd);
-    if (env.length) s.emitEvent({ k: 'note', d: `◆ env dipulihkan: ${env.join(', ')}` });
+    if (env.length) s.emitEvent({ k: 'note', d: `◆ env restored: ${env.join(', ')}` });
     return s;
   }
 
@@ -1114,17 +1114,17 @@ export class SessionManager {
     const s = this.get(id);
     await s.close();
     for (const [t, x] of this.bridges) if (x === s) this.bridges.delete(t);
-    await new Promise((r) => setTimeout(r, 150)); // claude.exe melepas file worktree
+    await new Promise((r) => setTimeout(r, 150)); // claude.exe releases the worktree files
     this.sessions.delete(id);
     this.saveIndex();
     try {
       safeRm(s.logFile);
     } catch {}
-    // Folder lokal milik pengguna tidak pernah dihapus; hanya riwayat sesinya.
+    // The user's own local folders are never deleted; only their session history.
     if (!s.meta.local && !s.meta.computer) {
       await removeWorktree(s.meta.cwd).catch(() => {});
     }
-    // Bersihkan worktree / log yatim (clone dasar repo disimpan beberapa hari untuk sesi berikutnya)
+    // Clean up orphan worktrees / logs (repo base clones are kept for a few days for the next session)
     await this.cleanupOrphans({ minAgeMs: 0 }).catch(() => {});
   }
 }

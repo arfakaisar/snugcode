@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Server MCP stdio kecil untuk engine Codex: meneruskan tool dev snugcode (dev_start, dev_logs,
-// preview_screenshot, …) ke daemon lewat kanal lokal (named pipe / unix socket), sehingga tool itu
-// berjalan di daemon dengan izin & proses milik sesi. Dijalankan Codex (mcp_servers.snugcode).
+// Tiny stdio MCP server for the Codex engine: forwards snugcode dev tools (dev_start, dev_logs,
+// preview_screenshot, …) to the daemon over a local channel (named pipe / unix socket), so those tools
+// run in the daemon with the session's permissions & processes. Launched by Codex (mcp_servers.snugcode).
 //
-// Env: SNUGCODE_IPC (path kanal lokal), SNUGCODE_BRIDGE (token jembatan sesi ini — hanya boleh
-// memanggil tool dev untuk satu sesi, bukan RPC daemon lainnya).
+// Env: SNUGCODE_IPC (local channel path), SNUGCODE_BRIDGE (this session's bridge token — may only
+// call dev tools for one session, not other daemon RPCs).
 import net from 'node:net';
 
 const IPC = process.env.SNUGCODE_IPC;
@@ -35,7 +35,7 @@ function connectDaemon() {
           continue;
         }
         if (m.ev === 'ready') resolve(sock);
-        else if (m.ev === 'denied') reject(new Error('daemon menolak jembatan MCP'));
+        else if (m.ev === 'denied') reject(new Error('daemon rejected the MCP bridge'));
         else if (m.id != null && pending.has(m.id)) {
           const p = pending.get(m.id);
           pending.delete(m.id);
@@ -45,7 +45,7 @@ function connectDaemon() {
     });
     sock.on('error', reject);
     sock.on('close', () => {
-      for (const p of pending.values()) p.reject(new Error('kanal daemon tertutup'));
+      for (const p of pending.values()) p.reject(new Error('daemon channel closed'));
       pending.clear();
       ready = null;
     });
@@ -67,7 +67,7 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 
 async function handle(msg) {
   const { id, method, params } = msg;
-  if (id == null) return; // notifikasi (notifications/initialized, …)
+  if (id == null) return; // notification (notifications/initialized, …)
   try {
     let result;
     if (method === 'initialize') result = { protocolVersion: params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'snugcode', version: '1.0.0' } };

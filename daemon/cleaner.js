@@ -1,18 +1,18 @@
-// Pembersih otomatis ruang kerja dan folder yatim (orphan cleaner).
-// Menghapus worktree dan repository yang sudah tidak digunakan lagi oleh sesi apa pun,
-// membersihkan file log basi, serta merapikan referensi git worktree di PC host.
+// Automatic cleaner for workspaces and orphaned folders.
+// Removes worktrees and repositories no longer used by any session,
+// clears stale log files, and prunes git worktree references on the host PC.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSPACES, SESSIONS_DIR } from './config.js';
 import { git, repoDirName, LAST_USED } from './github.js';
 
-// Clone dasar yang tidak dipakai sesi mana pun tetap disimpan selama ini (default 3 hari):
-// sesi baru di repo yang sama cukup `fetch`, tidak perlu clone ulang dari nol.
+// Base clones not used by any session are kept for this long (default 3 days):
+// a new session on the same repo only needs a `fetch`, not a fresh clone.
 export const REPO_TTL_MS = 3 * 24 * 3600 * 1000;
 
-// Hapus berkas / folder secara aman dan tangguh di Windows/Linux/macOS.
-// Mengatasi file lock sementara dan atribut read-only yang sering terjadi pada git packfile.
+// Remove files / folders safely and robustly on Windows/Linux/macOS.
+// Handles temporary file locks and read-only attributes common on git packfiles.
 export function safeRm(targetPath) {
   if (!targetPath || !fs.existsSync(targetPath)) return;
   try {
@@ -22,7 +22,7 @@ export function safeRm(targetPath) {
       chmodRecursive(targetPath);
       fs.rmSync(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     } catch {
-      // Biarkan gagal tanpa melempar uncaught exception; background cleaner akan mencoba lagi nanti.
+      // Fail quietly without an uncaught exception; the background cleaner will retry later.
     }
   }
 }
@@ -42,15 +42,15 @@ function chmodRecursive(target) {
 }
 
 export async function cleanupWorkspaces(sessions, options = {}) {
-  // `busy(folderRepo)`: repo yang sedang dipakai membuat sesi baru (clone/worktree berjalan)
-  // tidak boleh disentuh sama sekali, walau worktree barunya belum terdaftar sebagai sesi.
+  // `busy(folderRepo)`: a repo currently being used to create a new session (clone/worktree in progress)
+  // must not be touched at all, even if its new worktree isn't registered as a session yet.
   const { workspacesDir = WORKSPACES, sessionsDir = SESSIONS_DIR, minAgeMs = 30000, repoTtlMs = REPO_TTL_MS, busy = () => false } = options;
   const activeSessions = sessions instanceof Map ? [...sessions.values()] : Array.isArray(sessions) ? sessions : [];
 
   const activeCwds = new Set(
     activeSessions.map((s) => path.resolve(s.meta?.cwd || s.cwd || '').toLowerCase()).filter(Boolean),
   );
-  // Dibandingkan dengan nama folder (lihat repoDirName), bukan "owner/nama" yang ditebak dari folder.
+  // Compared by folder name (see repoDirName), not an "owner/name" guessed from the folder.
   const activeRepos = new Set(
     activeSessions.map((s) => s.meta?.repo || s.repo).filter(Boolean).map((r) => repoDirName(r).toLowerCase()),
   );
@@ -93,7 +93,7 @@ export async function cleanupWorkspaces(sessions, options = {}) {
       continue;
     }
 
-    // 1. Bersihkan worktree sesi (s-*) yang tidak ada di daftar sesi aktif
+    // 1. Clean up session worktrees (s-*) not in the active session list
     for (const sub of subDirs) {
       if (!/^s-[\w-]+$/i.test(sub)) continue;
       const wtPath = path.join(repoPath, sub);
@@ -105,7 +105,7 @@ export async function cleanupWorkspaces(sessions, options = {}) {
         } catch {
           continue;
         }
-        // Cegah race condition: jangan hapus folder yang baru dibuat beberapa detik lalu
+        // Avoid a race: don't remove folders created just seconds ago
         if (minAgeMs > 0 && now - wtStat.mtimeMs < minAgeMs) continue;
         if (busy(entry)) break;
 
@@ -121,7 +121,7 @@ export async function cleanupWorkspaces(sessions, options = {}) {
       }
     }
 
-    // 2. Evaluasi apakah repository ini masih dipakai oleh sesi mana pun
+    // 2. Check whether this repository is still used by any session
     let remaining = [];
     try {
       remaining = fs.readdirSync(repoPath);
@@ -135,30 +135,30 @@ export async function cleanupWorkspaces(sessions, options = {}) {
 
     const isRepoActive = activeRepos.has(entry.toLowerCase()) || hasActiveWorktree;
 
-    // Kapan clone ini terakhir dipakai (penanda .last-used; clone lama tanpa penanda: mtime folder).
+    // When this clone was last used (.last-used marker; old clones without one: folder mtime).
     let lastUsed = stat.mtimeMs;
     try {
       lastUsed = Math.max(lastUsed, fs.statSync(path.join(repoPath, LAST_USED)).mtimeMs);
     } catch {}
     const idleFor = now - lastUsed;
-    // TTL 0 = hapus sekarang. Tanpa pengecualian ini, mtime presisi nanodetik (APFS) dari folder yang baru
-    // disentuh bisa sedikit melewati Date.now() yang dibulatkan ke milidetik, jadi idleFor negatif.
+    // TTL 0 = remove now. Without this exception, the nanosecond-precision mtime (APFS) of a just-touched
+    // folder can slightly exceed Date.now() rounded to milliseconds, making idleFor negative.
     const ttl = Math.max(repoTtlMs, minAgeMs);
 
-    // Tidak ada sesi aktif lagi di repo ini dan clone-nya sudah lama tidak dipakai.
-    // `busy` dicek ulang tepat sebelum menghapus: pembuatan sesi bisa dimulai saat `await` di atas.
+    // No active sessions left in this repo and its clone hasn't been used for a while.
+    // `busy` is re-checked right before removing: session creation may have started during the `await` above.
     if (!isRepoActive && (ttl <= 0 || idleFor >= ttl) && !busy(entry)) {
       safeRm(repoPath);
       result.removedRepos.push(repoPath);
     } else if (fs.existsSync(baseDir)) {
-      // Repo masih aktif: rapikan daftar worktree internal git
+      // Repo still active: prune git's internal worktree list
       try {
         await git(baseDir, ['worktree', 'prune']).catch(() => {});
       } catch {}
     }
   }
 
-  // 3. Bersihkan file log .jsonl dari sesi yang sudah dihapus
+  // 3. Clean up .jsonl logs of deleted sessions
   if (fs.existsSync(sessionsDir)) {
     try {
       const files = fs.readdirSync(sessionsDir);

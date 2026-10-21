@@ -1,20 +1,20 @@
-// Runner cloud: daemon snugcode di GitHub Codespaces atau container (Docker/Fly/VPS), tanpa PC.
+// Cloud runner: the snugcode daemon on GitHub Codespaces or a container (Docker/Fly/VPS), no PC needed.
 //
-// `snugcode cloud` membaca konfigurasi dari environment (lihat bootstrapCloud), lalu menjalankan
-// daemon di bawah supervisor kecil. Semua setelan lain (API key / login model, login GitHub, PIN,
-// perangkat) diatur dari HP lewat RPC. Saat tidak dipakai, runner berhenti sendiri (stopRunner).
+// `snugcode cloud` reads its configuration from the environment (see bootstrapCloud), then runs the
+// daemon under a small supervisor. Every other setting (API key / model login, GitHub login, PIN,
+// devices) is managed from the phone over RPC. When idle, the runner stops itself (stopRunner).
 //
-// Env yang dibaca (semuanya opsional kecuali token mesin):
-//   SNUGCODE_MACHINE_TOKEN  token mesin dari relay (/api/machines/provision); mid & akun dibaca darinya
-//   SNUGCODE_PAIR_PIN       PIN pairing (dibuat di HP); hanya diterapkan bila berubah sejak start terakhir
-//   SNUGCODE_RELAY          URL relay (bawaan: defaults.js)
-//   SNUGCODE_API_KEY        API key model apa pun (Anthropic, OpenAI, Gemini, OpenRouter, router, …), dideteksi otomatis
-//   SNUGCODE_API_URL        URL router/endpoint untuk key yang bukan key official (9router, OmniRoute, …)
-//   SNUGCODE_ROUTER         URL 9router;  SNUGCODE_ROUTER_KEY  key 9router (bentuk lama);  SNUGCODE_MODEL  model default
-//   SNUGCODE_GITHUB_TOKEN   token GitHub untuk clone/push (bisa juga login dari HP)
-//   SNUGCODE_NAME           nama mesin;  SNUGCODE_IDLE_MINUTES  berhenti setelah N menit menganggur (0 = tidak)
-//   SNUGCODE_IDLE_EXIT=1    container: keluar (exit 0) saat menganggur
-//   CODESPACE_NAME          diisi Codespaces: runner dihentikan lewat GitHub API (token dari HP)
+// Env read (all optional except the machine token):
+//   SNUGCODE_MACHINE_TOKEN  machine token from the relay (/api/machines/provision); mid & account are read from it
+//   SNUGCODE_PAIR_PIN       pairing PIN (created on the phone); only applied if changed since the last start
+//   SNUGCODE_RELAY          relay URL (default: defaults.js)
+//   SNUGCODE_API_KEY        any model API key (Anthropic, OpenAI, Gemini, OpenRouter, router, …), auto-detected
+//   SNUGCODE_API_URL        router/endpoint URL for keys that aren't official keys (9router, OmniRoute, …)
+//   SNUGCODE_ROUTER         9router URL;  SNUGCODE_ROUTER_KEY  9router key (legacy form);  SNUGCODE_MODEL  default model
+//   SNUGCODE_GITHUB_TOKEN   GitHub token for clone/push (you can also sign in from the phone)
+//   SNUGCODE_NAME           machine name;  SNUGCODE_IDLE_MINUTES  stop after N idle minutes (0 = never)
+//   SNUGCODE_IDLE_EXIT=1    container: exit (exit 0) when idle
+//   CODESPACE_NAME          set by Codespaces: the runner is stopped via the GitHub API (token from the phone)
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,8 +27,8 @@ export const IDLE_MINUTES_DEFAULT = 30;
 
 const env1 = (env, k) => env['SNUGCODE_' + k] || env['POCKETCODE_' + k] || '';
 
-// Payload token mesin (dibuat & ditandatangani relay): { kind: 'machine', sub, login, mid }.
-// Tidak diverifikasi di sini — relay yang memverifikasinya saat daemon tersambung.
+// Machine token payload (created & signed by the relay): { kind: 'machine', sub, login, mid }.
+// Not verified here — the relay verifies it when the daemon connects.
 export function decodeMachineToken(token) {
   try {
     const body = String(token).split('.')[0];
@@ -39,8 +39,8 @@ export function decodeMachineToken(token) {
   }
 }
 
-// Nilai dari env diterapkan hanya bila berbeda dari yang terakhir diterapkan dari env, sehingga
-// perubahan dari HP (ganti PIN, ganti key) tidak ditimpa lagi setiap runner start ulang.
+// Env values are applied only when they differ from what was last applied from env, so
+// changes made from the phone (new PIN, new key) aren't overwritten on every runner restart.
 const fp = (scope, v) => createHash('sha256').update(scope + '\0' + v).digest('hex').slice(0, 32);
 function fromEnv(sec, name, value) {
   if (!value) return false;
@@ -52,7 +52,7 @@ function fromEnv(sec, name, value) {
 }
 
 /**
- * Isi config & secrets dari environment (idempoten). Mengubah objek yang diberikan.
+ * Fill config & secrets from the environment (idempotent). Mutates the given objects.
  * @param {Record<string, string | undefined>} env
  * @returns {Promise<{ relinked: boolean, warnings: string[] }>}
  */
@@ -66,9 +66,9 @@ export async function bootstrapCloud(env, cfg, sec) {
   const token = env1(env, 'MACHINE_TOKEN');
   if (token && token !== sec.machineToken) {
     const p = decodeMachineToken(token);
-    if (!p) throw new Error('SNUGCODE_MACHINE_TOKEN tidak valid');
+    if (!p) throw new Error('SNUGCODE_MACHINE_TOKEN is invalid');
     if (p.mid !== cfg.machineId) {
-      // Mesin baru: pairing HP & PIN milik mesin lama tidak berlaku lagi.
+      // New machine: phone pairings & PIN of the old machine no longer apply.
       sec.devices = {};
       resetPinLock(sec);
       delete sec.prs;
@@ -79,17 +79,17 @@ export async function bootstrapCloud(env, cfg, sec) {
     cfg.machineId = p.mid;
     cfg.relayLogin = p.login;
   }
-  if (!sec.machineToken) throw new Error('SNUGCODE_MACHINE_TOKEN belum di-set. Buat runner dari aplikasi HP (Pakai cloud), atau salin token dari /api/machines/provision.');
+  if (!sec.machineToken) throw new Error('SNUGCODE_MACHINE_TOKEN is not set. Create the runner from the phone app (Use cloud), or copy the token from /api/machines/provision.');
   cfg.linkedRelay = cfg.relayUrl;
   cfg.machineName = env1(env, 'NAME') || cfg.machineName || 'Cloud';
 
   const pin = env1(env, 'PAIR_PIN');
-  if (pin && !PIN_RE.test(pin)) warnings.push('SNUGCODE_PAIR_PIN diabaikan: harus 6–12 huruf/angka.');
+  if (pin && !PIN_RE.test(pin)) warnings.push('SNUGCODE_PAIR_PIN ignored: must be 6–12 letters/digits.');
   else if (pin && (fromEnv(sec, 'pin', cfg.machineId + ':' + normalizePin(pin)) || !sec.prs)) {
     sec.prs = bytesToHex(await pinToPrs(pin, cfg.machineId));
     resetPinLock(sec);
   }
-  if (!sec.prs) warnings.push('Belum ada PIN: HP belum bisa dipasangkan. Set SNUGCODE_PAIR_PIN.');
+  if (!sec.prs) warnings.push('No PIN yet: phones can\'t pair. Set SNUGCODE_PAIR_PIN.');
 
   const key = env1(env, 'ROUTER_KEY');
   if (fromEnv(sec, 'routerKey', key)) sec.routerKey = key;
@@ -107,13 +107,13 @@ export async function bootstrapCloud(env, cfg, sec) {
 
 export const idleMinutes = (cfg) => (cfg.idleStopMinutes ?? IDLE_MINUTES_DEFAULT);
 
-// Supervisor runner Codespaces mengabaikan SIGTERM (lihat cli.js cloud): daemon yang mati selagi
-// codespace menyala tidak akan dinyalakan lagi oleh siapa pun. Container (Docker) tetap berhenti rapi.
+// The Codespaces runner supervisor ignores SIGTERM (see cli.js cloud): a daemon that dies while the
+// codespace is running would never be started again by anyone. Containers (Docker) still stop cleanly.
 export const supervisorIgnoresTerm = (cfg) => cfg.runner?.provider === 'codespace';
 
-// Hentikan runner yang menganggur. Codespaces: lewat GitHub API dengan token ber-scope `codespace`
-// yang dikirim HP (RPC runnerConfig). Container: daemon keluar (exit 0) dan supervisor ikut berhenti.
-// @returns 'stopped' | 'exit' | null (tidak ada cara menghentikan runner ini)
+// Stop an idle runner. Codespaces: via the GitHub API with a `codespace`-scoped token
+// sent by the phone (RPC runnerConfig). Container: the daemon exits (exit 0) and the supervisor stops too.
+// @returns 'stopped' | 'exit' | null (no way to stop this runner)
 export async function stopRunner(cfg, sec, { fetchImpl = fetch } = {}) {
   const r = cfg.runner || {};
   if (r.provider === 'codespace' && r.name && sec.runnerToken) {
@@ -124,16 +124,16 @@ export async function stopRunner(cfg, sec, { fetchImpl = fetch } = {}) {
     if (res.ok) return 'stopped';
     if (res.status === 401) {
       delete sec.runnerToken;
-      throw new Error('token Codespaces dari HP tidak berlaku lagi (buka aplikasi untuk memperbaruinya)');
+      throw new Error('the Codespaces token from the phone is no longer valid (open the app to refresh it)');
     }
-    throw new Error('GitHub menjawab ' + res.status);
+    throw new Error('GitHub answered ' + res.status);
   }
   if (r.idleExit) return 'exit';
   return null;
 }
 
-// Laporkan tahap/kegagalan runner ke relay (tampil di aplikasi HP selama runner belum tersambung).
-// Hanya bila token mesin tersedia; kegagalan jaringan diabaikan.
+// Report the runner's stage/failure to the relay (shown in the phone app while the runner isn't connected yet).
+// Only when a machine token is available; network failures are ignored.
 export async function reportStatus(env, stage, msg, { fetchImpl = fetch } = {}) {
   const token = env1(env, 'MACHINE_TOKEN');
   if (!token) return false;
@@ -151,12 +151,12 @@ export async function reportStatus(env, stage, msg, { fetchImpl = fetch } = {}) 
   }
 }
 
-// ---------- Perkiraan pemakaian kuota ----------
-// API billing GitHub tidak bisa dibaca dengan scope `codespace`, jadi runner mencatat sendiri berapa lama
-// ia menyala per bulan (UTC, seperti siklus kuota Codespaces) dikali jumlah core. Ini perkiraan: waktu
-// codespace menyala sebelum daemon berjalan (build, start) dan pemakaian codespace lain tidak terhitung.
+// ---------- Estimated quota usage ----------
+// GitHub's billing API can't be read with the `codespace` scope, so the runner records how long
+// it's been running per month (UTC, like the Codespaces quota cycle) times the core count. It's an estimate:
+// time the codespace ran before the daemon started (build, start) and other codespaces' usage aren't counted.
 const USAGE_FILE = path.join(HOME, 'runner-usage.json');
-const TICK_MAX = 5 * 60; // celah lebih lama dari ini = runner sempat mati (tidak dihitung)
+const TICK_MAX = 5 * 60; // a gap longer than this = the runner was down (not counted)
 export const FREE_CORE_HOURS = 120; // GitHub Free; Pro: 180
 
 const month = (t) => new Date(t).toISOString().slice(0, 7);
@@ -170,7 +170,7 @@ export function readUsage(file = USAGE_FILE) {
   }
 }
 
-/** Tambahkan waktu menyala sejak tick terakhir. @returns {any} isi file yang baru */
+/** Add running time since the last tick. @returns {any} the new file contents */
 export function tickUsage(now = Date.now(), { file = USAGE_FILE, cores = os.cpus().length } = {}) {
   const u = readUsage(file);
   const gap = u.last ? (now - u.last) / 1000 : 0;
@@ -181,7 +181,7 @@ export function tickUsage(now = Date.now(), { file = USAGE_FILE, cores = os.cpus
   }
   u.last = now;
   u.cores = cores;
-  // Simpan 12 bulan terakhir saja.
+  // Keep only the last 12 months.
   u.months = Object.fromEntries(Object.entries(u.months).sort(([a], [b]) => a.localeCompare(b)).slice(-12));
   try {
     fs.writeFileSync(file, JSON.stringify(u));
@@ -189,7 +189,7 @@ export function tickUsage(now = Date.now(), { file = USAGE_FILE, cores = os.cpus
   return u;
 }
 
-/** Ringkasan bulan berjalan untuk HP. */
+/** Current month summary for the phone. */
 export function usageSummary(now = Date.now(), file = USAGE_FILE) {
   const u = readUsage(file);
   const cur = u.months[month(now)] || { secs: 0, coreSecs: 0 };

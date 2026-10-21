@@ -1,6 +1,6 @@
-// Terminal interaktif di HP: xterm.js (dimuat saat pertama dibuka) + baris tombol ekstra (Esc, Tab,
-// Ctrl, Alt, panah, …) untuk keyboard HP. Shell-nya hidup di PC: menutup layar ini tidak mematikannya,
-// dan membukanya lagi memutar ulang output terakhir.
+// Interactive terminal on the phone: xterm.js (loaded on first open) + an extra key row (Esc, Tab,
+// Ctrl, Alt, arrows, …) for phone keyboards. The shell lives on the PC: closing this screen doesn't kill it,
+// and reopening replays the latest output.
 import { app } from './state.js';
 import { store } from '../conn.js';
 import { coarse, copyText, h, haptic, ic, isOldDaemon, toast, ui } from './dom.js';
@@ -10,7 +10,7 @@ import { ctrlKey, imeDelta } from '../termkeys.js';
 let lib = null;
 function loadLib() {
   if (!document.querySelector('link[data-xterm]')) document.head.append(h('link', { rel: 'stylesheet', href: 'xterm.css', 'data-xterm': true }));
-  // Bundle terpisah (scripts/build-web.mjs): app.js tetap ringan untuk yang tidak memakai terminal.
+  // Separate bundle (scripts/build-web.mjs): app.js stays light for people who don't use the terminal.
   lib ??= import(new URL('xterm.js', document.baseURI).href).catch((e) => {
     lib = null;
     throw e;
@@ -18,8 +18,8 @@ function loadLib() {
   return lib;
 }
 
-// Diunduh saat HP menganggur begitu sesi dengan terminal dibuka (service worker menyimpannya), agar membuka
-// terminal di sinyal lemah tidak gagal "Gagal memuat terminal". Hanya diunduh, belum dijalankan.
+// Downloaded while the phone is idle once a session with a terminal opens (the service worker caches it), so
+// opening the terminal on a weak signal doesn't fail to load. Only downloaded, not executed.
 let prefetched = false;
 export function prefetchTerminal() {
   if (prefetched) return;
@@ -31,7 +31,7 @@ export function prefetchTerminal() {
 }
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-// Palet ANSI bawaan xterm dibuat untuk latar gelap; tema terang memakai warna yang lebih pekat.
+// xterm's default ANSI palette is made for dark backgrounds; the light theme uses deeper colors.
 const LIGHT_ANSI = { black: '#1f1e1d', red: '#b3261e', green: '#2e7d32', yellow: '#8a6100', blue: '#1f5fbf', magenta: '#8e3fa8', cyan: '#0f7c80', white: '#6b6a64', brightBlack: '#6b6a64', brightRed: '#c4432f', brightGreen: '#3f8f5a', brightYellow: '#a8741a', brightBlue: '#2f6fb8', brightMagenta: '#7a5bd1', brightCyan: '#2a8a86', brightWhite: '#1f1e1d' };
 function themeOf() {
   const bg = css('--code-bg');
@@ -40,11 +40,11 @@ function themeOf() {
   return { background: bg, foreground: css('--fg'), cursor: css('--accent'), cursorAccent: bg, selectionBackground: css('--accent-soft') || 'rgba(217,119,87,.3)', ...(light ? LIGHT_ANSI : {}) };
 }
 
-// Keyboard HP mengetik lewat komposisi IME: xterm.js baru meneruskan kata setelah di-commit (spasi/Enter)
-// dan ketikan dengan keydown 229 di luar komposisi bisa hilang, jadi di Android layar terminal tampak diam
-// saat mengetik. Di layar sentuh, perubahan isi textarea bantu xterm dikirim sendiri begitu terjadi
-// sebagai selisih (imeDelta) — termasuk koreksi otomatis, ketik geser, dan input suara. Event komposisi &
-// input dihentikan di elemen induk (fase capture) sebelum sampai ke listener xterm di textarea.
+// Phone keyboards type through IME composition: xterm.js only forwards a word once committed (space/Enter)
+// and keystrokes with keydown 229 outside a composition can get lost, so on Android the terminal looks frozen
+// while typing. On touch screens, changes to xterm's helper textarea are sent ourselves as they happen,
+// as a diff (imeDelta) — including autocorrect, swipe typing, and voice input. Composition & input events
+// are stopped at the parent (capture phase) before reaching xterm's textarea listeners.
 function mobileInput(term) {
   const ta = term.textarea;
   const host = term.element;
@@ -53,8 +53,8 @@ function mobileInput(term) {
   ta.setAttribute('enterkeyhint', 'enter');
   let prev = ta.value;
   let composing = false;
-  // Karakter dari keypress sudah dikirim xterm, yang tidak membatalkan event-nya (mis. spasi keyboard
-  // fisik): teks yang lalu masuk ke textarea hanya dicatat, tidak dikirim lagi.
+  // Characters from keypress were already sent by xterm, which doesn't cancel the event (e.g. a physical
+  // keyboard space): text that then lands in the textarea is only recorded, not sent again.
   let keyPressed = false;
   const own = (/** @type {Event} */ e) => e.target === ta;
   host.addEventListener('compositionstart', (e) => own(e) && ((composing = true), e.stopPropagation()), true);
@@ -67,12 +67,12 @@ function mobileInput(term) {
     prev = ta.value;
     if (d && !keyPressed) term.input(d, true);
     keyPressed = false;
-    // Kata yang di-commit menumpuk di textarea: dikosongkan setelah Enter / bila panjang, di luar komposisi.
+    // Committed words pile up in the textarea: cleared after Enter / when long, outside a composition.
     if (!composing && (prev.length > 256 || prev.includes('\n'))) ta.value = prev = '';
   }, true);
-  // keydown 229 = "lewat IME": ditangani event input di atas. Tombol lain (Enter, Backspace saat textarea
-  // kosong, panah & keyboard fisik) tetap ditangani xterm, yang bisa mengosongkan textarea (Enter, ^C):
-  // selisih berikutnya dihitung dari isi setelah listener xterm selesai.
+  // keydown 229 = "via IME": handled by the input event above. Other keys (Enter, Backspace on an empty
+  // textarea, arrows & physical keyboards) are still handled by xterm, which may clear the textarea (Enter, ^C):
+  // the next diff is computed from the content after xterm's listener finishes.
   term.attachCustomKeyEventHandler((e) => {
     if (e.keyCode === 229) return false;
     if (e.type === 'keydown') {
@@ -83,8 +83,8 @@ function mobileInput(term) {
   });
 }
 
-// Cubit dua jari di layar terminal mengubah ukuran huruf (zoom halaman dikunci seperti aplikasi native).
-// Fase capture: viewport xterm menangani sentuhan sendiri dan tidak meneruskannya ke induk.
+// A two-finger pinch on the terminal changes the font size (page zoom is locked like a native app).
+// Capture phase: xterm's viewport handles touches itself and doesn't pass them to the parent.
 const FONT_MIN = 8;
 const FONT_MAX = 24;
 function pinchFont(term, el, onChange) {
@@ -111,7 +111,7 @@ export async function showTerminal() {
   try {
     L = await loadLib();
   } catch {
-    return toast('Gagal memuat terminal. Periksa koneksi lalu coba lagi.', true);
+    return toast('Couldn’t load the terminal. Check the connection and try again.', true);
   }
   ui.closeSheet();
   const saved = Number(store.get('termFont'));
@@ -127,13 +127,13 @@ export async function showTerminal() {
   const mods = { ctrl: false, alt: false };
   const tabs = h('div', { class: 'ttabs' });
   const screen = h('div', { class: 'tscreen' });
-  const empty = h('div', { class: 'tempty', hidden: true }, h('div', { class: 'dim small' }, 'Tidak ada terminal yang terbuka.'), h('button', { class: 'btn primary', onclick: () => openNew() }, ic('plus'), 'Buka terminal'));
+  const empty = h('div', { class: 'tempty', hidden: true }, h('div', { class: 'dim small' }, 'No terminals open.'), h('button', { class: 'btn primary', onclick: () => openNew() }, ic('plus'), 'Open a terminal'));
   const keys = h('div', { class: 'tkeys' });
   const view = h('div', { class: 'termview', role: 'dialog', 'aria-label': 'Terminal' },
     h('div', { class: 'tbar' },
-      h('button', { class: 'iconbtn', 'aria-label': 'Tutup layar terminal', onclick: () => close() }, ic('back')),
+      h('button', { class: 'iconbtn', 'aria-label': 'Close terminal screen', onclick: () => close() }, ic('back')),
       tabs,
-      h('button', { class: 'iconbtn', 'aria-label': 'Terminal baru', onclick: () => openNew() }, ic('plus')),
+      h('button', { class: 'iconbtn', 'aria-label': 'New terminal', onclick: () => openNew() }, ic('plus')),
     ),
     h('div', { class: 'tbody' }, screen, empty),
     keys,
@@ -157,7 +157,7 @@ export async function showTerminal() {
     });
   }
 
-  // --- input: dikumpulkan per ~8ms jadi satu RPC (ketikan cepat / tempel teks) ---
+  // --- input: batched per ~8ms into one RPC (fast typing / pasted text) ---
   let inq = '';
   let inT = null;
   const flushIn = () => {
@@ -179,7 +179,7 @@ export async function showTerminal() {
   };
   term.onData((d) => sendIn(applyMods(d)));
 
-  // --- ukuran: PTY di PC mengikuti ukuran layar terakhir yang membuka terminal itu ---
+  // --- size: the PTY on the PC follows the last screen that opened that terminal ---
   let rsT;
   term.onResize(({ cols, rows }) => {
     clearTimeout(rsT);
@@ -188,21 +188,21 @@ export async function showTerminal() {
   const ro = new ResizeObserver(syncSize);
   ro.observe(screen);
 
-  // --- tombol ekstra ---
+  // --- extra keys ---
   const arrow = (c) => (term.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[') + c;
-  // Menekan lama layar xterm di HP tidak memunculkan menu Tempel: isi clipboard dikirim lewat tombol,
-  // memakai term.paste (bracketed paste bila shell memintanya, baris baru jadi Enter).
+  // Long-pressing xterm on a phone doesn't bring up a Paste menu: clipboard content is sent via a button,
+  // using term.paste (bracketed paste when the shell asks for it, newlines become Enter).
   const paste = async () => {
     try {
       const text = await navigator.clipboard.readText();
       if (text) term.paste(text);
-      else toast('Clipboard kosong');
+      else toast('Clipboard is empty');
     } catch {
-      toast('Izinkan akses clipboard untuk menempel.', true);
+      toast('Allow clipboard access to paste.', true);
     }
   };
-  // Seleksi di kanvas xterm sulit di layar sentuh: tanpa seleksi, seluruh isi layar disalin (baris yang
-  // terbungkus disambung kembali).
+  // Selecting on xterm's canvas is hard on touch screens: with no selection, the whole screen is copied
+  // (wrapped lines are joined back).
   const copy = async () => {
     let text = term.getSelection();
     if (!text) {
@@ -214,7 +214,7 @@ export async function showTerminal() {
       }
       text = text.replace(/\s+$/, '');
     }
-    if (text && (await copyText(text))) toast(term.hasSelection() ? 'Teks terpilih disalin' : 'Isi layar disalin');
+    if (text && (await copyText(text))) toast(term.hasSelection() ? 'Selection copied' : 'Screen copied');
     term.focus();
   };
   const KEYS = [
@@ -226,8 +226,8 @@ export async function showTerminal() {
     ['↓', () => arrow('B')],
     ['↑', () => arrow('A')],
     ['→', () => arrow('C')],
-    ['Tempel', 'paste'],
-    ['Salin', 'copy'],
+    ['Paste', 'paste'],
+    ['Copy', 'copy'],
     ['^C', () => '\x03'],
     ['Home', () => arrow('H')],
     ['End', () => arrow('F')],
@@ -242,7 +242,7 @@ export async function showTerminal() {
         h('button', {
           class: 'tk' + (typeof act === 'string' && mods[act] ? ' on' : ''),
           'aria-label': label === '^C' ? 'Ctrl+C' : null,
-          // Jangan ambil fokus dari xterm: keyboard HP tetap terbuka.
+          // Don't steal focus from xterm: the phone keyboard stays open.
           onpointerdown: (e) => e.preventDefault(),
           onclick: () => {
             haptic(5);
@@ -262,7 +262,7 @@ export async function showTerminal() {
       ...list.map((t) =>
         h('div', { class: 'ttab' + (t.tid === cur ? ' on' : '') },
           h('button', { class: 'tt', onclick: () => t.tid !== cur && attach(t.tid) }, t.title),
-          t.tid === cur ? h('button', { class: 'tx', 'aria-label': 'Tutup ' + t.title, onclick: () => closeTerm(t) }, ic('x')) : null,
+          t.tid === cur ? h('button', { class: 'tx', 'aria-label': 'Close ' + t.title, onclick: () => closeTerm(t) }, ic('x')) : null,
         ),
       ),
     );
@@ -298,12 +298,12 @@ export async function showTerminal() {
       list.push({ tid: r.tid, title: r.title });
       show(r);
     } catch (e) {
-      toast(isOldDaemon(e) ? 'Perbarui snugcode di PC untuk terminal interaktif.' : e.message, true);
+      toast(isOldDaemon(e) ? 'Update snugcode on the PC for the interactive terminal.' : e.message, true);
       renderTabs();
     }
   };
   const closeTerm = async (t) => {
-    if (!(await ui.confirm({ title: `Tutup ${t.title}?`, text: 'Shell dan proses yang berjalan di dalamnya dihentikan.', ok: 'Tutup', danger: true, icon: 'term' }))) return term.focus();
+    if (!(await ui.confirm({ title: `Close ${t.title}?`, text: 'The shell and any processes running in it will be stopped.', ok: 'Close', danger: true, icon: 'term' }))) return term.focus();
     await app.conn.call('termClose', { tid: t.tid }).catch(() => {});
     list = list.filter((x) => x.tid !== t.tid);
     cur = null;
@@ -315,7 +315,7 @@ export async function showTerminal() {
     if (m.tid !== cur) return;
     if (m.d) term.write(m.d);
     if (m.exit != null) {
-      term.write(`\r\n\x1b[2m[shell selesai · kode ${m.exit}]\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[2m[shell exited · code ${m.exit}]\x1b[0m\r\n`);
       list = list.filter((t) => t.tid !== m.tid);
       cur = null;
       renderTabs();
@@ -323,7 +323,7 @@ export async function showTerminal() {
       screen.hidden = false;
     }
   };
-  // Tersambung lagi setelah koneksi putus: berlangganan ulang & putar ulang output.
+  // Reconnected after a drop: resubscribe & replay output.
   app.current.onTermReady = () => cur && attach(cur);
 
   function close() {
@@ -338,7 +338,7 @@ export async function showTerminal() {
   try {
     list = (await app.conn.call('termList', { id: s.id })).map((t) => ({ tid: t.tid, title: t.title }));
   } catch (e) {
-    if (isOldDaemon(e)) return close(), toast('Perbarui snugcode di PC untuk terminal interaktif.', true);
+    if (isOldDaemon(e)) return close(), toast('Update snugcode on the PC for the interactive terminal.', true);
   }
   if (list.length) await attach(list.at(-1).tid);
   else await openNew();
