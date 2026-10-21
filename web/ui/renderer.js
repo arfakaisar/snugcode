@@ -20,6 +20,8 @@ export class Renderer {
     this.dock = dock;
     this.tools = new Map();
     this.users = new Map(); // seq prompt -> tombol rewind
+    /** @type {Set<string>} catatan (note) yang sudah tampil di layar ini */
+    this.notes = new Set();
     this.permQueue = [];
     this.nextSteps = NEXT_OK;
     this.nextEl = null;
@@ -208,8 +210,14 @@ export class Renderer {
       case 'shDone':
         this.outEl = null;
         return this.append(h('div', { class: 'meta', style: 'margin-bottom:8px' }, e.code === 0 ? '✓ exit 0' : `✗ exit ${e.code}`));
-      case 'note':
-        return this.append(h('div', { class: 'note' }, h('span', {}, '◆'), h('span', {}, e.d)));
+      case 'note': {
+        // Teks dari daemon sudah diawali "◆" (ikon ditambahkan di sini). Peringatan yang sama (mis. sandbox
+        // OS, dikirim sekali per proses daemon) tampil sekali saja walau daemon sempat restart.
+        const text = String(e.d).replace(/^◆\s*/, '');
+        if (this.notes.has(text)) return;
+        this.notes.add(text);
+        return this.append(h('div', { class: 'note' }, h('span', {}, '◆'), h('span', {}, text)));
+      }
       case 'error':
         return this.line('e', '✗ ' + e.d);
     }
