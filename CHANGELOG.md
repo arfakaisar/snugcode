@@ -23,8 +23,13 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 - **Zoom PWA dikunci seperti aplikasi native**: meta viewport `maximum-scale=1, user-scalable=no`, `touch-action:
   pan-x pan-y` di semua elemen (cubit & ketuk-dua-kali tidak memperbesar, geser tetap jalan), dan gestur cubit Safari
   iOS (yang mengabaikan `user-scalable`) dibatalkan di `web/ui/dom.js`.
+- **Ukuran teks** (Akun & tampilan: Kecil / Normal / Besar / Sangat besar) sebagai pengganti zoom halaman untuk
+  aksesibilitas: CSS `zoom` pada isi layar, sheet & drawer, dipasang `theme.js` sebelum render pertama (tanpa kedip).
 - **Terminal HP**: cubit dua jari mengubah ukuran huruf (8–24 px, diingat per perangkat); tombol **Tempel** (isi
-  clipboard lewat bracketed paste — menekan lama layar xterm tidak memberi menu Tempel), **Home**, dan **End**.
+  clipboard lewat bracketed paste — menekan lama layar xterm tidak memberi menu Tempel), **Salin** (teks terpilih, atau
+  seluruh isi layar dengan baris terbungkus disambung), **Home**, dan **End**.
+- Aset terminal (`xterm.js`, `xterm.css`) diunduh saat HP menganggur begitu sesi dengan terminal dibuka, jadi membuka
+  terminal di sinyal lemah tidak lagi gagal "Gagal memuat terminal".
 - Menekan lama tombol tidak lagi menyeleksi teks atau memunculkan menu salin.
 
 ## 2026-10-20 — v0.4.0: keamanan relay, koneksi tahan banting, izin bertingkat risiko, biaya sesi
