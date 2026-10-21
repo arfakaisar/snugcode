@@ -191,6 +191,10 @@ await shot('13-terminal');
   // Bash memakai bracketed paste: baris baru hasil tempel tidak langsung menjalankan perintah.
   await page.keyboard.press('Enter');
   await waitLine(/^tempel-5$/);
+  // Tombol Salin tanpa seleksi: seluruh isi layar terminal masuk clipboard
+  await page.locator('.termview .tk', { hasText: 'Salin' }).click();
+  await page.waitForSelector('.toast >> text=Isi layar disalin');
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^tempel-5$/m);
 }
 await page.click('.termview [aria-label="Tutup layar terminal"]');
 await page.waitForSelector('.termview', { state: 'detached' });
@@ -215,12 +219,27 @@ ok('drawer: sesi aktif ditandai, Beranda kembali ke daftar sesi');
 const overflow = await page.evaluate(() => [...document.querySelectorAll('#view *')].filter((el) => el.getBoundingClientRect().right > innerWidth + 1).map((el) => el.className || el.tagName));
 assert.deepEqual(overflow, [], 'elemen melewati lebar layar');
 ok('judul sesi panjang terpotong rapi, tidak ada elemen keluar layar');
+// Ukuran teks (pengganti zoom halaman yang dikunci): isi layar membesar tanpa elemen keluar layar
+await page.click('#menuBtn');
+await page.locator('#drawerPanel .dme').click();
+await page.locator('#sheet:not([hidden]) .seg button[aria-label="Sangat besar"]').click();
+assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#view')).zoom), '1.3');
+await shot('14-teks-besar');
+await closeSheet();
+const overflowBig = await page.evaluate(() => [...document.querySelectorAll('#view *')].filter((el) => el.getBoundingClientRect().right > innerWidth + 1).map((el) => el.className || el.tagName));
+assert.deepEqual(overflowBig, [], 'teks besar: elemen melewati lebar layar');
+ok('ukuran teks: Sangat besar diterapkan ke isi layar, tetap muat lebar HP');
 await page.locator('#view >> text=' + path.basename(repo)).first().click();
 await page.locator('text=' + path.basename(repo)).first().click();
 await page.waitForFunction(() => document.querySelectorAll('.donel').length === 3, null, { timeout: 20000 });
 const replay = await page.evaluate(() => ({ done: document.querySelectorAll('.donel').length, todo: document.querySelectorAll('#term .col > .todo').length, h3: document.querySelectorAll('.ln.txt h3').length }));
 assert.deepEqual(replay, { done: 3, todo: 1, h3: 12 });
 ok('buka ulang sesi: riwayat diputar ulang tanpa duplikat ' + JSON.stringify(replay));
+
+// Ukuran teks dipasang theme.js sebelum render pertama (tanpa kedip), lalu dikembalikan ke Normal
+await page.reload();
+assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--text-scale')), '1.3');
+await page.evaluate(() => localStorage.removeItem('pc.textScale'));
 
 assert.deepEqual(errors, []);
 ok('tanpa error JavaScript di seluruh alur');

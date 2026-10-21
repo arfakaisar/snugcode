@@ -150,6 +150,8 @@ html {
   background: var(--bg);
 }
 html, body { margin: 0; height: 100%; overflow: hidden; }
+/* Ukuran teks pilihan pengguna (Akun & tampilan): isi layar, sheet & drawer ikut membesar. */
+#view, #sheetBody, #drawerPanel { zoom: var(--text-scale, 1); }
 body {
   color: var(--fg);
   font: 15px/1.5 var(--sans);
