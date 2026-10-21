@@ -72,6 +72,7 @@ jobs:
       - run: npm run test:e2e:relay
         env:
           RELAY_STALE: http://127.0.0.1:8788
+      - run: npm run test:e2e:reserve
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
       # Multi-provider connections: OpenAI-only endpoints through the translator (Claude Agent SDK) and GPT models
