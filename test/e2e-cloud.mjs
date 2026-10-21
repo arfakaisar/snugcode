@@ -148,6 +148,41 @@ if (exe) {
   assert.equal(await P.page.evaluate(() => localStorage.getItem('pc.ghcs')), null, 'token yang ditolak dibuang');
   await P.shot('5-hubungkan-lagi');
   await P.page.unroute('https://api.github.com/**');
+  // Codespace menyala tapi snugcode di dalamnya mati (tidak online, tidak melapor): dinyalakan ulang sekali
+  // (stop → start, postStartCommand menjalankan runner lagi); tetap diam → error dengan petunjuk log.
+  {
+    const dead = (await (await api('/api/machines')).json()).machines.find((m) => m.id !== prov.mid);
+    let state = 'Available';
+    const calls = [];
+    await P.page.route('https://api.github.com/**', (r) => {
+      const u = new URL(r.request().url());
+      if (r.request().method() === 'POST') calls.push(u.pathname.split('/').pop());
+      if (u.pathname.endsWith('/stop')) state = 'Shutdown';
+      if (u.pathname.endsWith('/start')) state = 'Available';
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: 'cs-mati', state, web_url: 'https://github.com/codespaces' }) });
+    });
+    await P.page.evaluate((mid) => {
+      localStorage.setItem('pc.ghcs', JSON.stringify({ token: 'ok', login: 'x' }));
+      localStorage.setItem('pc.cloud.' + mid, JSON.stringify({ codespace: 'cs-mati' }));
+      localStorage.removeItem('pc.last');
+    }, dead.id);
+    await P.page.reload();
+    await P.page.waitForSelector('.cardrow');
+    await P.page.clock.install();
+    await P.page.locator('.cardrow', { hasText: 'tidur' }).first().locator('.card').click();
+    await P.page.waitForSelector('text=Menyalakan runner');
+    const tick = async (n) => {
+      for (let i = 0; i < n; i++) await P.page.clock.runFor(5000), await sleep(60);
+    };
+    await tick(12); // > 45 detik menyala tanpa laporan
+    assert.deepEqual(calls, ['stop', 'start'], 'codespace dinyalakan ulang sekali: ' + calls);
+    await tick(80); // > 6 menit setelah dinyalakan ulang, tetap tanpa laporan
+    await P.page.waitForSelector('text=runner tidak melapor');
+    assert.deepEqual(calls, ['stop', 'start'], 'tidak dinyalakan ulang berulang-ulang');
+    assert.ok(await P.page.getByText('Coba lagi').count(), 'tombol coba lagi');
+    await P.shot('6-runner-mati');
+    await P.page.unroute('https://api.github.com/**');
+  }
   assert.deepEqual(P.errors, []);
   await P.page.close();
   // Akun tanpa mesin: pilihan utama "Pakai cloud", wizard meminta izin Codespaces.
@@ -160,7 +195,7 @@ if (exe) {
   assert.deepEqual(E.errors, []);
   await browser.close();
   await sleep(3100); // batas satu percobaan pairing per 3 detik di daemon
-  ok('PWA: pairing otomatis dengan PIN runner, sheet API key + deteksi + validasi, menu runner, hapus mesin dari daftar, hubungkan lagi Codespaces saat izin ditolak, layar tanpa mesin');
+  ok('PWA: pairing otomatis dengan PIN runner, sheet API key + deteksi + validasi, menu runner, hapus mesin dari daftar, hubungkan lagi Codespaces saat izin ditolak, codespace dengan runner mati dinyalakan ulang, layar tanpa mesin');
 } else console.log('- Chrome tidak ditemukan: uji PWA runner cloud dilewati');
 
 // ---------- HP: pairing dengan PIN yang dibuat HP ----------
@@ -250,6 +285,20 @@ assert.equal(info3.routerConfigured, true);
 assert.equal(info3.runner.idleStopMinutes, 15);
 assert.equal(runner.exitCode, null, 'supervisor tetap hidup');
 ok('restart dari HP: supervisor menyalakan daemon lagi, setelan tetap');
+
+// SIGTERM yang hanya mengenai daemon (mis. `kill` dari agen): supervisor menyalakannya lagi, HP tersambung ulang.
+{
+  const pid = +fs.readFileSync(path.join(HOME, 'daemon.pid'), 'utf8');
+  let readyAfterKill;
+  const back = new Promise((res) => (readyAfterKill = res));
+  A.conn.on('ready', (info) => readyAfterKill(info));
+  process.kill(pid, 'SIGTERM');
+  const info4 = await Promise.race([back, sleep(30000).then(() => null)]);
+  assert.ok(info4, 'tersambung lagi setelah daemon terkena SIGTERM\n' + rlog.slice(-2000));
+  assert.notEqual(+fs.readFileSync(path.join(HOME, 'daemon.pid'), 'utf8'), pid, 'daemon baru');
+  assert.equal(runner.exitCode, null, 'supervisor tetap hidup');
+  ok('daemon terkena SIGTERM: supervisor menyalakannya lagi');
+}
 
 // Supervisor berhenti rapi (container ikut berhenti).
 A.conn.close();

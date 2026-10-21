@@ -11,6 +11,15 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
   detik, dijawab otomatis): soket mesin tanpa ping selama 80 detik ditutup (kode 4006) dan mesin dicatat offline,
   dicek saat daftar mesin dibuka, saat HP tersambung/mengirim pesan, dan berkala (alarm) selama ada HP yang tersambung.
   Runner Codespaces yang dihentikan kini langsung dinyalakan lagi saat dibuka dari aplikasi.
+- **Runner Codespaces yang daemonnya mati tidak lagi macet di "menunggu snugcode tersambung…".** Daemon hanya
+  dijalankan saat codespace menyala (`postStartCommand`), jadi daemon yang mati selagi codespace tetap menyala tidak
+  pernah hidup lagi. Kini:
+  - supervisor `snugcode cloud` menyalakan lagi daemon yang terkena sinyal (mis. `pkill node` / `killall node` dari
+    agen); daemon di bawah supervisor keluar dengan 128+sinyal, bukan 0. Di Codespaces supervisor juga mengabaikan
+    SIGTERM (berhenti sengaja: `snugcode stop` atau dari aplikasi; codespace yang dihentikan tetap mematikan semuanya);
+  - aplikasi menyalakan ulang codespace sekali (stop → start) bila codespace menyala 45 detik tanpa runner tersambung
+    atau melapor, dan menampilkan error dengan petunjuk `cloud.log` (tombol *Coba lagi*) bila setelah itu runner tetap
+    diam 6 menit — sebelumnya layar menunggu tanpa batas.
 - **Ikon PWA di iPhone tidak lagi tampil sebagai huruf "S".** iOS membuat ikon huruf bila `apple-touch-icon` gagal
   diambil saat "Add to Home Screen"; di iOS 27 pemuat lembar itu gagal mengambil ikon dari URL jaringan. Ikon 180×180
   kini disisipkan sebagai `data:` URI di `index.html` saat build (`sizes="180x180"`), dan

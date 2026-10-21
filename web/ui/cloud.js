@@ -260,24 +260,59 @@ async function codespaceOf(m) {
 }
 
 // ---------- Nyalakan / hentikan / hapus ----------
-// Dipanggil saat runner offline dibuka. onState(teks) untuk layar tunggu. Mengembalikan false bila
-// tidak bisa dinyalakan dari HP ini (belum ada izin Codespaces) — pemanggil menampilkan tombolnya.
-export async function wakeRunner(m, onState) {
+// Codespace menyala tapi snugcode di dalamnya tidak tersambung & tidak melapor selama ini: daemon mati
+// (crash permanen, dibunuh) dan tidak ada yang menyalakannya lagi (postStartCommand hanya saat codespace
+// start), jadi codespace dinyalakan ulang sekali. Lebih lama dari backoff sambung ulang daemon (≤30 detik).
+const DEAD_RUNNER_MS = 45_000;
+// Setelah dinyalakan ulang pun tidak melapor: skrip runner tidak berjalan (secret hilang, setup rusak).
+const SILENT_MS = 6 * 60_000;
+
+// Dipanggil saat runner offline dibuka. onState(teks) untuk layar tunggu; onFail(error) bila runner tetap
+// tidak bisa dinyalakan saat menunggu. Mengembalikan false bila tidak bisa dinyalakan dari HP ini (belum ada
+// izin Codespaces) — pemanggil menampilkan tombolnya.
+export async function wakeRunner(m, onState, onFail) {
   if (!client()) return false;
   const c = await codespaceOf(m);
   if (!c) throw new Error('Codespace runner tidak ditemukan (mungkin sudah dihapus atau kedaluwarsa). Buat ulang dari menu Tambah PC → Runner cloud.');
   onState?.(stateText(c.state), c.state === 'Available' ? 'start' : 'boot');
   if (!['Available', 'Starting', 'Provisioning', 'Queued', 'Rebuilding', 'Updating', 'Created'].includes(c.state)) await client().start(c.name);
   // Daemon tersambung sendiri; status codespace ditampilkan sampai relay melihatnya online.
-  const t0 = Date.now() - 60_000;
+  let since = Date.now() - 60_000; // laporan runner sejak ini dihitung (diatur ulang saat dinyalakan ulang)
+  let availableAt = 0;
+  let restarted = false;
+  let busy = false;
   const t = setInterval(async () => {
     if (app.current?.m.id !== m.id || app.current.ready) return clearInterval(t);
-    const now = await client()?.get(c.name).catch(() => null);
-    // Tahap dari runner (memasang/menyalakan/error) setelah codespace menyala lebih informatif.
-    const boot = now?.state === 'Available' ? bootOf((await api('/api/machines').catch(() => ({ machines: [] }))).machines.find((x) => x.id === m.id), t0) : null;
-    if (now) onState?.(boot ? (boot.stage === 'error' ? 'gagal: ' : '') + boot.msg : stateText(now.state), now.state === 'Available' ? 'start' : 'boot');
-    // Dibuka tepat saat runner sedang berhenti sendiri: /start ditolak (409), jadi nyalakan setelah benar-benar berhenti.
-    if (now?.state === 'Shutdown') await client().start(c.name).catch(() => {});
+    if (busy) return;
+    busy = true;
+    try {
+      const now = await client()?.get(c.name).catch(() => null);
+      const mach = now?.state === 'Available' ? (await api('/api/machines').catch(() => ({ machines: [] }))).machines.find((x) => x.id === m.id) : null;
+      // Tahap dari runner (memasang/menyalakan/error) setelah codespace menyala lebih informatif.
+      const boot = bootOf(mach, since);
+      availableAt = now?.state === 'Available' ? availableAt || Date.now() : 0;
+      if (availableAt && !boot && !mach?.online) {
+        const quiet = Date.now() - availableAt;
+        if (!restarted && quiet > DEAD_RUNNER_MS) {
+          restarted = true;
+          since = Date.now();
+          availableAt = 0;
+          onState?.('snugcode tidak berjalan di codespace · menyalakan ulang codespace…', 'boot');
+          await client().stop(c.name);
+          return;
+        }
+        if (restarted && quiet > SILENT_MS) throw new Error('Codespace menyala tapi runner tidak melapor. Buka codespace di GitHub dan periksa /workspaces/.snugcode/cloud.log, atau buat ulang runner.');
+      }
+      if (now) onState?.(boot ? (boot.stage === 'error' ? 'gagal: ' : '') + boot.msg : stateText(now.state), now.state === 'Available' ? 'start' : 'boot');
+      // Dibuka tepat saat runner sedang berhenti (sendiri atau dinyalakan ulang di atas): /start ditolak (409),
+      // jadi nyalakan setelah benar-benar berhenti.
+      if (now?.state === 'Shutdown') await client().start(c.name).catch(() => {});
+    } catch (e) {
+      clearInterval(t);
+      onFail?.(e);
+    } finally {
+      busy = false;
+    }
   }, 5000);
   return true;
 }

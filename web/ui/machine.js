@@ -120,7 +120,18 @@ function wakeScreen(m, msg, showStatus) {
   ]);
   app.current.wakeProg = wp;
   showStatus('Menyalakan runner', 'Halaman ini tersambung otomatis begitu runner siap.', true, wp.el);
-  wakeRunner(m, (t, phase) => wp.step(phase, t))
+  const failed = (e) => {
+    if (app.current?.m.id !== m.id || app.current.ready) return;
+    app.current.waking = false;
+    wp.fail(e.message);
+    app.current.wakeProg = null;
+    ui.sub('gagal menyalakan');
+    const hero = $view()?.querySelector('.hero');
+    // Izin Codespaces ditolak: hubungkan lagi, lalu runner dinyalakan otomatis saat kembali ke aplikasi.
+    if (isAuthError(e)) hero?.append(connectButton('Hubungkan lagi GitHub Codespaces'));
+    else hero?.append(h('button', { class: 'btn', style: 'margin-top:16px', onclick: () => wakeScreen(m, msg, showStatus) }, ic('refresh'), 'Coba lagi'));
+  };
+  wakeRunner(m, (t, phase) => wp.step(phase, t), failed)
     .then((ok) => {
       if (ok || app.current?.m.id !== m.id || app.current.ready) return;
       wp.stop();
@@ -129,17 +140,7 @@ function wakeScreen(m, msg, showStatus) {
       showStatus('Runner tidur', 'Runner berhenti sendiri saat tidak dipakai. Hubungkan GitHub Codespaces di HP ini untuk menyalakannya.', false);
       $view()?.querySelector('.hero')?.append(connectButton());
     })
-    .catch((e) => {
-      if (app.current?.m.id !== m.id) return;
-      app.current.waking = false;
-      wp.fail(e.message);
-      app.current.wakeProg = null;
-      ui.sub('gagal menyalakan');
-      const hero = $view()?.querySelector('.hero');
-      // Izin Codespaces ditolak: hubungkan lagi, lalu runner dinyalakan otomatis saat kembali ke aplikasi.
-      if (isAuthError(e)) hero?.append(connectButton('Hubungkan lagi GitHub Codespaces'));
-      else hero?.append(h('button', { class: 'btn', style: 'margin-top:16px', onclick: () => wakeScreen(m, msg, showStatus) }, ic('refresh'), 'Coba lagi'));
-    });
+    .catch(failed);
 }
 const $view = () => document.getElementById('view');
 
