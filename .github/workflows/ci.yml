@@ -97,7 +97,7 @@ jobs:
       # The phone returns from the background on a network that stalls connections: never stuck on "Contacting the relay".
       - run: npm run test:e2e:resume
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-diagnostik
           path: |
