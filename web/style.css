@@ -174,6 +174,22 @@ a { color: var(--accent); text-decoration: none; }
 details > summary { list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 
+/* ---------- aplikasi terpasang di layar utama (iOS 26) ----------
+   1. WebKit 301108: dengan viewport-fit=cover + status bar black-translucent, viewport PWA dibuat lebih
+      pendek dari layar selama halaman lebih pendek dari layar, jadi shell fixed bottom:0 berhenti di atas
+      tepi bawah (composer melayang, ada pita kosong di bawahnya). Halaman setinggi layar membuat iOS
+      memberi viewport penuh; min() mencegah halaman bisa digulir bila status bar opak (inset atas 0).
+   2. Efek scroll-edge "Liquid Glass" iOS 26 memburamkan pita di bawah status bar dan tidak bisa dimatikan
+      lewat CSS/meta: semua yang menempel di atas (header, drawer, sheet, toast, terminal) diberi jarak
+      tambahan yang diisi warna latarnya sendiri, jadi judul & tombol berada di luar pita buram.
+      @supports -webkit-touch-callout = hanya WebKit iOS. */
+@media (display-mode: standalone) {
+  html { min-height: min(100lvh, calc(100% + env(safe-area-inset-top, 0px))); }
+  @supports (-webkit-touch-callout: none) {
+    :root { --safe-t: calc(env(safe-area-inset-top, 0px) + 28px); }
+  }
+}
+
 /* ---------- shell aplikasi ----------
    Keyboard tertutup: menempel ke tepi layar lewat CSS (top/bottom 0). Tinggi dari JS tidak dipakai:
    di PWA iOS innerHeight & visualViewport bisa kurang sebesar status bar dan meninggalkan celah di
