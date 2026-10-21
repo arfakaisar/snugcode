@@ -1,21 +1,21 @@
-// Engine Gemini CLI: harness resmi Google untuk model Gemini, dijalankan sebagai agen ACP
-// (Agent Client Protocol: JSON-RPC 2.0 per baris lewat stdio, `gemini --acp`). Event ACP diubah ke model
-// event snugcode, dan setiap perintah/edit melewati kebijakan izin snugcode yang sama dengan engine lain.
+// Gemini CLI engine: Google's official harness for Gemini models, run as an ACP agent
+// (Agent Client Protocol: line-delimited JSON-RPC 2.0 over stdio, `gemini --acp`). ACP events are mapped to
+// snugcode's event model, and every command/edit goes through the same snugcode permission policy as the other engines.
 //
-// Dipasang sekali ke ~/.snugcode/tools/gemini (versi dipatok di gemini-version.json). GEMINI_CLI_HOME =
-// ~/.snugcode/gemini/<repo|computer>: setelan & riwayat terpisah dari Gemini CLI milik pengguna, dengan
-// instruksi snugcode sebagai GEMINI.md global.
+// Installed once into ~/.snugcode/tools/gemini (version pinned in gemini-version.json). GEMINI_CLI_HOME =
+// ~/.snugcode/gemini/<repo|computer>: settings & history separate from the user's own Gemini CLI, with
+// snugcode's instructions as a global GEMINI.md.
 //
 // Keamanan:
-// - Key tidak pernah diberikan ke Gemini CLI: GOOGLE_GEMINI_BASE_URL menunjuk loopback proxy, dan
-//   GEMINI_API_KEY berisi token lokal yang ditukar proxy dengan key asli (lihat proxy.js, rute `gemini`).
-// - Folder trust aktif (bawaan Gemini CLI): `.gemini/settings.json` milik repo (MCP server, hook,
-//   discoveryCommand) tidak dimuat karena folder kerja tidak pernah ditandai tepercaya. Akibatnya Gemini CLI
-//   juga tidak memuat server MCP stdio (jadi tanpa tool dev snugcode) dan instruksi proyek; instruksi proyek
-//   (GEMINI.md / AGENTS.md / CLAUDE.md di root folder kerja) disisipkan snugcode di prompt pertama sesi.
-// - Baca/tulis file di dalam folder kerja lewat klien (fs/read_text_file, fs/write_text_file): folder data
-//   snugcode ditolak di sini, edit menunggu checkpoint. Gemini CLI tidak punya sandbox OS ringan di Linux,
-//   jadi saat auto-izin perintah shell tetap bertanya (agent.unsandboxedAuto).
+// - Keys are never given to Gemini CLI: GOOGLE_GEMINI_BASE_URL points at the loopback proxy, and
+//   GEMINI_API_KEY holds a local token the proxy swaps for the real key (see proxy.js, the `gemini` route).
+// - Folder trust is on (Gemini CLI default): the repo's `.gemini/settings.json` (MCP servers, hooks,
+//   discoveryCommand) isn't loaded because the working folder is never marked trusted. As a result Gemini CLI
+//   also doesn't load stdio MCP servers (so no snugcode dev tools) or project instructions; project instructions
+//   (GEMINI.md / AGENTS.md / CLAUDE.md at the working folder root) are injected by snugcode into the session's first prompt.
+// - File reads/writes inside the working folder go through the client (fs/read_text_file, fs/write_text_file): the
+//   snugcode data folder is denied here, edits wait for a checkpoint. Gemini CLI has no lightweight OS sandbox on Linux,
+//   so under auto-approve shell commands still ask (agent.unsandboxedAuto).
 import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -29,7 +29,7 @@ const TOOLS_DIR = path.join(HOME, 'tools', 'gemini');
 const VERSION = '0.1.0';
 
 // ---------- binary ----------
-// [command, ...args] untuk menjalankan gemini; null bila belum terpasang.
+// [command, ...args] to run gemini; null if not installed yet.
 export function geminiCommand(cfg = {}) {
   const exe = cfg.geminiExecutable || process.env.SNUGCODE_GEMINI_BIN;
   if (exe) return fs.existsSync(exe) ? (/\.m?js$/.test(exe) ? [process.execPath, exe] : [exe]) : null;
@@ -51,14 +51,14 @@ export function installGemini(cfg = {}) {
       installing = null;
       const cmd = geminiCommand(cfg);
       if (cmd) return resolve(cmd);
-      reject(new Error('Gagal memasang Gemini CLI: ' + String(err?.message || stderr || 'binary tidak ditemukan').split('\n').slice(-3).join(' ').slice(0, 300)));
+      reject(new Error('Failed to install Gemini CLI: ' + String(err?.message || stderr || 'binary not found').split('\n').slice(-3).join(' ').slice(0, 300)));
     });
   });
   return installing;
 }
 
-// ---------- konfigurasi ----------
-// Folder home Gemini CLI milik snugcode; instruksi berbeda untuk sesi repo dan Mode Komputer.
+// ---------- configuration ----------
+// snugcode's own Gemini CLI home folder; different instructions for repo sessions and Computer Mode.
 export function geminiHome({ computer = false } = {}) {
   const home = path.join(HOME, 'gemini', computer ? 'computer' : 'repo');
   const dir = path.join(home, '.gemini');
@@ -68,7 +68,7 @@ export function geminiHome({ computer = false } = {}) {
     privacy: { usageStatisticsEnabled: false },
     telemetry: { enabled: false },
     security: { auth: { selectedType: 'gateway' }, folderTrust: { enabled: true } },
-    // Mode rencana hanya diatur pengguna (seperti EnterPlanMode di engine Claude).
+    // Plan mode is only set by the user (like EnterPlanMode in the Claude engine).
     tools: { exclude: ['enter_plan_mode'] },
   };
   writeIfChanged(path.join(dir, 'settings.json'), JSON.stringify(settings, null, 2) + '\n');
@@ -86,16 +86,16 @@ function writeIfChanged(file, text) {
 /** @param {NodeJS.ProcessEnv} base @param {{ home: string, baseUrl: string, token: string }} o */
 export function geminiEnv(base, { home, baseUrl, token }) {
   const env = { ...base, GEMINI_CLI_HOME: home, GOOGLE_GEMINI_BASE_URL: baseUrl, GEMINI_API_KEY: token, GEMINI_CLI_NO_RELAUNCH: 'true' };
-  // Kredensial Google milik pengguna di env tidak boleh terpakai (atau terbaca perintah agen).
+  // The user's Google credentials in env must not be used (or read by agent commands).
   for (const k of Object.keys(env)) if (/^(GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_CLOUD_PROJECT|GOOGLE_GENAI_USE_VERTEXAI|GOOGLE_GENAI_USE_GCA|GEMINI_SANDBOX|ANTHROPIC_|OPENAI_API_KEY)/.test(k)) delete env[k];
   return env;
 }
 
-// Effort snugcode ikut di ID model Gemini (gemini-x-flash-low); Gemini CLI memakai ID aslinya.
+// snugcode's effort is part of the Gemini model ID (gemini-x-flash-low); Gemini CLI uses the real ID.
 export const geminiModelId = (id) => String(id || '').replace(/-(minimal|low|medium|high)$/, '');
 
-// Instruksi proyek di root folder kerja. Gemini CLI tidak memuatnya di folder yang tidak tepercaya,
-// jadi disisipkan di prompt pertama sesi baru (sesi yang dilanjutkan sudah memuatnya di riwayat).
+// Project instructions at the working folder root. Gemini CLI doesn't load them in untrusted folders,
+// so they're injected into the first prompt of a new session (resumed sessions already have them in history).
 const RULE_FILES = ['GEMINI.md', 'AGENTS.md', 'CLAUDE.md'];
 export function projectInstructions(cwd, max = 24_000) {
   const parts = [];
@@ -136,7 +136,7 @@ export class AcpRpc extends EventEmitter {
     this.exited = new Promise((r) => this.proc.on('exit', (code) => r(code)));
     this.proc.on('exit', (code) => {
       this.closed = true;
-      for (const p of this.pending.values()) p.reject(new Error(`Gemini CLI berhenti (exit ${code})`));
+      for (const p of this.pending.values()) p.reject(new Error(`Gemini CLI stopped (exit ${code})`));
       this.pending.clear();
     });
     this.proc.on('error', (e) => {
@@ -170,10 +170,10 @@ export class AcpRpc extends EventEmitter {
 
   /** @param {string} method @param {any} params @param {{ timeout?: number }} [o] */
   call(method, params, { timeout = 60_000 } = {}) {
-    if (this.closed) return Promise.reject(new Error('Gemini CLI tidak berjalan'));
+    if (this.closed) return Promise.reject(new Error('Gemini CLI is not running'));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const t = timeout ? setTimeout(() => this.pending.delete(id) && reject(new Error(`Gemini CLI tidak menjawab ${method}`)), timeout) : null;
+      const t = timeout ? setTimeout(() => this.pending.delete(id) && reject(new Error(`Gemini CLI didn't answer ${method}`)), timeout) : null;
       t?.unref?.();
       this.pending.set(id, { resolve: (v) => (clearTimeout(t), resolve(v)), reject: (e) => (clearTimeout(t), reject(e)) });
       this.send({ id, method, params });
@@ -201,17 +201,17 @@ export class AcpRpc extends EventEmitter {
   }
 }
 
-// ---------- sesi agen ----------
+// ---------- agent session ----------
 const TOOL_NAME = { execute: 'Bash', edit: 'Edit', read: 'Read', search: 'Grep', fetch: 'WebFetch', delete: 'Edit', move: 'Edit', switch_mode: 'ExitPlanMode' };
 const PLAN_STATE = { completed: 'done', in_progress: 'doing' };
-const cutText = (s, n = 4000) => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} karakter dipotong)` : s);
+const cutText = (s, n = 4000) => (s.length > n ? s.slice(0, n) + `\n… (${s.length - n} characters cut)` : s);
 
 function rel(p, cwd) {
   const r = path.relative(cwd, String(p || ''));
   return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.replace(/\\/g, '/') : String(p || '');
 }
 
-// Isi tool call ACP (teks, diff) → teks ringkas.
+// ACP tool call content (text, diff) → compact text.
 function contentText(content) {
   return (content || [])
     .map((c) => (c.type === 'content' ? (c.content?.type === 'text' ? c.content.text : `[${c.content?.type}]`) : c.type === 'diff' ? `${c.path}` : c.type === 'terminal' ? '[terminal]' : ''))
@@ -219,7 +219,7 @@ function contentText(content) {
     .join('\n');
 }
 
-// Diff ACP {path, oldText, newText} → potongan baris -/+ untuk kartu izin & detail tool.
+// ACP diff {path, oldText, newText} → -/+ line snippet for permission cards & tool details.
 export function diffOf(content, cwd) {
   return (content || [])
     .filter((c) => c.type === 'diff')
@@ -236,7 +236,7 @@ export function diffOf(content, cwd) {
 }
 
 /**
- * Satu proses `gemini --acp` per sesi, dipakai ulang antar prompt. `host` = Session (lihat CodexAgent).
+ * One `gemini --acp` process per session, reused across prompts. `host` = Session (see CodexAgent).
  */
 export class GeminiAgent {
   /** @param {any} host @param {{ cmd: string[], env: NodeJS.ProcessEnv, route: any, log: (m: string) => void }} o */
@@ -249,7 +249,7 @@ export class GeminiAgent {
     this.dead = false;
     this.idle = null;
     this.lastUsed = Date.now();
-    // Gemini CLI tidak punya sandbox OS ringan: auto-izin tidak meloloskan perintah shell (sessions.askPermission).
+    // Gemini CLI has no lightweight OS sandbox: auto-approve doesn't let shell commands through (sessions.askPermission).
     this.unsandboxedAuto = true;
     this.sessionId = null;
     this.model = null;
@@ -262,7 +262,7 @@ export class GeminiAgent {
       clearTimeout(this.idle);
       if (this.host.agent === this) this.host.agent = null;
       if (this.host.turn?.agent === this) {
-        this.host.emitEvent({ k: 'error', d: 'Gemini CLI berhenti di tengah prompt.' });
+        this.host.emitEvent({ k: 'error', d: 'Gemini CLI stopped in the middle of a prompt.' });
         this.host.endTurn();
       }
     });
@@ -273,17 +273,17 @@ export class GeminiAgent {
   async start() {
     const meta = this.host.meta;
     const init = await this.rpc.call('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false }, clientInfo: { name: 'snugcode', title: 'snugcode', version: VERSION } }, { timeout: 60_000 });
-    if (!(init?.authMethods || []).some((a) => a.id === 'gateway')) throw new Error('Gemini CLI versi ini tidak mendukung endpoint kustom (gateway)');
+    if (!(init?.authMethods || []).some((a) => a.id === 'gateway')) throw new Error('This Gemini CLI version does not support custom endpoints (gateway)');
     await this.rpc.call('authenticate', { methodId: 'gateway' });
     const params = { cwd: meta.cwd, mcpServers: [] };
     let r = null;
     if (meta.geminiSessionId && init.agentCapabilities?.loadSession) {
-      // session/load memutar ulang riwayat sebagai session/update: diabaikan (HP sudah punya riwayatnya).
+      // session/load replays history as session/update: ignored (the phone already has the history).
       this.loading = true;
       r = await this.rpc
         .call('session/load', { sessionId: meta.geminiSessionId, ...params }, { timeout: 120_000 })
         .then((x) => ({ ...x, sessionId: meta.geminiSessionId }))
-        .catch((e) => (this.log('! lanjutkan sesi Gemini gagal, mulai sesi baru: ' + e.message), null));
+        .catch((e) => (this.log('! resuming the Gemini session failed, starting a new one: ' + e.message), null));
       this.loading = false;
     }
     if (!r) {
@@ -304,7 +304,7 @@ export class GeminiAgent {
     this.route = route;
   }
 
-  // Mode rencana pengguna ↔ mode `plan` Gemini CLI (hanya baca).
+  // User plan mode ↔ Gemini CLI's `plan` mode (read-only).
   async syncMode() {
     const want = this.host.meta.plan ? 'plan' : 'default';
     if (want === this.mode) return;
@@ -335,7 +335,7 @@ export class GeminiAgent {
       if (rules) text = rules + '\n\n' + (text || '');
     }
     const prompt = [...images.map((i) => ({ type: 'image', mimeType: i.mime, data: i.data })), ...(text ? [{ type: 'text', text }] : [])];
-    // Tidak ditunggu: prompt selesai lewat jawaban session/prompt (bisa berjam-jam).
+    // Not awaited: the prompt finishes via the session/prompt reply (can take hours).
     this.rpc.call('session/prompt', { sessionId: this.sessionId, prompt }, { timeout: 0 }).then(
       (r) => this.onTurnDone(r),
       (e) => this.onTurnDone({ stopReason: 'error', error: e }),
@@ -405,19 +405,19 @@ export class GeminiAgent {
     this.calls.delete(u.toolCallId);
     if (!call) return;
     const out = contentText(u.content);
-    this.host.emitEvent({ k: 'result', id: u.toolCallId, ok: u.status === 'completed', d: cutText(out || (u.status === 'completed' ? '' : 'gagal')) });
+    this.host.emitEvent({ k: 'result', id: u.toolCallId, ok: u.status === 'completed', d: cutText(out || (u.status === 'completed' ? '' : 'failed')) });
   }
 
   onTurnDone(r) {
     const h = this.host;
-    // Proses mati di tengah prompt: giliran sudah diakhiri handler exit (satu pesan error saja).
+    // Process died mid-prompt: the exit handler already ended the turn (a single error message).
     if (this.dead && r.stopReason === 'error') return;
     h.flushText();
-    for (const [id] of this.calls) h.emitEvent({ k: 'result', id, ok: false, d: 'dihentikan' });
+    for (const [id] of this.calls) h.emitEvent({ k: 'result', id, ok: false, d: 'stopped' });
     this.calls.clear();
     const ok = r.stopReason === 'end_turn';
     const u = r.usage;
-    const err = ok ? undefined : r.stopReason === 'cancelled' ? 'interrupted' : r.stopReason === 'error' ? cutText(String(r.error?.message || 'Gemini CLI error'), 600) : r.stopReason === 'max_tokens' ? 'batas token tercapai' : String(r.stopReason || 'gagal');
+    const err = ok ? undefined : r.stopReason === 'cancelled' ? 'interrupted' : r.stopReason === 'error' ? cutText(String(r.error?.message || 'Gemini CLI error'), 600) : r.stopReason === 'max_tokens' ? 'token limit reached' : String(r.stopReason || 'failed');
     if (r.stopReason === 'error') h.emitEvent({ k: 'error', d: err });
     h.emitEvent({
       k: 'done',
@@ -428,18 +428,18 @@ export class GeminiAgent {
       ctx: this.ctx,
       err,
     });
-    h.mgr.notify(h, ok ? `✓ selesai · ${this.lastText.replace(/\s+/g, ' ').slice(0, 140)}` : `✗ berhenti · ${String(err).slice(0, 140)}`);
+    h.mgr.notify(h, ok ? `✓ done · ${this.lastText.replace(/\s+/g, ' ').slice(0, 140)}` : `✗ stopped · ${String(err).slice(0, 140)}`);
     if (h.turn?.agent === this) h.endTurn();
     if (!this.dead) h.idleAgent(this);
   }
 
-  // ---------- permintaan dari Gemini CLI: izin & file ----------
+  // ---------- requests from Gemini CLI: permissions & files ----------
   async onRequest({ id, method, params: p }) {
     try {
       if (method === 'session/request_permission') return this.rpc.respond(id, { outcome: await this.permission(p) });
       if (method === 'fs/read_text_file') return this.rpc.respond(id, { content: this.readText(p) });
       if (method === 'fs/write_text_file') return this.rpc.respond(id, await this.writeText(p));
-      this.rpc.fail(id, 'snugcode tidak mendukung ' + method, -32601);
+      this.rpc.fail(id, 'snugcode does not support ' + method, -32601);
     } catch (e) {
       this.rpc.fail(id, String(e?.message || e));
     }
@@ -456,14 +456,14 @@ export class GeminiAgent {
 
   readText({ path: p, line, limit }) {
     const abs = path.resolve(this.host.meta.cwd, String(p || ''));
-    if (isSensitivePath(abs)) throw new Error('Folder data snugcode berisi kredensial dan tidak boleh diakses agen.');
+    if (isSensitivePath(abs)) throw new Error('The snugcode data folder holds credentials and may not be accessed by the agent.');
     let text;
     try {
       text = fs.readFileSync(abs, 'utf8');
     } catch (e) {
-      // Gemini CLI tidak mengenali error ENOENT lewat ACP (objek error polos, bukan Error ber-`code`), jadi
-      // write_file ke file baru gagal. File yang belum ada = isi kosong; read_file sudah memeriksa keberadaan
-      // file sendiri sebelum membaca.
+      // Gemini CLI doesn't recognize ENOENT errors over ACP (a plain error object, not an Error with `code`), so
+      // write_file to a new file failed. A missing file = empty content; read_file checks existence
+      // itself before reading.
       if (e?.code === 'ENOENT') return '';
       throw e;
     }
@@ -477,7 +477,7 @@ export class GeminiAgent {
 
   async writeText({ path: p, content }) {
     const abs = path.resolve(this.host.meta.cwd, String(p || ''));
-    if (isSensitivePath(abs, { write: true })) throw new Error('Folder data snugcode berisi kredensial dan tidak boleh diakses agen.');
+    if (isSensitivePath(abs, { write: true })) throw new Error('The snugcode data folder holds credentials and may not be accessed by the agent.');
     if (this.host.cpReady) await this.host.cpReady;
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, String(content ?? ''));

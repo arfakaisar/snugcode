@@ -35,13 +35,13 @@ process.on('uncaughtException', async (e) => {
 });
 const shot = (n) => SHOTS && page.screenshot({ path: path.join(SHOTS, n + '.png') });
 const closeSheet = async () => {
-  await page.locator('#sheet:not([hidden]) [aria-label="Tutup"]').first().click();
+  await page.locator('#sheet:not([hidden]) [aria-label="Close"]').first().click();
   await page.waitForSelector('#sheet', { state: 'hidden' });
 };
 
 // Halaman login tampil tanpa error, lalu masuk dengan token + perangkat yang sudah dipasangkan
 await page.goto(RELAY + '/agent/');
-await page.waitForSelector('text=Login dengan GitHub');
+await page.waitForSelector('text=Sign in with GitHub');
 await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);
 await page.reload();
 await page.waitForSelector('text=' + PCNAME);
@@ -60,7 +60,7 @@ await page.fill('#input', 'tolong WRITE file ' + 'dan tambahkan dark mode di hal
 await page.click('#send');
 await page.waitForSelector('#dock .perm', { timeout: 30000 });
 await shot('3-izin');
-await page.locator('#dock button', { hasText: 'Izinkan' }).click();
+await page.locator('#dock button', { hasText: 'Allow' }).click();
 await page.waitForSelector('text=Selesai menulis file.', { timeout: 30000 });
 await page.waitForSelector('.donel');
 ok('prompt dari UI: dok izin Write, Izinkan, jawaban & ringkasan selesai');
@@ -91,33 +91,33 @@ await page.click('[aria-label="Git"]');
 await page.waitForSelector('#sheet:not([hidden]) >> text=hasil.txt', { timeout: 15000 });
 await shot('5-git');
 await closeSheet();
-await page.click('[aria-label="Ganti model"]');
+await page.click('[aria-label="Change model"]');
 await page.waitForSelector('#sheet:not([hidden])');
 await page.waitForTimeout(800);
 await shot('6-model');
 await closeSheet();
-await page.click('[aria-label="Jalankan & preview"]');
+await page.click('[aria-label="Run & preview"]');
 await page.waitForSelector('#sheet:not([hidden])');
 await page.waitForTimeout(500);
 await shot('7-run');
 await closeSheet();
-await page.click('[aria-label="Menu sesi"]');
+await page.click('[aria-label="Session menu"]');
 await page.waitForSelector('#sheet:not([hidden])');
 await shot('8-menu');
 await closeSheet();
-await page.click('[aria-label="Lampiran & alat"]');
-await page.waitForSelector('#sheet:not([hidden]) >> text=Mode rencana');
-await page.waitForSelector('#sheet:not([hidden]) >> text=Jelaskan repo ini');
+await page.click('[aria-label="Attachments & tools"]');
+await page.waitForSelector('#sheet:not([hidden]) >> text=Plan mode');
+await page.waitForSelector('#sheet:not([hidden]) >> text=Explain this repo');
 await shot('9-alat');
 await closeSheet();
 ok('sheet git (file hasil.txt terlihat), model, run, menu sesi, lampiran & alat terbuka & tertutup');
 
 // File explorer: daftar folder (penanda git), lihat & edit file dari HP
 const openTool = async (label) => {
-  await page.click('[aria-label="Lampiran & alat"]');
+  await page.click('[aria-label="Attachments & tools"]');
   await page.locator('#sheet:not([hidden]) .tile', { hasText: label }).click();
 };
-await openTool('File');
+await openTool('Files');
 await page.waitForSelector('#sheet:not([hidden]) .frow >> text=hasil.txt');
 assert.equal(await page.locator('.frow', { hasText: 'hasil.txt' }).locator('.fm').textContent(), 'A');
 await page.locator('.frow', { hasText: 'hasil.txt' }).click();
@@ -125,27 +125,27 @@ await page.waitForSelector('.codeview .cl');
 await shot('11-file');
 await page.locator('#sheet:not([hidden]) .chip', { hasText: 'Edit' }).click();
 await page.fill('textarea.editor', 'baris satu\nbaris dua dari HP\n');
-await page.locator('#sheet:not([hidden]) button', { hasText: 'Simpan' }).click();
+await page.locator('#sheet:not([hidden]) button', { hasText: 'Save' }).click();
 await page.waitForFunction(() => [...document.querySelectorAll('.codeview .lt')].map((x) => x.textContent).join('|') === 'baris satu|baris dua dari HP');
 assert.equal(fs.readFileSync(path.join(repo, 'hasil.txt'), 'utf8'), 'baris satu\nbaris dua dari HP\n');
 ok('file explorer: penanda git, lihat file bernomor baris, edit & simpan dari HP');
 // Review diff: komentar per baris lalu batalkan file baru
-await page.locator('#sheet:not([hidden]) [aria-label="Kembali"]').click();
+await page.locator('#sheet:not([hidden]) [aria-label="Back"]').click();
 await closeSheet();
 await page.click('[aria-label="Git"]');
-await page.locator('#sheet:not([hidden]) button', { hasText: 'Lihat diff' }).click();
+await page.locator('#sheet:not([hidden]) button', { hasText: 'View diff' }).click();
 await page.waitForSelector('.difffile .dl');
 await page.locator('.dl', { hasText: 'baris dua dari HP' }).click();
 await page.fill('.cbox2 textarea', 'Ganti jadi bahasa Inggris');
-await page.locator('.cbox2 button', { hasText: 'Tambah' }).click();
+await page.locator('.cbox2 button', { hasText: 'Add' }).click();
 await page.waitForSelector('.cmt >> text=Ganti jadi bahasa Inggris');
-await page.waitForSelector('.sheetfoot >> text=1 komentar');
+await page.waitForSelector('.sheetfoot >> text=1 comment');
 await shot('12-review');
-await page.locator('.sheetfoot button', { hasText: 'Hapus' }).click();
+await page.locator('.sheetfoot button', { hasText: 'Clear' }).click();
 await page.waitForSelector('.difffile .dl');
-await page.locator('.difffile .chip', { hasText: 'Hapus file baru' }).click();
-await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Batalkan perubahan' }).click();
-await page.waitForSelector('#sheet:not([hidden]) >> text=Tidak ada perubahan.');
+await page.locator('.difffile .chip', { hasText: 'Delete new file' }).click();
+await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Revert changes' }).click();
+await page.waitForSelector('#sheet:not([hidden]) >> text=No changes.');
 assert.ok(!fs.existsSync(path.join(repo, 'hasil.txt')));
 await closeSheet();
 ok('review diff: komentar per baris (kirim ke agen), batalkan perubahan file dari HP');
@@ -189,24 +189,24 @@ await shot('13-terminal');
   // Tombol Tempel: isi clipboard dikirim ke shell (menekan lama layar xterm di HP tidak memberi menu Tempel).
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.evaluate(() => navigator.clipboard.writeText('echo tempel-$((2+3))\n'));
-  await page.locator('.termview .tk', { hasText: 'Tempel' }).click();
+  await page.locator('.termview .tk', { hasText: 'Paste' }).click();
   await waitLine(/tempel-\$\(\(2\+3/);
   // Bash memakai bracketed paste: baris baru hasil tempel tidak langsung menjalankan perintah.
   await page.keyboard.press('Enter');
   await waitLine(/^tempel-5$/);
   // Tombol Salin tanpa seleksi: seluruh isi layar terminal masuk clipboard
-  await page.locator('.termview .tk', { hasText: 'Salin' }).click();
-  await page.waitForSelector('.toast >> text=Isi layar disalin');
+  await page.locator('.termview .tk', { hasText: 'Copy' }).click();
+  await page.waitForSelector('.toast >> text=Screen copied');
   assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^tempel-5$/m);
 }
-await page.click('.termview [aria-label="Tutup layar terminal"]');
+await page.click('.termview [aria-label="Close terminal screen"]');
 await page.waitForSelector('.termview', { state: 'detached' });
 await openTool('Terminal');
 await page.waitForFunction(() => /snug-42/.test(document.querySelector('.termview .xterm-rows')?.textContent || ''), null, { timeout: 15000 });
 await page.click('.termview .ttab.on .tx');
-await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Tutup' }).click();
+await page.locator('#sheet:not([hidden]) .confirm button', { hasText: 'Close' }).click();
 await page.waitForSelector('.termview .tempty:not([hidden])');
-await page.click('.termview [aria-label="Tutup layar terminal"]');
+await page.click('.termview [aria-label="Close terminal screen"]');
 await page.waitForSelector('.termview', { state: 'detached' });
 ok('terminal: perintah dijalankan di PTY PC, tetap hidup saat layar ditutup, ditutup dari HP');
 
@@ -215,7 +215,7 @@ await page.click('#menuBtn');
 await page.waitForSelector('#drawerPanel .dsess.on');
 await page.waitForTimeout(500);
 await shot('10-drawer');
-await page.locator('#drawerPanel button', { hasText: 'Beranda' }).click();
+await page.locator('#drawerPanel button', { hasText: 'Home' }).click();
 await page.waitForSelector('#drawer', { state: 'hidden' });
 await page.waitForSelector('#view >> text=' + path.basename(repo));
 ok('drawer: sesi aktif ditandai, Beranda kembali ke daftar sesi');
@@ -225,7 +225,7 @@ ok('judul sesi panjang terpotong rapi, tidak ada elemen keluar layar');
 // Ukuran teks (pengganti zoom halaman yang dikunci): isi layar membesar tanpa elemen keluar layar
 await page.click('#menuBtn');
 await page.locator('#drawerPanel .dme').click();
-await page.locator('#sheet:not([hidden]) .seg button[aria-label="Sangat besar"]').click();
+await page.locator('#sheet:not([hidden]) .seg button[aria-label="Extra large"]').click();
 assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#view')).zoom), '1.3');
 await shot('14-teks-besar');
 await closeSheet();

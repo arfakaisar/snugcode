@@ -1,7 +1,7 @@
 {
   "name": "snugcode",
   "version": "0.4.0",
-  "description": "Remote coding agent multi-model (Claude Agent SDK, Codex, Gemini CLI) di PC-mu atau di cloud, dikendalikan dari HP.",
+  "description": "Multi-model remote coding agent (Claude Agent SDK, Codex, Gemini CLI) on your PC or in the cloud, controlled from your phone.",
   "type": "module",
   "bin": {
     "snugcode": "daemon/cli.js",

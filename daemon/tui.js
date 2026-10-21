@@ -1,5 +1,5 @@
-// snugcode — UI terminal (seperti `claude`), tersambung ke daemon lokal.
-// Sesi yang sama bisa dilanjutkan di HP dan di terminal.
+// snugcode — terminal UI (like `claude`), connected to the local daemon.
+// The same session can be continued on the phone and in the terminal.
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,7 +17,7 @@ import { PAL, c, bold, dim, under, strike, userBg, gradient, cw, width, cols, ro
 const out = process.stdout;
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cli.js');
 
-// ---------- klien daemon (named pipe / unix socket) ----------
+// ---------- daemon client (named pipe / unix socket) ----------
 class Client extends EventEmitter {
   constructor(sock) {
     super();
@@ -47,7 +47,7 @@ class Client extends EventEmitter {
       }
     });
     sock.on('close', () => {
-      for (const p of this.pending.values()) p.reject(new Error('Koneksi ke daemon terputus'));
+      for (const p of this.pending.values()) p.reject(new Error('Lost connection to the daemon'));
       this.pending.clear();
       this.emit('closed');
     });
@@ -67,9 +67,9 @@ function tryConnect(token) {
     sock.once('error', fail);
     sock.once('connect', () => {
       const cl = new Client(sock);
-      const t = setTimeout(() => fail(new Error('daemon tidak menjawab')), 4000);
+      const t = setTimeout(() => fail(new Error('daemon not answering')), 4000);
       cl.once('ready', (m) => (clearTimeout(t), sock.off('error', fail), resolve({ client: cl, info: m.info })));
-      cl.once('denied', () => (clearTimeout(t), fail(new Error('token lokal ditolak daemon'))));
+      cl.once('denied', () => (clearTimeout(t), fail(new Error('local token rejected by the daemon'))));
       sock.write(JSON.stringify({ t: 'hello', token }) + '\n');
     });
   });
@@ -85,8 +85,8 @@ function runningPid() {
   }
 }
 
-// Hentikan daemon dengan rapi lewat kanal lokal (dev server & tunnel sesi ikut dimatikan),
-// fallback ke process.kill untuk daemon versi lama. Menunggu sampai prosesnya benar-benar keluar.
+// Stop the daemon cleanly over the local channel (sessions' dev servers & tunnels die too),
+// falling back to process.kill for old daemons. Waits until the process has really exited.
 export async function stopDaemon(pid = runningPid()) {
   if (!pid) return false;
   let graceful = false;
@@ -106,7 +106,7 @@ export async function stopDaemon(pid = runningPid()) {
   return true;
 }
 
-// Sambung ke daemon; nyalakan (atau ganti versi lama tanpa kanal lokal) bila perlu.
+// Connect to the daemon; start it (or replace an old version without a local channel) if needed.
 async function connectDaemon(onStatus) {
   const token = () => loadSecrets().localToken;
   try {
@@ -114,9 +114,9 @@ async function connectDaemon(onStatus) {
   } catch {}
   const old = runningPid();
   if (old) {
-    onStatus('memperbarui daemon…');
+    onStatus('updating the daemon…');
     await stopDaemon(old);
-  } else onStatus('menyalakan daemon…');
+  } else onStatus('starting the daemon…');
   const p = spawn(process.execPath, [CLI, 'start', '--log'], { detached: true, stdio: 'ignore', windowsHide: true });
   p.unref();
   for (let i = 0; i < 60; i++) {
@@ -125,10 +125,10 @@ async function connectDaemon(onStatus) {
       return await tryConnect(token());
     } catch {}
   }
-  throw new Error('Daemon tidak bisa dinyalakan. Cek log: ' + path.join(HOME, 'daemon.log'));
+  throw new Error('The daemon could not be started. Check the log: ' + path.join(HOME, 'daemon.log'));
 }
 
-// ---------- clipboard & browser (untuk kode login GitHub) ----------
+// ---------- clipboard & browser (for the GitHub login code) ----------
 export function copyClipboard(text) {
   const tries = process.platform === 'win32' ? [['clip']] : process.platform === 'darwin' ? [['pbcopy']] : [['wl-copy'], ['xclip', '-selection', 'clipboard'], ['xsel', '-b']];
   for (const [cmd, ...a] of tries) {
@@ -147,8 +147,8 @@ export function openUrl(url) {
   p.on('error', () => {});
   p.unref();
 }
-// Kotak kode login yang mudah dibaca & disalin.
-function ghCodeBox(p, copied, { title = 'Login GitHub', done = 'tekan Authorize — selesai, tidak perlu restart' } = {}) {
+// An easy-to-read & copy login code box.
+function ghCodeBox(p, copied, { title = 'GitHub login', done = 'press Authorize — done, no restart needed' } = {}) {
   const W = Math.min(cols() - 1, 64);
   const row = (l = '') => c.line('│ ') + pad(trunc(l, W - 4), W - 4) + c.line(' │');
   const code = [...p.code].join(' ');
@@ -159,38 +159,38 @@ function ghCodeBox(p, copied, { title = 'Login GitHub', done = 'tekan Authorize 
     row(),
     row(center(bold(gradient(code, PAL.green, PAL.cyan)))),
     row(),
-    row(`1. buka ${under(c.blue(p.uri))}`),
-    row(`2. masukkan kode di atas${copied ? dim(' (sudah disalin ke clipboard)') : ''}`),
+    row(`1. open ${under(c.blue(p.uri))}`),
+    row(`2. enter the code above${copied ? dim(' (copied to clipboard)') : ''}`),
     row('3. ' + done),
     row(),
     c.line('╰' + '─'.repeat(W - 2) + '╯'),
   ];
 }
 
-// `snugcode login` saat daemon berjalan: login lewat daemon (tanpa restart).
+// `snugcode login` while the daemon runs: sign in through the daemon (no restart).
 export async function loginViaDaemon({ openBrowser = true } = {}) {
   const { client } = await tryConnect(loadSecrets().localToken);
   try {
     const st = await client.call('githubLogin');
-    if (!st.pending) throw new Error('Gagal memulai login GitHub');
+    if (!st.pending) throw new Error('Failed to start GitHub login');
     const copied = copyClipboard(st.pending.code);
     console.log(ghCodeBox(st.pending, copied).join('\n'));
     if (openBrowser) openUrl(st.pending.uri);
-    console.log(dim('  menunggu otorisasi… (Ctrl+C untuk batal)'));
+    console.log(dim('  waiting for authorization… (Ctrl+C to cancel)'));
     const res = await new Promise((resolve, reject) => {
       client.on('github', (m) => {
         if (m.state === 'ok' && !m.pending) resolve(m);
         else if (m.pending?.error) reject(new Error(m.pending.error));
       });
-      client.on('closed', () => reject(new Error('Koneksi ke daemon terputus')));
+      client.on('closed', () => reject(new Error('Lost connection to the daemon')));
     });
-    console.log(c.green(`✓ GitHub tersambung: @${res.login}`) + dim(' — langsung dipakai daemon, HP, dan terminal.'));
+    console.log(c.green(`✓ GitHub connected: @${res.login}`) + dim(' — used right away by the daemon, phone, and terminal.'));
   } finally {
     client.sock.end();
   }
 }
 
-// Satu RPC ke daemon yang sedang berjalan (perintah CLI seperti `snugcode connect`).
+// One RPC to the running daemon (CLI commands like `snugcode connect`).
 export async function daemonCall(method, params = {}) {
   const { client } = await tryConnect(loadSecrets().localToken);
   try {
@@ -200,29 +200,29 @@ export async function daemonCall(method, params = {}) {
   }
 }
 
-// Login ChatGPT lewat daemon (Codex resmi), kode tampil di terminal; bisa diselesaikan dari HP.
+// ChatGPT login through the daemon (official Codex), the code shows in the terminal; can be completed from the phone.
 export async function chatgptLoginViaDaemon({ openBrowser = true } = {}) {
   const { client } = await tryConnect(loadSecrets().localToken);
   try {
-    console.log(dim('  menyiapkan Codex & meminta kode login… (pertama kali ±1–2 menit)'));
+    console.log(dim('  preparing Codex & requesting a login code… (first time ~1–2 min)'));
     const r = await client.call('chatgptLogin');
     const copied = copyClipboard(r.code);
-    console.log(ghCodeBox({ code: r.code, uri: r.url }, copied, { title: 'Login ChatGPT', done: 'login dengan akun ChatGPT — selesai' }).join('\n'));
+    console.log(ghCodeBox({ code: r.code, uri: r.url }, copied, { title: 'ChatGPT login', done: 'sign in with your ChatGPT account — done' }).join('\n'));
     if (openBrowser) openUrl(r.url);
-    console.log(dim('  menunggu login ChatGPT… (Ctrl+C untuk batal)'));
+    console.log(dim('  waiting for ChatGPT login… (Ctrl+C to cancel)'));
     const res = await new Promise((resolve, reject) => {
-      client.on('chatgpt', (m) => (m.ok ? resolve(m) : reject(new Error(m.err || 'Login ChatGPT gagal'))));
-      client.on('closed', () => reject(new Error('Koneksi ke daemon terputus')));
+      client.on('chatgpt', (m) => (m.ok ? resolve(m) : reject(new Error(m.err || 'ChatGPT login failed'))));
+      client.on('closed', () => reject(new Error('Lost connection to the daemon')));
     });
-    console.log(c.green('✓ ChatGPT tersambung') + dim(' — model GPT berjalan di harness Codex.'));
+    console.log(c.green('✓ ChatGPT connected') + dim(' — GPT models run in the Codex harness.'));
     return res;
   } finally {
     client.sock.end();
   }
 }
 
-// ---------- utilitas tampilan ----------
-// Maskot snugcode yang sedang bekerja: berkedip sambil "mengetik" (lebar tetap 8 kolom).
+// ---------- display utilities ----------
+// The snugcode mascot at work: blinks while "typing" (fixed width of 8 columns).
 const SPIN = ['(ᵔᴗᵔ)   ', '(ᵔᴗᵔ).  ', '(ᵔᴗᵔ).. ', '(ᵔᴗᵔ)...', '(-ᴗ-)...', '(ᵔᴗᵔ)   '];
 const LOGO = '(˘ᵕ˘)ᶻ';
 const fmtDur = (ms) => {
@@ -231,7 +231,7 @@ const fmtDur = (ms) => {
 };
 const ago = (ts) => {
   const s = (Date.now() - ts) / 1000;
-  return s < 60 ? 'baru saja' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'j' : Math.floor(s / 86400) + 'h';
+  return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd';
 };
 const tildify = (p) => {
   const home = os.homedir();
@@ -243,40 +243,40 @@ function modelLabel(id) {
   return p.base + (p.effort ? ' · ' + (M.EFFORT_LABEL[p.effort] || p.effort) : '');
 }
 
-const PLAN_REVISE = 'Pengguna ingin merevisi rencana. Berhenti sekarang dan tunggu arahan revisinya.';
+const PLAN_REVISE = 'The user wants to revise the plan. Stop now and wait for their revision instructions.';
 
 const COMMANDS = [
-  ['/help', 'bantuan & pintasan keyboard'],
-  ['/model', 'ganti model & effort sesi ini'],
-  ['/default', 'model default untuk sesi baru'],
-  ['/sessions', 'pindah sesi (juga sesi dari HP)'],
-  ['/computer', 'sesi mode komputer (kontrol seluruh PC)'],
-  ['/new', 'sesi baru dari repo GitHub'],
-  ['/run', 'jalankan dev server di latar belakang [perintah]'],
-  ['/ps', 'daftar proses latar belakang'],
-  ['/logs', 'log proses [nama]'],
-  ['/stop', 'hentikan proses [nama]'],
-  ['/preview', 'link preview untuk HP/laptop lain [nama]'],
-  ['/plan', 'mode rencana: agen menyusun rencana dulu'],
-  ['/rewind', 'kembalikan file ke sebelum prompt terakhir'],
-  ['/git', 'status git'],
-  ['/diff', 'tampilkan diff'],
-  ['/commit', 'commit semua perubahan [pesan]'],
-  ['/push', 'push branch ke GitHub'],
-  ['/pr', 'buat Pull Request [judul]'],
-  ['/auto', 'nyalakan/matikan auto-izin'],
-  ['/edits', 'tinjau setiap edit file sebelum diterapkan (on/off)'],
-  ['/otonomi', 'tingkat otonomi agen: tanya | seimbang | rutin | penuh'],
-  ['/login', 'login ulang GitHub (push, PR, repo)'],
-  ['/update', 'periksa & pasang pembaruan jarak jauh'],
-  ['/clean', 'pindai & bersihkan worktree / repo yatim'],
-  ['/restart', 'restart daemon di PC'],
-  ['/clear', 'bersihkan layar'],
-  ['/delete', 'hapus sesi ini'],
-  ['/exit', 'keluar (sesi tetap jalan di PC)'],
+  ['/help', 'help & keyboard shortcuts'],
+  ['/model', 'change this session\'s model & effort'],
+  ['/default', 'default model for new sessions'],
+  ['/sessions', 'switch sessions (including sessions from the phone)'],
+  ['/computer', 'computer mode session (control the whole PC)'],
+  ['/new', 'new session from a GitHub repo'],
+  ['/run', 'run a dev server in the background [command]'],
+  ['/ps', 'list background processes'],
+  ['/logs', 'process logs [name]'],
+  ['/stop', 'stop a process [name]'],
+  ['/preview', 'preview link for a phone/other laptop [name]'],
+  ['/plan', 'plan mode: the agent drafts a plan first'],
+  ['/rewind', 'restore files to before the last prompt'],
+  ['/git', 'git status'],
+  ['/diff', 'show the diff'],
+  ['/commit', 'commit all changes [message]'],
+  ['/push', 'push the branch to GitHub'],
+  ['/pr', 'create a Pull Request [title]'],
+  ['/auto', 'toggle auto-approve'],
+  ['/edits', 'review every file edit before it\'s applied (on/off)'],
+  ['/autonomy', 'agent autonomy: ask | balanced | routine | full'],
+  ['/login', 'sign in to GitHub again (push, PR, repos)'],
+  ['/update', 'check & install remote updates'],
+  ['/clean', 'scan & clean up orphaned worktrees / repos'],
+  ['/restart', 'restart the daemon on the PC'],
+  ['/clear', 'clear the screen'],
+  ['/delete', 'delete this session'],
+  ['/exit', 'exit (the session keeps running on the PC)'],
 ];
 
-// ---------- aplikasi ----------
+// ---------- app ----------
 class App {
   constructor(client, info, opts) {
     this.cl = client;
@@ -285,9 +285,9 @@ class App {
     this.session = null;
     this.input = '';
     this.cursor = 0;
-    this.evCursor = new EventCursor(); // seq event sesi terakhir yang sudah ditampilkan
+    this.evCursor = new EventCursor(); // seq of the last session event already shown
     /** @type {Set<string> | null} */
-    this.procPorts = null; // proses yang port-nya sudah diumumkan
+    this.procPorts = null; // processes whose port was already announced
     this.mode = 'chat'; // chat | shell
     this.history = [];
     this.histIdx = -1;
@@ -297,7 +297,7 @@ class App {
     this.runStart = 0;
     this.activity = '';
     this.perms = [];
-    this.queue = []; // item tertunda yang belum dicetak (urutan terjaga)
+    this.queue = []; // pending items not yet printed (order preserved)
     this.tools = new Map();
     this.liveRows = 0;
     this.liveCursorRow = 0;
@@ -309,7 +309,7 @@ class App {
     this.pasting = false;
   }
 
-  // ---- area hidup di bawah ----
+  // ---- live area at the bottom ----
   clearLive() {
     let s = '';
     if (this.liveRows) {
@@ -320,7 +320,7 @@ class App {
     this.liveCursorRow = 0;
     return s;
   }
-  // Cetak ke scrollback di atas area hidup.
+  // Print to the scrollback above the live area.
   /** @param {string | string[]} [text] */
   print(text = '') {
     const lines = Array.isArray(text) ? text : String(text).split('\n');
@@ -341,18 +341,18 @@ class App {
     const lines = [];
     let cursor = null;
 
-    // Pratinjau item yang masih berjalan (teks streaming, tool menunggu hasil).
+    // Preview of items still in progress (streaming text, tools waiting for results).
     const pre = [];
     for (const it of this.queue) pre.push(...it.preview(W));
     const maxPre = Math.max(3, rowsN() - 12);
-    if (pre.length > maxPre) lines.push(dim(`  … ${pre.length - maxPre} baris di atas`), ...pre.slice(-maxPre));
+    if (pre.length > maxPre) lines.push(dim(`  … ${pre.length - maxPre} lines above`), ...pre.slice(-maxPre));
     else lines.push(...pre);
 
-    for (const q of this.queued || []) lines.push(trunc(dim('  ⏳ antre: ') + c.soft(q.replace(/\n/g, ' ↵ ')), W - 1));
+    for (const q of this.queued || []) lines.push(trunc(dim('  ⏳ queued: ') + c.soft(q.replace(/\n/g, ' ↵ ')), W - 1));
     if (this.running || this.busyText) {
       const g = SPIN[this.frame % SPIN.length];
-      const act = this.perms.length ? 'Menunggu izinmu' : this.busyText || this.activity || 'Berpikir';
-      const meta = this.running ? `(${fmtDur(Date.now() - this.runStart)} · ${bold('esc')} untuk hentikan)` : '';
+      const act = this.perms.length ? 'Waiting for your permission' : this.busyText || this.activity || 'Thinking';
+      const meta = this.running ? `(${fmtDur(Date.now() - this.runStart)} · ${bold('esc')} to stop)` : '';
       lines.push('');
       lines.push(...hardWrap(`${gradient(g, PAL.peach, PAL.clay)} ${c.clay(trunc(act, W - 34))}${c.clay('…')} ${dim(meta)}`, W - 1));
     }
@@ -386,10 +386,10 @@ class App {
     const shell = this.mode === 'shell';
     const bc = shell ? c.pink : this.input.startsWith('/') ? c.cyan : c.line;
     const prompt = shell ? c.pink(bold('! ')) : c.green(bold('❯ '));
-    // Setiap baris maksimal W-1 kolom: baris selebar terminal memicu auto-wrap
-    // di sebagian terminal dan merusak perhitungan posisi baris/kursor.
+    // Every line is at most W-1 columns: a terminal-wide line triggers auto-wrap
+    // in some terminals and breaks line/cursor position math.
     const textW = W - 7;
-    // Bungkus teks input + petakan posisi kursor.
+    // Wrap the input text + map the cursor position.
     const rows = [[]];
     let cur = null;
     const chars = [...this.input];
@@ -423,7 +423,7 @@ class App {
       const text = r.join('');
       const lead = i === 0 && first === 0 ? prompt : '  ';
       let body = text;
-      if (!this.input && i === 0) body = dim(shell ? 'perintah shell di folder sesi…' : 'Minta sesuatu…  (/ perintah · ! shell · \\ + enter baris baru)');
+      if (!this.input && i === 0) body = dim(shell ? 'shell command in the session folder…' : 'Ask for something…  (/ commands · ! shell · \\ + enter new line)');
       lines.push(bc('│') + ' ' + lead + pad(trunc(body, textW), textW) + ' ' + bc('│'));
     });
     lines.push(bc('╰' + '─'.repeat(W - 3) + '╯'));
@@ -436,22 +436,22 @@ class App {
     if (s) {
       parts.push(c.purple('◆ ') + c.soft(modelLabel(s.model)));
       if (s.computer) {
-        parts.push(c.cyan('💻 komputer ') + c.soft(tildify(s.cwd || '')));
+        parts.push(c.cyan('💻 computer ') + c.soft(tildify(s.cwd || '')));
       } else {
         const g = this.git;
         parts.push(c.blue('git ') + c.soft(g?.branch || s.branch) + (g && g.files ? c.yellow(` +${g.files}`) : '') + (g && g.ahead ? c.green(` ↑${g.ahead}`) : ''));
         if (s.local) parts.push(dim(tildify(s.cwd || '')));
         else parts.push(dim(s.repo));
       }
-      if (s.auto) parts.push(c.red('⚡ auto-izin'));
-      if (['invalid', 'missing'].includes(this.info.githubState)) parts.push(c.red('GitHub: perlu /login'));
+      if (s.auto) parts.push(c.red('⚡ auto-approve'));
+      if (['invalid', 'missing'].includes(this.info.githubState)) parts.push(c.red('GitHub: needs /login'));
     }
     let left = '  ' + parts.join(dim('  ·  '));
     let right;
     if (this.flash && Date.now() < this.flash.until) right = this.flash.bad ? c.red(this.flash.text) : c.green(this.flash.text);
-    else if (this.exitArmed && Date.now() - this.exitArmed < 2000) right = c.yellow('Ctrl+C lagi untuk keluar');
-    else if (this.mode === 'shell') right = dim('mode shell · backspace untuk kembali');
-    else right = dim('? bantuan');
+    else if (this.exitArmed && Date.now() - this.exitArmed < 2000) right = c.yellow('Ctrl+C again to exit');
+    else if (this.mode === 'shell') right = dim('shell mode · backspace to go back');
+    else right = dim('? help');
     const room = W - 2 - width(right);
     if (width(left) > room - 2) left = trunc(left, Math.max(10, room - 2));
     return [pad(left, room) + right];
@@ -494,22 +494,22 @@ class App {
         if (op.description) body.push('     ' + dim(op.description));
       });
       const other = q.options.length;
-      body.push(o.idx === other ? c.cyan('❯ ') + bold(`${other + 1}. Jawaban lain: `) + c.fg(o.text[o.qi]) + c.cyan('▏') : c.soft(`  ${other + 1}. Jawaban lain${o.text[o.qi] ? ': ' + o.text[o.qi] : ''}`));
+      body.push(o.idx === other ? c.cyan('❯ ') + bold(`${other + 1}. Other answer: `) + c.fg(o.text[o.qi]) + c.cyan('▏') : c.soft(`  ${other + 1}. Other answer${o.text[o.qi] ? ': ' + o.text[o.qi] : ''}`));
       const count = o.perm.ask.length > 1 ? dim(` (${o.qi + 1}/${o.perm.ask.length})`) : '';
-      return { lines: box(bold(c.cyan('Agen bertanya')) + (q.header ? ' ' + c.soft(q.header) : '') + count, body, q.multiSelect ? '↑↓ · spasi pilih · enter lanjut · esc lewati' : '↑↓ · enter · 1-5 · esc lewati', c.cyan) };
+      return { lines: box(bold(c.cyan('The agent has a question')) + (q.header ? ' ' + c.soft(q.header) : '') + count, body, q.multiSelect ? '↑↓ · space select · enter next · esc skip' : '↑↓ · enter · 1-5 · esc skip', c.cyan) };
     }
     if (o.type === 'perm' && o.perm.plan) {
       const body = String(o.perm.summary || o.perm.s || '').split('\n').slice(0, Math.max(6, rowsN() - 14)).map((l) => c.fg(l));
-      body.push('', ...['Setujui & kerjakan', 'Revisi (lalu ketik arahan revisinya)'].map((t, i) => (i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`))));
-      return { lines: box(bold(c.cyan('Rencana siap — setujui?')), body, '↑↓ · enter · 1-2', c.cyan) };
+      body.push('', ...['Approve & do it', 'Revise (then type your revision instructions)'].map((t, i) => (i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`))));
+      return { lines: box(bold(c.cyan('Plan ready — approve?')), body, '↑↓ · enter · 1-2', c.cyan) };
     }
     if (o.type === 'perm') {
       const p = o.perm;
-      const opts = p.push ? ['Ya, izinkan push', 'Tidak (esc)'] : ['Ya', `Ya, dan jangan tanya lagi untuk ${p.always || p.tool} di sesi ini`, 'Tidak (esc)'];
+      const opts = p.push ? ['Yes, allow the push', 'No (esc)'] : ['Yes', `Yes, and don't ask again for ${p.always || p.tool} in this session`, 'No (esc)'];
       const body = [];
       if (p.title) body.push(c.soft(p.title), '');
-      // Tingkat risiko (shared/risk.js): permintaan berbahaya terlihat berbeda dari yang rutin.
-      if (p.risk) body.push(({ high: c.red('▲ risiko tinggi'), medium: c.yellow('● risiko sedang'), low: c.green('○ risiko rendah') })[p.risk.level] + (p.risk.why ? dim(' — ' + p.risk.why) : ''), '');
+      // Risk level (shared/risk.js): dangerous requests look different from routine ones.
+      if (p.risk) body.push(({ high: c.red('▲ high risk'), medium: c.yellow('● medium risk'), low: c.green('○ low risk') })[p.risk.level] + (p.risk.why ? dim(' — ' + p.risk.why) : ''), '');
       for (const l of String(p.summary || p.s || '').split('\n').slice(0, 12)) body.push(c.fg(l));
       if (p.x) {
         const diff = [];
@@ -518,16 +518,16 @@ class App {
           if (ed.new) for (const l of ed.new.split('\n')) diff.push(c.green('+ ' + l));
         }
         body.push('', ...diff.slice(0, 16));
-        if (diff.length > 16) body.push(dim(`… ${diff.length - 16} baris lagi`));
+        if (diff.length > 16) body.push(dim(`… ${diff.length - 16} more lines`));
       }
-      if (p.undo) body.push('', dim(p.undo === 'file' ? '↺ bisa dibatalkan dengan /rewind' : '↺ perubahan file bisa di-/rewind; efek di luar folder (jaringan, paket global) tidak'));
+      if (p.undo) body.push('', dim(p.undo === 'file' ? '↺ can be undone with /rewind' : '↺ file changes can be /rewind-ed; effects outside the folder (network, global packages) can\'t'));
       body.push('');
       opts.forEach((t, i) => body.push(i === o.idx ? c.cyan(`❯ ${i + 1}. ${t}`) : c.soft(`  ${i + 1}. ${t}`)));
-      if (this.perms.length > 1) body.push('', dim(`+${this.perms.length - 1} permintaan lagi`));
-      return { lines: box(bold(p.push ? c.red('Agen ingin PUSH ke GitHub') : c.yellow(`Izinkan ${p.tool}?`)), body, '↑↓ pilih · enter · 1-3', p.push ? c.red : c.yellow) };
+      if (this.perms.length > 1) body.push('', dim(`+${this.perms.length - 1} more request(s)`));
+      return { lines: box(bold(p.push ? c.red('The agent wants to PUSH to GitHub') : c.yellow(`Allow ${p.tool}?`)), body, '↑↓ select · enter · 1-3', p.push ? c.red : c.yellow) };
     }
     if (o.type === 'confirm') {
-      const body = [o.text, '', o.idx === 0 ? c.cyan('❯ Ya') + '   ' + c.soft('Tidak') : c.soft('  Ya') + '   ' + c.cyan('❯ Tidak')];
+      const body = [o.text, '', o.idx === 0 ? c.cyan('❯ Yes') + '   ' + c.soft('No') : c.soft('  Yes') + '   ' + c.cyan('❯ No')];
       return { lines: box(bold(o.title), body, '←→ · enter · y/n') };
     }
     if (o.type === 'select') {
@@ -536,9 +536,9 @@ class App {
       o.idx = Math.max(0, Math.min(o.idx, items.length - 1));
       const top = Math.max(0, Math.min(o.idx - Math.floor(vis / 2), items.length - vis));
       const body = [];
-      if (o.filter !== undefined) body.push(c.cyan('⌕ ') + (o.filter ? c.fg(o.filter) : dim(o.placeholder || 'ketik untuk menyaring…')));
-      if (o.loading) body.push(dim('  memuat…'));
-      else if (!items.length) body.push(dim('  (kosong)'));
+      if (o.filter !== undefined) body.push(c.cyan('⌕ ') + (o.filter ? c.fg(o.filter) : dim(o.placeholder || 'type to filter…')));
+      if (o.loading) body.push(dim('  loading…'));
+      else if (!items.length) body.push(dim('  (empty)'));
       for (let i = top; i < Math.min(items.length, top + vis); i++) {
         const it = items[i];
         const on = i === o.idx;
@@ -548,7 +548,7 @@ class App {
       }
       if (items.length > vis) body.push(dim(`  ${o.idx + 1}/${items.length}`));
       if (o.note) body.push('', o.note);
-      return { lines: box(bold(o.title), body, o.foot || '↑↓ pilih · enter · esc batal'), cursor: null };
+      return { lines: box(bold(o.title), body, o.foot || '↑↓ select · enter · esc cancel'), cursor: null };
     }
     return { lines: [] };
   }
@@ -601,7 +601,7 @@ class App {
       e,
       done: false,
       result: null,
-      // Titik berkedip selama tool berjalan.
+      // Blinking dot while the tool runs.
       preview: (W) => [trunc(`${Math.floor(this.frame / 4) % 2 ? c.gray('●') : c.fg('●')} ${this.toolTitle(e)}`, W - 1)],
       final: (W) => this.toolFinal(it, W),
     };
@@ -628,24 +628,24 @@ class App {
         if (ed.old) for (const l of ed.old.split('\n')) (del++, diff.push(c.red('- ' + l)));
         if (ed.new) for (const l of ed.new.split('\n')) (add++, diff.push(c.green('+ ' + l)));
       }
-      const sum = e.name === 'Write' ? `Menulis ${add} baris` : `Diubah: ${c.green('+' + add)} ${c.red('−' + del)}`;
+      const sum = e.name === 'Write' ? `Wrote ${add} lines` : `Changed: ${c.green('+' + add)} ${c.red('−' + del)}`;
       const show = diff.slice(0, 14).map((l) => trunc(l, W - 8));
-      if (diff.length > 14) show.push(dim(`… +${diff.length - 14} baris`));
+      if (diff.length > 14) show.push(dim(`… +${diff.length - 14} lines`));
       L.push(...branch([sum, ...show]));
       return L;
     }
-    if (!result) return [...L, ...branch([dim('(dihentikan)')])];
+    if (!result) return [...L, ...branch([dim('(stopped)')])];
     if (!ok) {
       const ls = outText.split('\n').slice(0, 6).map((l) => c.red(trunc(l, W - 8)));
-      if (n > 6) ls.push(dim(`… +${n - 6} baris (ctrl+o lihat semua)`));
-      return [...L, ...branch(ls.length ? ls : [c.red('gagal')])];
+      if (n > 6) ls.push(dim(`… +${n - 6} lines (ctrl+o to see all)`));
+      return [...L, ...branch(ls.length ? ls : [c.red('failed')])];
     }
-    if (e.name === 'Read') return [...L, ...branch([dim(`${n} baris dibaca`)])];
-    if (e.name === 'Glob' || e.name === 'Grep' || e.name === 'LS') return [...L, ...branch([dim(n ? `${n} hasil` : 'tidak ada hasil')])];
-    if (e.name === 'Task' || e.name === 'Agent') return [...L, ...branch([dim('subagen selesai')])];
-    if (!outText) return [...L, ...branch([dim('(tanpa output)')])];
+    if (e.name === 'Read') return [...L, ...branch([dim(`read ${n} lines`)])];
+    if (e.name === 'Glob' || e.name === 'Grep' || e.name === 'LS') return [...L, ...branch([dim(n ? `${n} results` : 'no results')])];
+    if (e.name === 'Task' || e.name === 'Agent') return [...L, ...branch([dim('subagent finished')])];
+    if (!outText) return [...L, ...branch([dim('(no output)')])];
     const ls = outText.split('\n').slice(0, 5).map((l) => c.soft(trunc(l, W - 8)));
-    if (n > 5) ls.push(dim(`… +${n - 5} baris (ctrl+o lihat semua)`));
+    if (n > 5) ls.push(dim(`… +${n - 5} lines (ctrl+o to see all)`));
     return [...L, ...branch(ls)];
   }
 
@@ -663,7 +663,7 @@ class App {
       final: (W) => {
         const all = it.buf.replace(/\s+$/, '').split('\n');
         const ls = (it.buf ? all.slice(0, 12) : []).map((l) => c.soft(trunc(l, W - 8)));
-        if (all.length > 12) ls.push(dim(`… +${all.length - 12} baris (ctrl+o lihat semua)`));
+        if (all.length > 12) ls.push(dim(`… +${all.length - 12} lines (ctrl+o to see all)`));
         ls.push(it.code === 0 ? dim('exit 0') : c.red(`exit ${it.code}`));
         return ['', (it.code === 0 ? c.green('● ') : c.red('● ')) + bold('$ ' + cmd), ...ls.map((l, i) => (i === 0 ? c.line('  ⎿  ') : '     ') + l)];
       },
@@ -680,7 +680,7 @@ class App {
         this.activity = 'Berpikir';
         break;
       case 'thinking':
-        this.activity = `Berpikir (${e.words} kata)`;
+        this.activity = `Thinking (${e.words} words)`;
         break;
       case 'toolStart':
         this.activity = `Menyiapkan ${e.name}`;
@@ -689,7 +689,7 @@ class App {
         let last = this.queue[this.queue.length - 1];
         if (!last || last.kind !== 'text' || last.done) this.queue.push((last = this.textItem()));
         last.src += e.d;
-        this.activity = 'Menulis';
+        this.activity = 'Writing';
         break;
       }
       case 'tool': {
@@ -719,17 +719,17 @@ class App {
         if (this.overlay?.type === 'perm' && this.overlay.perm.pid === e.pid) this.overlay = null;
         this.showNextPerm();
         this.closeText();
-        this.queue.push({ kind: 'note', done: true, final: () => [dim(`  ${e.allow ? c.green('✓') : c.red('✗')} ${e.allow ? 'diizinkan' : 'ditolak'} · ${e.tool}`)], preview: () => [] });
+        this.queue.push({ kind: 'note', done: true, final: () => [dim(`  ${e.allow ? c.green('✓') : c.red('✗')} ${e.allow ? 'allowed' : 'denied'} · ${e.tool}`)], preview: () => [] });
         break;
       case 'retry':
         this.closeText();
-        this.queue.push({ kind: 'note', done: true, final: () => [c.yellow(`  ↻ error model ${e.status ?? ''} — mencoba lagi${e.attempt ? ` (${e.attempt}/${e.max})` : ''}`)], preview: () => [] });
+        this.queue.push({ kind: 'note', done: true, final: () => [c.yellow(`  ↻ model error ${e.status ?? ''} — retrying${e.attempt ? ` (${e.attempt}/${e.max})` : ''}`)], preview: () => [] });
         break;
       case 'done': {
         for (const it of this.queue) it.done = true;
         const t = e.ok
-          ? `${c.green('✻')} ${dim(['Selesai', ...doneParts(e)].join(' · '))}`
-          : `${c.red('✻')} ${c.red('Berhenti: ' + (e.err || 'error'))}`;
+          ? `${c.green('✻')} ${dim(['Done', ...doneParts(e)].join(' · '))}`
+          : `${c.red('✻')} ${c.red('Stopped: ' + (e.err || 'error'))}`;
         this.queue.push({ kind: 'note', done: true, final: () => ['', t], preview: () => [] });
         this.activity = '';
         if (!replay) this.refreshGit();
@@ -769,12 +769,12 @@ class App {
       case 'proc':
         if (e.port && !this.procPorts?.has(e.name + e.port)) {
           (this.procPorts ??= new Set()).add(e.name + e.port);
-          this.setFlash(`▶ ${e.name} siap di http://localhost:${e.port} — /preview untuk HP`);
-        } else if (e.status === 'exited' && !e.killed && e.code) this.setFlash(`✗ ${e.name} berhenti (exit ${e.code}) — /logs ${e.name}`, true, 5000);
+          this.setFlash(`▶ ${e.name} ready at http://localhost:${e.port} — /preview for your phone`);
+        } else if (e.status === 'exited' && !e.killed && e.code) this.setFlash(`✗ ${e.name} stopped (exit ${e.code}) — /logs ${e.name}`, true, 5000);
         break;
       case 'shot':
         this.closeText();
-        this.queue.push({ kind: 'note', done: true, final: () => [dim(`  ◐ screenshot ${e.url} (lihat di HP)`)], preview: () => [] });
+        this.queue.push({ kind: 'note', done: true, final: () => [dim(`  ◐ screenshot ${e.url} (see it on your phone)`)], preview: () => [] });
         break;
     }
     if (!replay) this.flushQueue();
@@ -800,13 +800,13 @@ class App {
   addPerm(p) {
     if (this.perms.some((x) => x.pid === p.pid)) return;
     this.perms.push(p);
-    out.write('\x07'); // bel: menarik perhatian
+    out.write('\x07'); // bell: get attention
     this.showNextPerm();
   }
   showNextPerm() {
     if (this.overlay && this.overlay.type !== 'perm') return;
     const p = this.perms[0];
-    if (this.overlay?.perm === p) return this.scheduleRender(); // jangan reset jawaban yang sedang diisi
+    if (this.overlay?.perm === p) return this.scheduleRender(); // don't reset an answer being filled in
     this.overlay = p ? { type: 'perm', perm: p, idx: 0, qi: 0, sel: (p.ask || []).map(() => new Set()), text: (p.ask || []).map(() => '') } : null;
     this.scheduleRender();
   }
@@ -824,7 +824,7 @@ class App {
     } catch {}
   }
 
-  // ---- sesi ----
+  // ---- session ----
   async attach(s, { quiet = false } = {}) {
     if (this.session) await this.cl.call('detach').catch(() => {});
     this.session = s;
@@ -839,7 +839,7 @@ class App {
     const keep = all.slice(-80);
     if (!quiet) {
       this.printHeader();
-      if (all.length > keep.length || res.truncated) this.print(dim(`  … ${all.length - keep.length + (res.truncated ? 1 : 0)}+ event sebelumnya tidak ditampilkan`));
+      if (all.length > keep.length || res.truncated) this.print(dim(`  … ${all.length - keep.length + (res.truncated ? 1 : 0)}+ earlier events not shown`));
     }
     this.evCursor = new EventCursor();
     for (const e of all) this.evCursor.accept(e);
@@ -861,12 +861,12 @@ class App {
       c.line('╭' + '─'.repeat(W - 2) + '╮'),
       row(`${gradient(LOGO + ' snugcode', PAL.peach, PAL.clay)}  ${dim('— coding agent · ' + (ENGINE_LABEL[this.info?.engine] || 'Claude Agent SDK'))}`),
       row(),
-      row(`  ${dim('/help')} bantuan  ${dim('/model')} model & effort  ${dim('!')} shell`),
+      row(`  ${dim('/help')} help  ${dim('/model')} model & effort  ${dim('!')} shell`),
       row(),
     ];
     if (s) {
       if (s.computer) {
-        lines.push(kv('mode', c.cyan('💻 Komputer (kontrol seluruh PC)')));
+        lines.push(kv('mode', c.cyan('💻 Computer (control the whole PC)')));
         lines.push(kv('folder', c.fg(tildify(s.cwd))));
       } else {
         if (s.local) lines.push(kv('folder', c.fg(tildify(s.cwd))));
@@ -874,9 +874,9 @@ class App {
       }
       lines.push(kv('model', c.purple('◆ ') + c.fg(modelLabel(s.model))));
     }
-    lines.push(kv('PC', c.fg(this.info.name) + dim(this.info.github ? ` · @${this.info.github}` : '') + dim(' · bisa dilanjutkan di HP')));
+    lines.push(kv('PC', c.fg(this.info.name) + dim(this.info.github ? ` · @${this.info.github}` : '') + dim(' · continue on your phone anytime')));
     lines.push(c.line('╰' + '─'.repeat(W - 2) + '╯'));
-    if (s?.title) lines.push('', dim('  sesi: ') + c.soft(trunc(s.title, W - 10)));
+    if (s?.title) lines.push('', dim('  session: ') + c.soft(trunc(s.title, W - 10)));
     this.print(lines);
   }
 
@@ -897,10 +897,10 @@ class App {
     this.input = '';
     this.cursor = 0;
     if (this.mode === 'chat' && text.startsWith('/')) return this.command(text);
-    if (!this.session) return this.setFlash('Belum ada sesi — /new atau /sessions', true);
+    if (!this.session) return this.setFlash('No session yet — /new or /sessions', true);
     const toSend = this.mode === 'shell' ? '!' + text : text;
     this.mode = 'chat';
-    // Agen masih bekerja: antrekan, kirim otomatis begitu selesai (seperti Claude Code).
+    // The agent is still working: queue it, sent automatically when it finishes (like Claude Code).
     if (this.running) {
       this.queued = [...(this.queued || []), toSend];
       return this.scheduleRender();
@@ -946,7 +946,7 @@ class App {
     if (name === 'escape') {
       if (this.running) this.interrupt();
       else if (this.ghWaiting) {
-        // Berhenti menunggu di layar; kode tetap berlaku sampai kedaluwarsa.
+        // Stop waiting on screen; the code stays valid until it expires.
         this.ghWaiting = false;
         this.busyText = null;
       } else if (sug.length) this.input = '';
@@ -1017,12 +1017,12 @@ class App {
 
   async interrupt() {
     if (!this.session || !this.running) return;
-    this.setFlash('menghentikan…');
+    this.setFlash('stopping…');
     await this.cl.call('interrupt', { id: this.session.id }).catch((e) => this.setFlash(e.message, true));
   }
 
   showLastOutput() {
-    if (!this.lastOutput) return this.setFlash('Belum ada output tool', true);
+    if (!this.lastOutput) return this.setFlash('No tool output yet', true);
     const W = cols();
     this.print(['', c.soft('── ' + trunc(this.lastOutput.title, W - 8) + ' ' + '─'.repeat(Math.max(0, W - width(this.lastOutput.title) - 8))), ...this.lastOutput.text.replace(/\s+$/, '').split('\n').map((l) => c.soft(l)), c.soft('─'.repeat(W - 1))]);
   }
@@ -1077,7 +1077,7 @@ class App {
   }
   overlayPrompt(o) {
     return new Promise((resolve) => {
-      // Objek yang sama (bukan salinan): pemuatan async mengisi item ke overlay ini.
+      // The same object (not a copy): async loading fills items into this overlay.
       o.resolve = resolve;
       this.overlay = o;
       this.scheduleRender();
@@ -1085,7 +1085,7 @@ class App {
   }
   closeOverlay(value) {
     const o = this.overlay;
-    // Teks pencarian terakhir dipakai opsi "pakai nama yang diketik".
+    // The last search text is used by the "use the typed name" option.
     if (o?.filter !== undefined) this.overlayFilterLast = o.filter;
     this.overlay = null;
     o?.resolve?.(value);
@@ -1146,7 +1146,7 @@ class App {
     }
     this.showNextPerm();
   }
-  // AskUserQuestion: satu pertanyaan per layar; opsi terakhir = jawaban bebas yang diketik.
+  // AskUserQuestion: one question per screen; the last option = a typed free-form answer.
   askKey(o, str, key) {
     const qs = o.perm.ask;
     const q = qs[o.qi];
@@ -1158,12 +1158,12 @@ class App {
       else o.sel[o.qi].has(label) ? o.sel[o.qi].delete(label) : o.sel[o.qi].add(label);
     };
     const next = () => {
-      if (!o.sel[o.qi].size && !o.text[o.qi].trim()) return this.setFlash('Pilih jawaban dulu', true);
+      if (!o.sel[o.qi].size && !o.text[o.qi].trim()) return this.setFlash('Pick an answer first', true);
       if (o.qi < qs.length - 1) return (o.qi++, (o.idx = 0), this.scheduleRender());
       const answers = Object.fromEntries(qs.map((x, i) => [x.question, [...o.sel[i], o.text[i].trim()].filter(Boolean).join(', ')]));
       return this.sendPerm(o.perm, 'allow', { answers });
     };
-    if (key.name === 'escape') return this.sendPerm(o.perm, 'deny', { message: 'Pengguna melewati pertanyaan; putuskan sendiri dengan pilihan paling masuk akal.' });
+    if (key.name === 'escape') return this.sendPerm(o.perm, 'deny', { message: 'The user skipped the question; decide yourself with the most reasonable choice.' });
     if (key.name === 'up') o.idx = (o.idx + n - 1) % n;
     else if (key.name === 'down' || key.name === 'tab') o.idx = (o.idx + 1) % n;
     else if (key.name === 'return') {
@@ -1179,29 +1179,29 @@ class App {
     return this.scheduleRender();
   }
 
-  // ---- perintah ----
+  // ---- commands ----
   help() {
     const W = cols();
     const keys = [
-      ['enter', 'kirim'],
-      ['\\ + enter / alt+enter', 'baris baru'],
-      ['!', 'mode shell (perintah langsung)'],
-      ['esc', 'hentikan agen'],
-      ['↑ ↓', 'riwayat input'],
-      ['tab', 'lengkapi perintah /'],
-      ['ctrl+o', 'output lengkap tool terakhir'],
-      ['ctrl+l', 'bersihkan layar'],
-      ['ctrl+c ×2', 'keluar'],
+      ['enter', 'send'],
+      ['\\ + enter / alt+enter', 'new line'],
+      ['!', 'shell mode (direct commands)'],
+      ['esc', 'stop the agent'],
+      ['↑ ↓', 'input history'],
+      ['tab', 'complete / commands'],
+      ['ctrl+o', 'full output of the last tool'],
+      ['ctrl+l', 'clear the screen'],
+      ['ctrl+c ×2', 'exit'],
     ];
     this.print([
       '',
-      bold(gradient('snugcode', PAL.peach, PAL.clay)) + dim('  — perintah'),
+      bold(gradient('snugcode', PAL.peach, PAL.clay)) + dim('  — commands'),
       ...COMMANDS.map(([cmd, d]) => `  ${c.cyan(cmd.padEnd(11))} ${c.soft(d)}`),
       '',
       bold('Pintasan'),
       ...keys.map(([k, d]) => `  ${c.yellow(k.padEnd(22))} ${c.soft(d)}`),
       '',
-      dim(trunc('Sesi di sini sama dengan di HP — mulai di terminal, lanjutkan di HP (atau sebaliknya).', W - 2)),
+      dim(trunc('Sessions here are the same as on your phone — start in the terminal, continue on the phone (or the other way round).', W - 2)),
     ]);
   }
 
@@ -1210,7 +1210,7 @@ class App {
     const arg = rest.join(' ').trim();
     const s = this.session;
     const need = () => {
-      if (!s) throw new Error('Belum ada sesi — /new atau /sessions');
+      if (!s) throw new Error('No session yet — /new or /sessions');
       return s;
     };
     try {
@@ -1242,36 +1242,36 @@ class App {
         case '/auto': {
           need();
           const on = !s.auto;
-          if (on && !(await this.confirm('Auto-izin', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push). Lanjut?'))) return;
+          if (on && !(await this.confirm('Auto-approve', 'The agent may run any shell command without asking (except git push). Continue?'))) return;
           this.session = await this.cl.call('auto', { id: s.id, on });
-          return this.setFlash(on ? '⚡ auto-izin ON' : 'auto-izin off', on);
+          return this.setFlash(on ? '⚡ auto-approve ON' : 'auto-approve off', on);
         }
         case '/otonomi':
         case '/autonomy': {
           need();
-          const names = { tanya: 'ask', ask: 'ask', seimbang: 'balanced', balanced: 'balanced', rutin: 'trusted', trusted: 'trusted', penuh: 'auto', auto: 'auto' };
+          const names = { ask: 'ask', tanya: 'ask', balanced: 'balanced', seimbang: 'balanced', routine: 'trusted', rutin: 'trusted', trusted: 'trusted', full: 'auto', penuh: 'auto', auto: 'auto' };
           const level = names[String(arg || '').trim().toLowerCase()];
-          if (!level) return this.setFlash('pakai: /otonomi tanya | seimbang | rutin | penuh  (sekarang: ' + (s.autonomy || '-') + ')');
-          if (level === 'auto' && !(await this.confirm('Otonomi penuh', 'Agen boleh menjalankan perintah shell apa pun tanpa bertanya (kecuali git push & PR). Lanjut?'))) return;
+          if (!level) return this.setFlash('usage: /autonomy ask | balanced | routine | full  (now: ' + (s.autonomy || '-') + ')');
+          if (level === 'auto' && !(await this.confirm('Full autonomy', 'The agent may run any shell command without asking (except git push & PRs). Continue?'))) return;
           this.session = await this.cl.call('autonomy', { id: s.id, level });
-          return this.setFlash({ ask: 'otonomi: tanya setiap edit & perintah', balanced: 'otonomi: seimbang (edit langsung, perintah ditanyakan)', trusted: 'otonomi: test/lint/build otomatis, perintah lain ditanyakan', auto: '⚡ otonomi penuh' }[level], level === 'auto');
+          return this.setFlash({ ask: 'autonomy: ask for every edit & command', balanced: 'autonomy: balanced (edits apply directly, commands ask)', trusted: 'autonomy: test/lint/build automatic, other commands ask', auto: '⚡ full autonomy' }[level], level === 'auto');
         }
         case '/edits': {
           need();
           const on = !s.askEdits;
           this.session = await this.cl.call('edits', { id: s.id, on });
-          return this.setFlash(on ? 'tinjau edit ON: setiap Write/Edit minta izin' : 'tinjau edit off: edit di worktree langsung diterapkan (bisa /rewind)');
+          return this.setFlash(on ? 'edit review ON: every Write/Edit asks for permission' : 'edit review off: edits in the worktree apply directly (can /rewind)');
         }
         case '/run': {
           need();
           const r = await this.cl.call('runDev', { id: s.id, cmd: arg || undefined });
-          return this.print(['', c.green('▶ ') + bold(r.dev) + (r.setup ? dim(`  (setelah ${r.setup})`) : '') + dim('  — /ps · /logs · /preview · /stop')]);
+          return this.print(['', c.green('▶ ') + bold(r.dev) + (r.setup ? dim(`  (after ${r.setup})`) : '') + dim('  — /ps · /logs · /preview · /stop')]);
         }
         case '/ps': {
           need();
           const ps = (await this.cl.call('project', { id: s.id })).procs;
-          if (!ps.length) return this.setFlash('Belum ada proses — /run');
-          return this.print(['', ...ps.map((p) => `  ${p.status === 'running' ? c.green('●') : c.gray('○')} ${bold(p.name)} ${dim(p.status === 'running' ? (p.port ? 'port ' + p.port : 'menunggu port') : 'exit ' + p.code)}  ${c.soft(p.cmd)}`)]);
+          if (!ps.length) return this.setFlash('No processes yet — /run');
+          return this.print(['', ...ps.map((p) => `  ${p.status === 'running' ? c.green('●') : c.gray('○')} ${bold(p.name)} ${dim(p.status === 'running' ? (p.port ? 'port ' + p.port : 'waiting for port') : 'exit ' + p.code)}  ${c.soft(p.cmd)}`)]);
         }
         case '/logs':
         case '/stop':
@@ -1279,10 +1279,10 @@ class App {
           need();
           const ps = (await this.cl.call('project', { id: s.id })).procs;
           const name = arg || ps.find((p) => p.status === 'running')?.name || ps[0]?.name;
-          if (!name) return this.setFlash('Belum ada proses — /run', true);
+          if (!name) return this.setFlash('No processes yet — /run', true);
           if (cmd === '/stop') {
             await this.cl.call('procStop', { id: s.id, name });
-            return this.setFlash('■ ' + name + ' dihentikan');
+            return this.setFlash('■ ' + name + ' stopped');
           }
           if (cmd === '/logs') {
             const t = await this.cl.call('procLogs', { id: s.id, name });
@@ -1293,29 +1293,29 @@ class App {
           this.scheduleRender();
           const pv = await this.cl.call('preview', { id: s.id, name }).finally(() => (this.busyText = null));
           const copied = copyClipboard(pv.link);
-          return this.print(['', c.green('◆ ') + bold('Preview ' + name) + dim(` (port ${pv.port})`), `  ${under(c.blue(pv.link))}`, dim(`  link berisi token rahasia${copied ? ' · sudah disalin' : ''} — buka di HP/laptop lain; tertutup saat proses berhenti`)]);
+          return this.print(['', c.green('◆ ') + bold('Preview ' + name) + dim(` (port ${pv.port})`), `  ${under(c.blue(pv.link))}`, dim(`  the link contains a secret token${copied ? ' · copied' : ''} — open it on your phone/another laptop; closes when the process stops`)]);
         }
         case '/plan': {
           need();
           this.session = await this.cl.call('plan', { id: s.id, on: !s.plan });
-          return this.setFlash(this.session.plan ? '☰ mode rencana ON — agen menyusun rencana dulu' : 'mode rencana off', this.session.plan);
+          return this.setFlash(this.session.plan ? '☰ plan mode ON — the agent drafts a plan first' : 'plan mode off', this.session.plan);
         }
         case '/rewind': {
           need();
-          if (s.computer) return this.setFlash('Checkpoint dan rewind hanya tersedia untuk sesi repository git', true);
+          if (s.computer) return this.setFlash('Checkpoints and rewind are only available for git repository sessions', true);
           const last = this.lastUserSeq;
-          if (!last) return this.setFlash('Belum ada prompt di sesi ini', true);
-          if (!(await this.confirm('Rewind', `Kembalikan semua file ke sebelum prompt "${trunc(last.d || 'gambar', 50)}"?`))) return;
+          if (!last) return this.setFlash('No prompts in this session yet', true);
+          if (!(await this.confirm('Rewind', `Restore every file to before the prompt "${trunc(last.d || 'image', 50)}"?`))) return;
           const n = await this.cl.call('rewind', { id: s.id, seq: last.seq });
-          return this.setFlash(`↺ ${n} file dikembalikan`);
+          return this.setFlash(`↺ ${n} file(s) restored`);
         }
         case '/git': {
           need();
           const st = await this.cl.call('status', { id: s.id });
-          if (st.notRepo) return this.setFlash('Folder kerja sesi ini bukan repository git', true);
+          if (st.notRepo) return this.setFlash('This session\'s working folder is not a git repository', true);
           this.git = { branch: st.branch, files: st.files.length, ahead: st.ahead };
-          const L = ['', bold('git') + ' ' + c.blue(st.branch) + dim(st.hasUpstream ? `  ↑${st.ahead} ↓${st.behind}` : st.ahead ? `  ${st.ahead} commit belum di GitHub` : '  belum ada di GitHub')];
-          if (!st.files.length) L.push(dim('  tidak ada perubahan'));
+          const L = ['', bold('git') + ' ' + c.blue(st.branch) + dim(st.hasUpstream ? `  ↑${st.ahead} ↓${st.behind}` : st.ahead ? `  ${st.ahead} commit(s) not on GitHub` : '  not on GitHub yet')];
+          if (!st.files.length) L.push(dim('  no changes'));
           for (const f of st.files) L.push(`  ${f.st.includes('?') || f.st.includes('A') ? c.green('A') : f.st.includes('D') ? c.red('D') : c.yellow('M')}  ${f.path}`);
           if (st.log.length) L.push('', ...st.log.slice(0, 5).map((l) => `  ${c.yellow(l.slice(0, 7))} ${c.soft(l.slice(8))}`));
           return this.print(L);
@@ -1323,8 +1323,8 @@ class App {
         case '/diff': {
           need();
           const { diff, truncated, notRepo } = await this.cl.call('diff', { id: s.id });
-          if (notRepo) return this.setFlash('Folder kerja sesi ini bukan repository git', true);
-          if (!diff.trim()) return this.setFlash('Tidak ada perubahan');
+          if (notRepo) return this.setFlash('This session\'s working folder is not a git repository', true);
+          if (!diff.trim()) return this.setFlash('No changes');
           const L = [''];
           for (const l of diff.split('\n')) {
             if (l.startsWith('diff --git')) L.push('', bold(c.blue('▸ ' + l.replace(/^diff --git a\/(.+?) b\/.*$/, '$1'))));
@@ -1334,13 +1334,13 @@ class App {
             else if (l.startsWith('-')) L.push(c.red(l));
             else L.push(c.soft(l));
           }
-          if (truncated) L.push(dim('… diff dipotong'));
+          if (truncated) L.push(dim('… diff truncated'));
           return this.print(L);
         }
         case '/commit': {
           need();
           if (!arg) {
-            this.input = 'Lihat perubahan yang ada, tulis pesan commit yang jelas, lalu commit. Jangan push.';
+            this.input = 'Look at the current changes, write a clear commit message, then commit. Don\'t push.';
             this.cursor = [...this.input].length;
             return this.submit();
           }
@@ -1351,16 +1351,16 @@ class App {
         case '/push': {
           need();
           const st = await this.cl.call('status', { id: s.id });
-          if (!(await this.confirm('Push', `Push branch ${st.branch} ke GitHub?`))) return;
-          this.busyText = 'Push ke GitHub';
+          if (!(await this.confirm('Push', `Push branch ${st.branch} to GitHub?`))) return;
+          this.busyText = 'Pushing to GitHub';
           this.scheduleRender();
           const b = await this.cl.call('push', { id: s.id }).finally(() => (this.busyText = null));
-          this.setFlash('⇡ push ke origin/' + b);
+          this.setFlash('⇡ pushed to origin/' + b);
           return this.refreshGit();
         }
         case '/pr': {
           need();
-          this.busyText = 'Membuat Pull Request';
+          this.busyText = 'Creating Pull Request';
           this.scheduleRender();
           const st = await this.cl.call('status', { id: s.id });
           const pr = await this.cl.call('pr', { id: s.id, title: arg || s.title || st.branch, body: '' }).finally(() => (this.busyText = null));
@@ -1369,39 +1369,39 @@ class App {
         case '/delete': {
           need();
           const confirmMsg = s.computer
-            ? 'Hapus riwayat sesi komputer ini? File & sistem kamu tidak disentuh.'
+            ? 'Delete this computer session\'s history? Your files & system are not touched.'
             : s.local
-            ? 'Hapus riwayat sesi ini? Folder & file kamu tidak disentuh.'
-            : 'Hapus sesi beserta worktree-nya? Perubahan yang belum di-push hilang.';
-          if (!(await this.confirm('Hapus sesi', confirmMsg))) return;
+            ? 'Delete this session\'s history? Your folders & files are not touched.'
+            : 'Delete the session and its worktree? Unpushed changes will be lost.';
+          if (!(await this.confirm('Delete session', confirmMsg))) return;
           await this.cl.call('delete', { id: s.id });
           this.session = null;
-          this.setFlash('Sesi dihapus');
+          this.setFlash('Session deleted');
           return this.pickSession();
         }
         case '/update': {
-          this.busyText = 'Memeriksa pembaruan…';
+          this.busyText = 'Checking for updates…';
           this.scheduleRender();
           try {
             const st = await this.cl.call('updateStatus');
             this.busyText = null;
             if (!st.updateAvailable && arg !== '--force') {
-              return this.setFlash(`✓ snugcode sudah versi terbaru (${st.currentCommit})`);
+              return this.setFlash(`✓ snugcode is up to date (${st.currentCommit})`);
             }
             this.print([
               '',
-              bold(c.yellow('⬆ Pembaruan tersedia: ')) + c.yellow(st.latestCommit) + (st.latestMessage ? c.soft(' — ' + st.latestMessage) : ''),
-              dim(`  Komit saat ini: ${st.currentCommit}`),
+              bold(c.yellow('⬆ Update available: ')) + c.yellow(st.latestCommit) + (st.latestMessage ? c.soft(' — ' + st.latestMessage) : ''),
+              dim(`  Current commit: ${st.currentCommit}`),
             ]);
-            if (!(await this.confirm('Update snugcode', 'Pasang pembaruan dan restart daemon sekarang?'))) return;
-            this.busyText = 'Memasang pembaruan…';
+            if (!(await this.confirm('Update snugcode', 'Install the update and restart the daemon now?'))) return;
+            this.busyText = 'Installing the update…';
             this.scheduleRender();
             const res = await this.cl.call('update');
             this.busyText = null;
-            this.print(['', c.green('✓ ') + bold(res.message || 'Pembaruan selesai, daemon sedang me-restart.')]);
+            this.print(['', c.green('✓ ') + bold(res.message || 'Update finished, the daemon is restarting.')]);
           } catch (e) {
             this.busyText = null;
-            return this.setFlash('Update gagal: ' + e.message, true);
+            return this.setFlash('Update failed: ' + e.message, true);
           }
           return;
         }
@@ -1414,26 +1414,26 @@ class App {
             const wtCount = r.removedWorktrees?.length || 0;
             const repoCount = r.removedRepos?.length || 0;
             if (wtCount === 0 && repoCount === 0) {
-              return this.setFlash('✓ Workspace PC sudah bersih');
+              return this.setFlash('✓ PC workspace is already clean');
             }
             return this.setFlash(`✓ Dibersihkan: ${wtCount} worktree, ${repoCount} repo`);
           } catch (e) {
             this.busyText = null;
-            return this.setFlash('Gagal clean: ' + e.message, true);
+            return this.setFlash('Clean failed: ' + e.message, true);
           }
         }
         case '/restart': {
-          if (!(await this.confirm('Restart daemon', 'Restart daemon snugcode sekarang?'))) return;
+          if (!(await this.confirm('Restart daemon', 'Restart the snugcode daemon now?'))) return;
           try {
             await this.cl.call('restart');
-            this.print(['', c.green('● ') + bold('Daemon sedang me-restart…')]);
+            this.print(['', c.green('● ') + bold('The daemon is restarting…')]);
           } catch (e) {
             this.setFlash(e.message, true);
           }
           return;
         }
         default:
-          return this.setFlash(`Perintah tidak dikenal: ${cmd} — /help`, true);
+          return this.setFlash(`Unknown command: ${cmd} — /help`, true);
       }
     } catch (e) {
       this.busyText = null;
@@ -1444,12 +1444,12 @@ class App {
   // ---- login GitHub ----
   async loginGithub() {
     const st = await this.cl.call('githubLogin');
-    if (!st.pending) return this.setFlash('Gagal memulai login GitHub', true);
+    if (!st.pending) return this.setFlash('Failed to start GitHub login', true);
     const copied = copyClipboard(st.pending.code);
     this.print(ghCodeBox(st.pending, copied));
     openUrl(st.pending.uri);
     this.ghWaiting = true;
-    this.busyText = 'Menunggu otorisasi GitHub (esc batal)';
+    this.busyText = 'Waiting for GitHub authorization (esc to cancel)';
     this.scheduleRender();
   }
   onGithub(st) {
@@ -1459,17 +1459,17 @@ class App {
     if (this.ghWaiting && st.state === 'ok' && !st.pending) {
       this.ghWaiting = false;
       this.busyText = null;
-      this.print(['', c.green('● ') + bold('GitHub tersambung') + c.soft(` @${st.login}`) + dim(' — push, PR, dan daftar repo bisa dipakai lagi')]);
+      this.print(['', c.green('● ') + bold('GitHub connected') + c.soft(` @${st.login}`) + dim(' — push, PRs, and the repo list work again')]);
     } else if (this.ghWaiting && st.pending?.error) {
       this.ghWaiting = false;
       this.busyText = null;
-      this.print(['', c.red('✗ Login GitHub gagal: ' + st.pending.error) + dim(' — coba /login lagi')]);
+      this.print(['', c.red('✗ GitHub login failed: ' + st.pending.error) + dim(' — try /login again')]);
     } else if (st.state === 'invalid' && was !== 'invalid') this.printGhWarning();
     this.scheduleRender();
   }
   printGhWarning() {
-    const title = this.info.githubState === 'missing' ? 'GitHub belum login di PC ini' : 'Login GitHub di PC ini tidak berlaku';
-    this.print(['', c.red('● ') + bold(c.red(title)) + dim(' — push, PR, dan daftar repo tidak bisa dipakai.'), `  ${c.line('⎿')}  ketik ${c.cyan('/login')} untuk login ulang (kode tampil di sini, bisa juga dari HP)`]);
+    const title = this.info.githubState === 'missing' ? 'GitHub is not signed in on this PC' : 'The GitHub login on this PC is no longer valid';
+    this.print(['', c.red('● ') + bold(c.red(title)) + dim(' — push, PRs, and the repo list are unavailable.'), `  ${c.line('⎿')}  type ${c.cyan('/login')} to sign in again (the code shows here, or use your phone)`]);
   }
 
   async pickSession() {
@@ -1477,17 +1477,17 @@ class App {
     const here = gitTop(process.cwd());
     const items = list.map((x) => ({
       value: x,
-      label: x.title || (x.computer ? 'Sesi Komputer' : '(belum ada prompt)'),
+      label: x.title || (x.computer ? 'Computer session' : '(no prompt yet)'),
       key: x.repo,
       sub: x.computer
-        ? `Komputer · ${tildify(x.cwd || '')} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}`
-        : `${x.repo} · ${x.branch} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}${x.local ? ' · lokal' : ''}`,
-      tag: x.status === 'running' ? c.yellow('● berjalan') : x.id === this.session?.id ? c.green('● sekarang') : '',
+        ? `Computer · ${tildify(x.cwd || '')} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}`
+        : `${x.repo} · ${x.branch} · ${modelLabel(x.model)} · ${ago(x.updatedAt)}${x.local ? ' · local' : ''}`,
+      tag: x.status === 'running' ? c.yellow('● running') : x.id === this.session?.id ? c.green('● current') : '',
     }));
-    if (here) items.unshift({ value: { here }, label: c.green('+ ') + 'Sesi di folder ini', sub: tildify(here), always: true });
-    items.push({ value: { computer: true }, label: c.green('+ ') + 'Sesi Komputer (kontrol PC seperti Claude Code)…', sub: 'akses penuh ke sistem & direktori', always: true });
-    items.push({ value: { create: true }, label: c.green('+ ') + 'Sesi baru dari repo GitHub…', always: true });
-    const pick = await this.select({ title: 'Sesi', items, placeholder: 'cari sesi…' });
+    if (here) items.unshift({ value: { here }, label: c.green('+ ') + 'Session in this folder', sub: tildify(here), always: true });
+    items.push({ value: { computer: true }, label: c.green('+ ') + 'Computer session (control the PC like Claude Code)…', sub: 'full access to the system & directories', always: true });
+    items.push({ value: { create: true }, label: c.green('+ ') + 'New session from a GitHub repo…', always: true });
+    const pick = await this.select({ title: 'Sessions', items, placeholder: 'search sessions…' });
     if (!pick) return;
     const v = pick.value;
     if (v.computer) return this.newComputerSession();
@@ -1497,7 +1497,7 @@ class App {
   }
 
   async newComputerSession(cwd = process.cwd()) {
-    this.busyText = 'Menyiapkan sesi komputer';
+    this.busyText = 'Preparing the computer session';
     this.scheduleRender();
     try {
       const s = await this.cl.call('create', { computer: true, cwd });
@@ -1512,16 +1512,16 @@ class App {
   async newSession(q) {
     const pick = await this.select({
       title: 'Repo GitHub',
-      placeholder: 'cari repo atau ketik owner/nama…',
+      placeholder: 'search repos or type owner/name…',
       load: async (o) => {
         if (q) o.filter = q;
         const repos = await this.cl.call('repos').catch((e) => {
-          o.note = c.yellow(e.message + ' — ketik owner/nama untuk repo publik.');
+          o.note = c.yellow(e.message + ' — type owner/name for a public repo.');
           return [];
         });
         return [
           ...repos.map((r) => ({ value: r.full, label: r.full, sub: [r.private ? 'private' : '', r.desc || ''].filter(Boolean).join(' · '), tag: r.private ? c.gray('🔒') : '' })),
-          { value: '__typed', label: c.green('+ ') + 'pakai nama yang diketik (owner/nama)', always: true },
+          { value: '__typed', label: c.green('+ ') + 'use the typed name (owner/name)', always: true },
         ];
       },
     });
@@ -1529,7 +1529,7 @@ class App {
     let repo = pick.value;
     if (repo === '__typed') {
       repo = (this.overlayFilterLast || '').trim();
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return this.setFlash('Ketik owner/nama di kotak pencarian dulu', true);
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return this.setFlash('Type owner/name in the search box first', true);
     }
     this.busyText = `Menyiapkan ${repo} (clone/fetch)`;
     this.scheduleRender();
@@ -1545,19 +1545,19 @@ class App {
 
   async pickModel(target) {
     const cur = target === 'session' ? this.session?.model : this.info.model;
-    if (target === 'session' && !this.session) return this.setFlash('Belum ada sesi', true);
+    if (target === 'session' && !this.session) return this.setFlash('No session yet', true);
     const effort = new Map();
     const slider = (g) => {
       const e = effort.get(g.key);
       const levels = [...(g.auto ? [null] : []), ...g.levels.map((l) => l.effort)];
       const idx = Math.max(0, levels.indexOf(e));
       const seg = levels.map((lv, i) => (i === idx ? c.yellow(bold('●')) : c.line('━━━'))).join(c.line('━'));
-      return [`    ${dim('effort')}  ${c.green('cepat')} ${seg} ${c.yellow('dalam')}   ${bold(c.yellow(e === null ? 'auto' : M.EFFORT_LABEL[e] || e))}  ${dim('← →')}`];
+      return [`    ${dim('effort')}  ${c.green('fast')} ${seg} ${c.yellow('deep')}   ${bold(c.yellow(e === null ? 'auto' : M.EFFORT_LABEL[e] || e))}  ${dim('← →')}`];
     };
     const pick = await this.select({
-      title: target === 'session' ? 'Model sesi ini' : 'Model default (sesi baru)',
-      placeholder: 'cari model…',
-      foot: '↑↓ model · ←→ effort · enter pakai · esc batal',
+      title: target === 'session' ? 'This session\'s model' : 'Default model (new sessions)',
+      placeholder: 'search models…',
+      foot: '↑↓ model · ←→ effort · enter use · esc cancel',
       load: async (o) => {
         const groups = M.groupModels(await this.cl.call('modelsInfo'));
         const items = groups.map((g) => {
@@ -1567,8 +1567,8 @@ class App {
             value: g,
             key: g.key,
             label: g.name,
-            sub: [g.conn && g.conn !== 'router' ? g.label || M.PROVIDER_LABEL[g.provider] || g.provider : M.PROVIDER_LABEL[g.provider] || g.provider, g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : '', g.ctx ? M.ctxLabel(g.ctx) + ' konteks' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} tingkat effort` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
-            tag: inUse ? c.green('● dipakai') : '',
+            sub: [g.conn && g.conn !== 'router' ? g.label || M.PROVIDER_LABEL[g.provider] || g.provider : M.PROVIDER_LABEL[g.provider] || g.provider, g.engine === 'codex' ? 'Codex' : g.engine === 'gemini' ? 'Gemini CLI' : '', g.ctx ? M.ctxLabel(g.ctx) + ' context' : '', g.slider ? `${g.levels.length + (g.auto ? 1 : 0)} effort levels` : g.fixed ? 'effort ' + (M.EFFORT_LABEL[g.fixed] || g.fixed) : ''].filter(Boolean).join(' · '),
+            tag: inUse ? c.green('● in use') : '',
             extra: g.slider ? () => slider(g) : null,
           };
         });
@@ -1585,18 +1585,18 @@ class App {
     });
     if (!pick) return;
     const id = M.resolveId(pick.value, effort.get(pick.value.key));
-    if (id === cur) return this.setFlash('Model tidak berubah');
+    if (id === cur) return this.setFlash('Model unchanged');
     this.busyText = `Menguji ${modelLabel(id)}`;
     this.scheduleRender();
     const r = await this.cl.call('probeModel', { model: id }).catch((e) => ({ ok: false, err: e.message }));
     this.busyText = null;
-    if (!r.ok && !(await this.confirm('Model bermasalah', `${modelLabel(id)}: ${r.err}\nTetap pakai?`))) return;
+    if (!r.ok && !(await this.confirm('Model problem', `${modelLabel(id)}: ${r.err}\nUse it anyway?`))) return;
     if (target === 'session') {
       this.session = await this.cl.call('setSessionModel', { id: this.session.id, model: id });
     } else {
       this.info = await this.cl.call('setModel', { model: id });
     }
-    this.setFlash(`${r.ok ? '✓' : '!'} ${modelLabel(id)}${r.ok ? ` · siap ${(r.ms / 1000).toFixed(1)}s` : ''}`, !r.ok);
+    this.setFlash(`${r.ok ? '✓' : '!'} ${modelLabel(id)}${r.ok ? ` · ready ${(r.ms / 1000).toFixed(1)}s` : ''}`, !r.ok);
   }
 
   exit() {
@@ -1605,7 +1605,7 @@ class App {
     out.write(this.clearLive() + '\x1b[?2004l\x1b[?25h');
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     const s = this.session;
-    out.write(`\n${gradient(LOGO + 'ᶻ', PAL.peach, PAL.clay)} ${dim('sampai jumpa.')}${s ? dim(' Sesi tetap ada di PC — lanjutkan di HP atau jalankan ') + c.soft('snugcode') + dim(' lagi.') : ''}\n`);
+    out.write(`\n${gradient(LOGO + 'ᶻ', PAL.peach, PAL.clay)} ${dim('see you.')}${s ? dim(' The session stays on the PC — continue on your phone or run ') + c.soft('snugcode') + dim(' again.') : ''}\n`);
     this.cl.sock.end();
     process.exit(0);
   }
@@ -1622,10 +1622,10 @@ function gitTop(dir) {
 // ---------- main ----------
 export async function runTui({ prompt = '', pick = false, computer = false } = {}) {
   if (!process.stdin.isTTY || !out.isTTY) {
-    console.error('snugcode perlu terminal interaktif. Untuk menjalankan daemon saja: snugcode start');
+    console.error('snugcode needs an interactive terminal. To run just the daemon: snugcode start');
     process.exit(1);
   }
-  out.write(dim('  menghubungkan ke daemon…') + '\r');
+  out.write(dim('  connecting to the daemon…') + '\r');
   let conn;
   try {
     conn = await connectDaemon((m) => out.write('\x1b[2K' + dim('  ' + m) + '\r'));
@@ -1637,7 +1637,7 @@ export async function runTui({ prompt = '', pick = false, computer = false } = {
   out.write('\x1b[2K\r');
   const app = new App(conn.client, conn.info, { prompt });
 
-  // Timeout Esc pendek: default 500ms membuat "Esc lalu ketik B" terbaca sebagai Alt+B.
+  // Short Esc timeout: the 500ms default makes "Esc then type B" read as Alt+B.
   readline.emitKeypressEvents(process.stdin, /** @type {any} */ ({ escapeCodeTimeout: 50 }));
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -1655,7 +1655,7 @@ export async function runTui({ prompt = '', pick = false, computer = false } = {
   };
   process.on('exit', cleanup);
   process.on('SIGINT', () => app.exit());
-  // Error tak terduga ditampilkan sebagai pesan, bukan mematikan UI.
+  // Unexpected errors are shown as messages instead of killing the UI.
   const soft = (e) => app.setFlash(String(e?.message || e), true, 6000);
   process.on('unhandledRejection', soft);
   process.on('uncaughtException', soft);
@@ -1673,11 +1673,11 @@ export async function runTui({ prompt = '', pick = false, computer = false } = {
     app.closed = true;
     out.write(app.clearLive() + '\x1b[?2004l\x1b[?25h');
     process.stdin.setRawMode(false);
-    console.error(c.red('\n✗ Koneksi ke daemon terputus.') + dim(' Jalankan snugcode lagi.'));
+    console.error(c.red('\n✗ Lost connection to the daemon.') + dim(' Run snugcode again.'));
     process.exit(1);
   });
 
-  // Folder repo git -> sesi lokal (lanjutkan yang sudah ada), selain itu pilih sesi atau komputer.
+  // A git repo folder -> local session (continue the existing one), otherwise pick a session or computer.
   const top = gitTop(process.cwd());
   try {
     if (computer) {
@@ -1691,10 +1691,10 @@ export async function runTui({ prompt = '', pick = false, computer = false } = {
       if (list.length || top) await app.pickSession();
       else {
         const pickStart = await app.select({
-          title: 'Mulai Sesi',
+          title: 'Start a session',
           items: [
-            { value: 'computer', label: c.green('+ ') + 'Sesi Komputer (kontrol PC seperti Claude Code)', sub: tildify(process.cwd()) + ' · akses seluruh PC', always: true },
-            { value: 'repo', label: c.cyan('+ ') + 'Sesi dari repo GitHub…', sub: 'clone ke worktree terisolasi', always: true },
+            { value: 'computer', label: c.green('+ ') + 'Computer session (control the PC like Claude Code)', sub: tildify(process.cwd()) + ' · access to the whole PC', always: true },
+            { value: 'repo', label: c.cyan('+ ') + 'Session from a GitHub repo…', sub: 'cloned into an isolated worktree', always: true },
           ],
         });
         if (pickStart?.value === 'computer') await app.newComputerSession(process.cwd());
@@ -1704,7 +1704,7 @@ export async function runTui({ prompt = '', pick = false, computer = false } = {
   } catch (e) {
     app.setFlash(e.message, true, 8000);
   }
-  // Status GitHub dicek ulang di awal agar peringatan langsung terlihat.
+  // The GitHub status is re-checked at startup so warnings show right away.
   app.cl.call('githubStatus', { check: true }).then((st) => {
     if (!st) return;
     app.info.githubState = st.state;

@@ -1,506 +1,509 @@
 # snugcode — Master Project Documentation
 
-> **Remote Coding Agent di PC Pribadi (atau runner cloud) yang Dikendalikan Penuh dari Smartphone — model apa pun, di harness terbaiknya (Claude Agent SDK / Codex).**  
-> *Bekerja di repository PC lokalmu dari mana saja: review kode, edit, commit, push, buat PR, dan eksekusi perintah shell langsung dari HP.*
+> **A remote coding agent on your own PC (or a cloud runner), fully controlled from your smartphone — any model, in its best harness (Claude Agent SDK / Codex).**  
+> *Work on the repositories on your local PC from anywhere: review code, edit, commit, push, open PRs, and run shell commands straight from your phone.*
 
 ---
 
-## 1. Executive Summary & Visi Produk
+## 1. Executive Summary & Product Vision
 
-**snugcode** adalah platform *remote agentic coding* yang memungkinkan pengguna menjalankan dan mengendalikan coding agent — **Claude Agent SDK** untuk model Claude & endpoint format Anthropic/OpenAI, **Codex** resmi untuk model GPT — di komputer lokal (PC/laptop) secara langsung dari perangkat seluler (HP/tablet) melalui Progressive Web App (PWA) modern, maupun melalui terminal PC (TUI) secara bersamaan. Tanpa PC pun bisa: daemon yang sama berjalan sebagai **runner cloud** di GitHub Codespaces milik pengguna atau di container Docker (lihat §3 → Runner cloud).
+**snugcode** is a *remote agentic coding* platform that lets users run and control coding agents — the **Claude Agent SDK** for Claude models & Anthropic/OpenAI-format endpoints, the official **Codex** for GPT models — on their local computer (PC/laptop) directly from a mobile device (phone/tablet) through a modern Progressive Web App (PWA), as well as from the PC terminal (TUI) at the same time. It also works without a PC: the same daemon runs as a **cloud runner** in the user's own GitHub Codespaces or in a Docker container (see §3 → Cloud runner).
 
-### Filosofi Desain
-1. **Compute Tetap di PC Lokal**: Seluruh kode sumber, compiler, runtime (Node, Python, Docker, dll.), file berukuran besar, dan proses build berada di PC milik pengguna. HP hanya berfungsi sebagai remote control cerdas (thin client).
-2. **Tanpa Konfigurasi Jaringan Rumit**: Tidak memerlukan IP publik, port forwarding, VPN, Tailscale, ngrok, atau sewa VPS cloud. Baik PC maupun HP sama-sama melakukan koneksi keluar (*outbound WebSocket*) ke relay Cloudflare.
-3. **Keamanan Zero-Knowledge & Kriptografi Modern**: Semua komunikasi antara HP dan PC dienkripsi *end-to-end* (E2EE) menggunakan PAKE (CPace di atas kurva Ristretto255) dan XChaCha20-Poly1305. Relay di Cloudflare Workers sama sekali tidak bisa membaca pesan, kode sumber, PIN, maupun data sensitif.
-4. **Credential Isolation**: Koneksi model (API key official/router, login ChatGPT) dan token GitHub **tersimpan di mesin daemon** (`~/.snugcode/secrets.json` & `~/.snugcode/codex` di PC, atau di disk runner cloud). Key yang diisi dari HP dikirim lewat kanal E2EE dan tidak pernah dikembalikan ke HP; relay tidak pernah melihatnya; proses agen hanya memegang token lokal loopback proxy.
-6. **Harness Terbaik per Model, Tanpa Router Terpusat**: Lalu lintas model berjalan langsung dari mesin daemon ke provider dalam format aslinya. snugcode tidak meneruskan langganan lewat jalur tidak resmi (langganan Claude Pro/Max & login Gemini CLI dilarang untuk aplikasi pihak ketiga); login ChatGPT dijalankan lewat Codex resmi (diizinkan OpenAI).
-5. **Mobile-First UX**: Antarmuka HP dirancang khusus untuk kenyamanan layar sentuh: tombol persetujuan izin 1-klik (*permission prompt*), visualisasi mini-diff berwarna, haptic feedback, input auto-resize, dan penanganan viewport keyboard virtual.
+The public website is **snugcode.dev**: a landing page at `/` and the app (**snugcode agent**) at `/agent/`.
+
+### Design Philosophy
+1. **Compute Stays on the Local PC**: All source code, compilers, runtimes (Node, Python, Docker, etc.), large files, and build processes live on the user's PC. The phone is only a smart remote control (thin client).
+2. **No Complicated Network Configuration**: No public IP, port forwarding, VPN, Tailscale, ngrok, or rented cloud VPS needed. Both the PC and the phone make outbound connections (*outbound WebSocket*) to the Cloudflare relay.
+3. **Zero-Knowledge Security & Modern Cryptography**: All communication between phone and PC is *end-to-end* encrypted (E2EE) using a PAKE (CPace over the Ristretto255 curve) and XChaCha20-Poly1305. The relay on Cloudflare Workers can't read messages, source code, the PIN, or any sensitive data.
+4. **Credential Isolation**: Model connections (official/router API keys, ChatGPT sign-in) and the GitHub token are **stored on the daemon machine** (`~/.snugcode/secrets.json` & `~/.snugcode/codex` on the PC, or on the cloud runner's disk). Keys entered from the phone are sent over the E2EE channel and never returned to the phone; the relay never sees them; agent processes only hold a local loopback-proxy token.
+5. **Mobile-First UX**: The phone interface is designed for touch-screen comfort: 1-tap permission approval buttons (*permission prompts*), colored mini-diff previews, haptic feedback, auto-resizing input, and handling of the virtual keyboard viewport.
+6. **Best Harness per Model, No Central Router**: Model traffic goes straight from the daemon machine to the provider in its native format. snugcode doesn't forward subscriptions through unofficial paths (Claude Pro/Max subscriptions & Gemini CLI sign-ins are forbidden for third-party apps); ChatGPT sign-in is run through the official Codex (allowed by OpenAI).
 
 ---
 
-## 2. Arsitektur Sistem
+## 2. System Architecture
 
-Berikut adalah alur komunikasi tingkat tinggi arsitektur `snugcode`:
+The high-level communication flow of the `snugcode` architecture:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        SMARTPHONE / BROWSER                            │
-│  Progressive Web App (PWA) — Mobile Terminal UI                        │
-│  • Enkripsi lokal via WebCrypto & @noble kripto                        │
-│  • Pairing PIN sekali via CPace (Ristretto255)                         │
+│  Progressive Web App (PWA) — snugcode agent (snugcode.dev/agent/)      │
+│  • Local encryption via WebCrypto & @noble crypto                      │
+│  • One-time PIN pairing via CPace (Ristretto255)                       │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ wss:// (E2EE Encrypted Payload)
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                 CLOUDFLARE WORKERS + DURABLE OBJECTS                   │
 │                     snugcode Relay (Zero-Knowledge)                    │
-│  • Worker alias `snugcode`: PWA + service binding ke `pocketcode-relay`│
-│  • Hub DO (1 per User GitHub): Mengarahkan koneksi HP ke PC yang tepat │
-│  • Pending DO: Menjembatani penautan PC lewat login browser            │
-│  • Relay hanya meneruskan byte terenkripsi; TIDAK bisa membaca pesan   │
+│  • Alias worker `snugcode`: site + service binding to `pocketcode-relay`│
+│  • Hub DO (1 per GitHub user): routes phone connections to the right PC│
+│  • Pending DO: bridges PC linking through a browser sign-in            │
+│  • The relay only forwards encrypted bytes; it CAN'T read messages     │
 └───────────────────────────────────▲────────────────────────────────────┘
                                     │ wss:// (Outbound WebSocket Connection)
 ┌───────────────────────────────────┴────────────────────────────────────┐
-│          PC PENGGUNA (DAEMON SERVICE) — atau runner cloud              │
+│          USER'S PC (DAEMON SERVICE) — or a cloud runner                │
 │  daemon/server.js (Background process via Windows/macOS/Linux service) │
 │  ├─ Keep-Awake Manager (Away Mode win32 / caffeinate / systemd)        │
-│  ├─ IPC Local Pipe/Socket (Koneksi untuk Terminal TUI `snugcode`)      │
-│  ├─ Git Worktree Manager (Worktree terisolasi per sesi; atau Komputer) │
-│  ├─ Local Loopback Proxy (127.0.0.1: token per koneksi, penerjemah)    │
-│  ├─ Claude Agent SDK  (model Claude / endpoint Anthropic & OpenAI)     │
-│  └─ Codex app-server  (model GPT: login ChatGPT / Responses API)       │
-│         │ HTTPS (lewat loopback proxy)        │ git / REST API         │
+│  ├─ Local IPC Pipe/Socket (connection for the `snugcode` terminal TUI) │
+│  ├─ Git Worktree Manager (isolated worktree per session; or Computer)  │
+│  ├─ Local Loopback Proxy (127.0.0.1: per-connection token, translator) │
+│  ├─ Claude Agent SDK  (Claude models / Anthropic & OpenAI endpoints)   │
+│  └─ Codex app-server  (GPT models: ChatGPT sign-in / Responses API)    │
+│         │ HTTPS (through the loopback proxy)  │ git / REST API         │
 │         ▼                                     ▼                        │
 │  ┌──────────────────────┐             ┌───────────────────────┐        │
-│  │ Provider model milik │             │        GitHub         │        │
-│  │ pengguna: Anthropic, │             │ (clone, push, PR)     │        │
+│  │ The user's model     │             │        GitHub         │        │
+│  │ providers: Anthropic,│             │ (clone, push, PR)     │        │
 │  │ OpenAI, Gemini, …    │             └───────────────────────┘        │
-│  │ atau router (9router)│                                              │
+│  │ or a router (9router)│                                              │
 │  └──────────────────────┘                                              │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Komponen Utama Repositori
+## 3. Main Repository Components
 
-Repositori `snugcode` dibangun secara modular dengan arsitektur monorepo ringan tanpa framework besar (Vanilla JS modern dengan Node.js 22+ native modules):
+The `snugcode` repository is built modularly as a lightweight monorepo without big frameworks (modern Vanilla JS with Node.js 22+ native modules):
 
-| Direktori / Berkas | Peran & Deskripsi |
+| Directory / File | Role & Description |
 |---|---|
-| `daemon/cli.js` | Antarmuka CLI utama (`snugcode setup`, `login`, `start`, `stop`, `restart`, `update`, `clean`, `pin`, `cloud`, dll.); tanpa perintah membuka TUI (`--pick`, `--computer`). `snugcode cloud` membungkus daemon dengan supervisor. |
-| `daemon/autostart.js` | Autostart lintas platform (Windows Startup `.vbs`, launchd `dev.snugcode`, systemd user `snugcode`), sinkron otomatis ke path CLI aktif saat start/update, migrasi entri `pocketcode` lama. |
-| `daemon/cleaner.js` | Pembersih worktree/repo/log yatim (`safeRm` tahan file read-only & kunci Windows); clone dasar disimpan 3 hari setelah sesi terakhirnya dihapus. Jalan saat start, setelah hapus sesi, tiap 30 menit, `snugcode clean`, `/clean`, dan tombol di HP. |
-| `daemon/config.js` | Lokasi data (`~/.snugcode`, bisa diganti lewat `SNUGCODE_HOME`), baca/tulis `config.json` & `secrets.json` secara atomik, path IPC. |
-| `daemon/defaults.js` | Nilai bawaan: URL relay, URL router bawaan untuk key router tanpa URL, GitHub OAuth client ID, spesifikasi paket (bisa ditimpa env `SNUGCODE_*`). |
-| `daemon/nativebin.js` | Deteksi binary native Claude (`claude.exe`) per platform dari paket opsional Agent SDK. |
-| `daemon/server.js` | Core Daemon: koneksi WebSocket relay (token lewat subprotocol bila relay mendukung `wsProto`; heartbeat dengan batas `pong` `DEAD_MS`, soket setengah mati disambung ulang), IPC pipe lokal, pairing HP, Web Push (level per HP: `all`/`important`, tombol izin di notifikasi), dan pengawas runner cloud yang menganggur. |
-| `daemon/rpc.js` | Tabel metode RPC (validasi input; `info.caps` untuk deteksi fitur), termasuk `autonomy` (preset otonomi) dan `budget` (batas biaya sesi). |
-| `daemon/sessions.js` | Pengelola sesi (`SessionManager` & `Session`): tiga jenis sesi (repo/worktree, folder lokal dari terminal, Komputer), pemilihan engine per model dengan izin & checkpoint yang sama, parsing event streaming, permission gating (`askPermission`), hook PreToolUse, dan eksekusi direct shell (`!`). |
-| `daemon/engine-claude.js` | Engine Claude Agent SDK: opsi `query()` (daftar tool ramping, subagen, MCP snugcode, sandbox saat auto-izin, `settingSources: []` + `CLAUDE.md` proyek), hook pelebar Read/Grep untuk model non-Claude. |
-| `daemon/engine-codex.js` | Engine Codex: proses `codex app-server` per sesi (sandbox OS, jembatan MCP) dan `decideCodex` (izin Codex lewat kebijakan snugcode). |
-| `daemon/engine-gemini.js` | Engine Gemini CLI: proses `gemini --acp` per sesi (token lokal proxy, `GEMINI_CLI_HOME` milik snugcode), fallback ke Claude Agent SDK bila Gemini CLI tidak bisa dipasang, dan `decideGemini` (izin tool call Gemini lewat kebijakan snugcode). |
-| `daemon/gemini.js` | Gemini CLI: pemasangan `@google/gemini-cli` (versi dipatok di `gemini-version.json`), setelan & `GEMINI.md` snugcode, klien JSON-RPC ACP (`AcpRpc`), `GeminiAgent` (event ACP → event snugcode, `fs/read_text_file`/`fs/write_text_file` lewat snugcode, mode rencana, `session/load`), instruksi proyek. |
-| `daemon/permissions.js` | Kebijakan izin bersama semua engine (fungsi murni): folder data snugcode, file konfigurasi repo (`.claude/`, `.codex/`, `.gemini/`, `.mcp.json`, `.git/`), push ke remote, perintah keluar sandbox, aturan "Selalu". |
-| `daemon/files.js` | File explorer dari HP: `resolveIn` (realpath; tolak di luar folder sesi & folder data snugcode), daftar folder (sembunyikan `.git` & symlink keluar), baca teks/gambar (deteksi biner, hash), tulis dengan deteksi konflik hash, `splitPatch` + `revertChange` (batalkan satu hunk lewat `git apply -R`, atau satu file). |
-| `daemon/pty.js` | Terminal interaktif: `@lydell/node-pty` (opsional), maks 4 PTY per sesi, scrollback 256 KB yang diputar ulang saat dibuka lagi, output dikumpulkan per 16 ms, satu pelanggan per terminal (HP terakhir yang membuka). |
-| `daemon/keychain.js` | `snugcode keychain on`: `secrets.json` dienkripsi XChaCha20-Poly1305 dengan kunci di keychain OS (macOS `security`, Secret Service `secret-tool`, DPAPI di Windows → `secrets.key`); kunci di-cache per proses, pesan jelas bila keychain terkunci. |
-| `daemon/sandbox.js` | Sandbox OS untuk Bash engine Claude: deteksi dukungan (bubblewrap + socat + probe namespace / Seatbelt), opsi `sandbox` SDK (tolak baca kredensial, tulis hanya worktree & cache paket, hook/config git terkunci), dan `info/exclude` untuk placeholder sandbox. |
-| `daemon/proxy.js` | Loopback HTTP proxy lokal (`127.0.0.1`) multi-rute: satu token lokal per koneksi+format, key asli disuntikkan per request. Rute `anthropic` (diteruskan apa adanya; khusus router: sanitasi header & `_ide`), `openai` (diterjemahkan, lihat `translate.js`), `responses` (Codex → endpoint OpenAI). |
-| `daemon/translate.js` | Penerjemah Anthropic Messages ⇄ OpenAI Chat Completions (request, stream SSE, error, `count_tokens`): skema tool & *thought signature* Gemini 3, effort dari akhiran ID → `reasoning_effort`, cache token → `cache_read_input_tokens`. |
-| `daemon/providers.js` | Koneksi model: deteksi API key/endpoint (pola key + uji ke API, deteksi format tanpa memanggil model), daftar model per koneksi (cache 5 menit), rute model → koneksi/engine (`resolveRoute`), uji model (*probe*), migrasi router lama. |
-| `daemon/codex.js` | Engine Codex: pemasangan `@openai/codex` (versi dipatok di `codex-version.json`), klien JSON-RPC `codex app-server`, profil sandbox (tolak baca folder data snugcode), login ChatGPT dengan device code, daftar model ChatGPT, dan `CodexAgent` (event Codex → event snugcode, izin lewat kebijakan snugcode). |
-| `daemon/mcp-bridge.js` | Server MCP stdio untuk engine Codex: tool `dev_*`/`preview_screenshot` diteruskan ke daemon lewat kanal lokal dengan token jembatan per sesi (hanya bisa memanggil tool dev sesi itu). |
-| `shared/providers.js` | Katalog provider (URL, pola key, format), key yang ditolak (token langganan Claude, OAuth Google, admin key), referensi model `<koneksi>:<model>`, dan pemilihan engine per koneksi+model (`engineFor`). |
-| `shared/engine-table.js` | Tabel engine bawaan per jenis koneksi + pola model (diisi dari `npm run bench`), dibaca `engineFor` sebelum aturan format. |
-| `scripts/bench.mjs` | `npm run bench`: tugas coding yang sama (perbaiki bug, fitur, rename lintas file) di tiap engine per model, dinilai test; tabel lulus/waktu/token + saran baris `engine-table.js`. Folder data sementara, koneksi disalin dari PC ini. |
-| `daemon/updater.js` | Self-update (instalasi `git` maupun `npm -g`): kanal `stable` (rilis bertag, bawaan) / `main`, rollback ke versi sebelumnya, graceful restart berjangka. |
-| `daemon/keepawake.js` | Anti-sleep service: menjaga CPU & koneksi jaringan PC tetap menyala saat daemon berjalan. |
-| `daemon/github.js` | Integrasi Git & GitHub REST API: pembuatan `git worktree`, branching, auto-prune, status, diff, commit, push, dan PR. |
-| `daemon/ghauth.js` | Pengelola otentikasi GitHub device flow dan notifikasi perubahan status token. |
-| `daemon/tui.js` | Terminal User Interface (TUI) interaktif di PC (`snugcode` / `snug`). |
-| `daemon/term.js` | Teks terminal untuk TUI: warna, lebar tampilan sadar ANSI, pembungkus baris, markdown → ANSI. |
-| `daemon/toolchain.js` | Shell perintah (PowerShell/bash) + pnpm/yarn otomatis lewat corepack bila tidak terpasang di PC. |
-| `daemon/procs.js` | Proses latar belakang per sesi (dev server/watcher): log ring buffer, deteksi port, kill satu pohon proses. |
-| `daemon/tunnel.js` | Preview untuk HP: Cloudflare quick tunnel + gerbang token lokal (rewrite Host/Origin, WebSocket HMR). `cloudflared` diunduh sesuai versi + SHA-256 di `cloudflared-version.json`. |
-| `daemon/project.js` | Deteksi perintah setup/dev, template `.env` per repo (`~/.snugcode/env`). |
-| `daemon/browser.js` | Screenshot + log konsol via Chrome/Edge headless (CDP), tanpa Playwright. |
-| `daemon/devtools.js` | Tool MCP in-process untuk agen: `dev_start`, `dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot` (agen: DPR 1, opsi `image:false`, log konsol diringkas). |
-| `daemon/prompt.js` | Tambahan system prompt snugcode: hanya aturan perilaku agen (±1,9 KB), dikirim di setiap request model. Dua varian: sesi repo (`SNUGCODE_SYSTEM_PROMPT`, tetap di worktree, tanpa `git push`) dan Mode Komputer (`SNUGCODE_COMPUTER_PROMPT`). |
-| `daemon/agents.js` | Definisi ulang subagen bawaan (Explore, Plan, general-purpose, claude) dengan effort rendah; modelnya model ringan sesi. |
-| `daemon/checkpoint.js` | Snapshot worktree per prompt (index git sementara) dan rewind. |
-| `daemon/webpush.js` | Web Push terenkripsi (RFC 8291 + VAPID) ke HP saat PWA ditutup. |
-| `daemon/runner.js` | Runner cloud (tanpa PC): `bootstrapCloud` mengisi config/secrets dari env secara idempoten (token mesin, PIN, relay, router, model), `stopRunner` menghentikan runner yang menganggur (Codespaces API dengan token dari HP, atau keluar dari container), `reportStatus` melaporkan kegagalan konfigurasi ke relay, `tickUsage`/`usageSummary` mencatat perkiraan core-jam per bulan (`runner-usage.json`, tampil di menu runner). |
-| `.devcontainer/`, `Dockerfile` | Runner Codespaces: `install.sh` (onCreate, ikut prebuild bila diatur: Chromium, bubblewrap + socat, paket snugcode), `start.sh` (postStart: `snugcode cloud` di latar belakang; fallback ke kode repo bila paket global gagal), `lib.sh` (folder data `/workspaces/.snugcode` atau `~/.snugcode`, log, laporan tahap ke relay). `Dockerfile`: image yang sama untuk VPS/Fly.io (volume `/data`). |
-| `relay/src/index.js` | Cloudflare Worker `pocketcode-relay` + Durable Objects (`Hub` dan `Pending`) sebagai message broker aman. Lihat tabel endpoint di bawah. |
-| `relay/src/headers.js` | Security header PWA (CSP ketat) — satu sumber untuk `_headers` aset dan respons relay. |
-| `relay/src/alias.js` | Worker alias `snugcode` (alamat publik `snugcode.dev`): menyajikan landing page (`/`) dan PWA snugcode agent (`/agent/`), dan meneruskan semua request lain ke relay lewat service binding. |
-| `web/app.js` | Titik masuk PWA: boot, service worker, sambung ulang saat aplikasi kembali terlihat, impor data dari alamat lama (`#import=`), token Codespaces dari fragmen (`#gh=`). |
-| `web/sw.js` | Service worker stale-while-revalidate; nama cache = hash isi aset (diisi `build:web`). Disajikan di root (`/sw.js`, scope `/`) agar registrasi & langganan push HP yang memasang PWA sebelum pindah ke `/agent/` tetap berlaku. |
-| `landing/` | Landing page snugcode Cloud di `/` (HTML/CSS/JS statis, disalin `build:web`). `boot.js`: tautan lama ke `/` (aplikasi terpasang, `#open=`, `#gh=`, `#import=`) diteruskan ke `/agent/`; token dari `#login=` disimpan di `pc.token` (dipakai bersama agent). Tombol agent membuka modal Masuk/Daftar bila belum login. |
-| `web/ui/*.js` | Layar PWA per modul: `dom` (elemen, ikon, toast, header/sheet), `auth` (login & daftar mesin, hapus mesin dari daftar), `machine` (koneksi PC, pairing, update, login GitHub PC, menu Pengaturan PC), `sessions` (beranda, drawer, sesi baru: tab Repository/Komputer), `session`, `renderer` (event agen), `run`, `git` (diff + review per hunk), `files` (explorer & editor), `terminal` (xterm.js, dimuat terpisah dari `xterm.js`), `model-picker`, `push`, `progress` (bar tahap + perkiraan sisa); state bersama di `state.js` (`app.conn`, `app.current`, `app.me`). |
-| `web/eta.js` | Perhitungan progress tanpa DOM: bar per tahap yang melambat mendekati akhir, sisa waktu, durasi tahap yang dipelajari per HP. |
-| `web/conn.js` | Koneksi terenkripsi HP ↔ PC: pairing PIN, auth perangkat, kanal E2EE teks/biner, RPC dengan timeout (30 dtk / 3 mnt untuk operasi lama), heartbeat & `wake()` (uji soket saat aplikasi dibuka lagi / jaringan kembali). |
-| `web/install.sh`, `web/install.ps1` | Pemasang satu baris yang disajikan relay: cek Node.js 22+ & git, pasang snugcode, `snugcode setup` (`SNUGCODE_RELAY` untuk relay sendiri). |
-| `web/codespaces.js` | Klien GitHub Codespaces tanpa DOM: cari fork runner, secret terenkripsi (sealed box) khusus repo fork, buat/cari/nyalakan/hentikan/hapus codespace. |
-| `web/ui/cloud.js`, `web/ui/settings.js` | Wizard & siklus hidup runner cloud; setelan mesin dari HP: Model & API key (koneksi, login ChatGPT dengan device code, deteksi jenis key saat diketik), perangkat, PIN. |
-| `shared/sealedbox.js` | `crypto_box_seal` libsodium (X25519 + XSalsa20-Poly1305) untuk Codespaces secrets. |
-| `web/md.js` | Markdown ringan untuk teks agen + `stableCut` untuk render bertahap saat streaming. |
-| `web/index.html` & `style.css` | Struktur dan styling antarmuka mobile bergaya aplikasi chat: tema terang/gelap (token CSS), teks agen serif, drawer, composer kartu, animasi transform/opacity. |
-| `shared/crypto.js` | Implementasi kriptografi bersama (CPace, Ristretto255, X25519, XChaCha20-Poly1305, Scrypt, HKDF). |
-| `shared/events.js` | Model event sesi agen bersama daemon/PWA/TUI: tipe event (JSDoc), rencana TodoWrite terstruktur, label aktivitas, ringkasan selesai, `EventCursor` (penyaring event duplikat). |
-| `shared/risk.js` | Tingkat risiko permintaan izin (`commandRisk`, `permRisk`: rendah/sedang/tinggi + alasan) dan preset otonomi (`ask`/`balanced`/`trusted`/`auto` ⇄ flag sesi `askEdits`/`autoLow`/`auto`). Heuristik UX, bukan batas keamanan. |
-| `shared/models.js` | Normalisasi ID model AI, pengelompokan varian reasoning effort ke virtual slider. |
-| `scripts/build-web.mjs` | Build script: landing page ke root `relay/public`, PWA ke `relay/public/agent/`, `sw.js`/font/pemasang di root (dipakai kedua worker); `_headers` dengan CSP yang `connect-src`-nya hanya host relay (`PUBLIC_URL`/`LEGACY_HOSTS` atau `SNUGCODE_WS_HOSTS`); `build.json` berisi SHA-256 tiap file untuk verifikasi build. |
-| `scripts/docs-images.mjs`, `scripts/icons.mjs` | `npm run docs:images` (gambar & GIF README dari UI asli, butuh relay dev) dan `npm run icons` (PNG/maskable/apple-touch dari SVG). |
-| `tsconfig.json` | `tsc --checkJs` untuk seluruh JS (daemon, shared, web); relay punya tsconfig sendiri dengan tipe `wrangler types`. `npm run typecheck`, juga di CI. |
-| `.github/workflows/` | `ci.yml`: cek sintaks, typecheck, unit test (Linux/Windows/macOS), bundle PWA, lalu e2e (agen, runner cloud, UI) di Linux. `deploy.yml`: setelah workflow CI lulus di `main` (`workflow_run`, memakai commit yang lulus) dan bila `relay/`, `web/`, `shared/` berubah (atau manual) → `npm run deploy`, lalu smoke test `build.json` yang disajikan = hasil build; butuh secret `CLOUDFLARE_API_TOKEN`. `release.yml`: tag `vX.Y.Z` → test, `build.json` dilampirkan ke rilis GitHub, dan `npm publish --provenance` bila secret `NPM_TOKEN` ada. |
-| `test/` | `features.test.js` (`npm test`: explorer, konflik edit, batalkan hunk, PTY, keychain, engine Gemini, perkiraan kuota runner), `e2e-gemini.mjs` (`npm run test:e2e:gemini`: Gemini CLI asli vs Gemini API tiruan — izin shell, tulis file lewat ACP, `session/load`, mode rencana, key tidak sampai ke Gemini CLI), `e2e-harness.mjs` (setup bersama), `e2e-ui.mjs` (`npm run test:ui`: PWA di Chrome + TUI di pty), `unit.test.js` & `providers.test.js` (`npm test`, juga dijalankan CI di Linux/Windows/macOS), `e2e-connections.mjs` (`npm run test:e2e:connections`: koneksi dari HP, endpoint OpenAI-only lewat penerjemah, Codex asli dengan izin/sandbox/jembatan MCP), `e2e-agent.mjs` (`npm run test:e2e`: HP → relay lokal → daemon → Agent SDK → mock 9router; butuh `npm run dev:relay`), `e2e-cloud.mjs` (`npm run test:e2e:cloud`: provision → `snugcode cloud` → pairing otomatis → setelan dari HP), `worktree.it.mjs` (integrasi git, butuh internet), `e2e-phone.mjs` (simulasi HP manual). |
+| `daemon/cli.js` | Main CLI (`snugcode setup`, `login`, `start`, `stop`, `restart`, `update`, `clean`, `pin`, `cloud`, etc.); with no command it opens the TUI (`--pick`, `--computer`). `snugcode cloud` wraps the daemon in a supervisor. |
+| `daemon/autostart.js` | Cross-platform autostart (Windows Startup `.vbs`, launchd `dev.snugcode`, systemd user `snugcode`), automatically synced to the active CLI path on start/update, migration of old `pocketcode` entries. |
+| `daemon/cleaner.js` | Cleaner for orphaned worktrees/repos/logs (`safeRm` copes with read-only files & Windows locks); base clones are kept 3 days after their last session is deleted. Runs at start, after deleting a session, every 30 minutes, on `snugcode clean`, `/clean`, and the button on the phone. |
+| `daemon/config.js` | Data location (`~/.snugcode`, changeable via `SNUGCODE_HOME`), atomic read/write of `config.json` & `secrets.json`, IPC path. |
+| `daemon/defaults.js` | Defaults: relay URL, default router URL for router keys without a URL, GitHub OAuth client ID, package specs (can be overridden with `SNUGCODE_*` env vars). |
+| `daemon/nativebin.js` | Per-platform detection of the native Claude binary (`claude.exe`) from the Agent SDK's optional packages. |
+| `daemon/server.js` | Core daemon: relay WebSocket connection (token via subprotocol when the relay supports `wsProto`; heartbeat with a `DEAD_MS` `pong` deadline, half-dead sockets are reconnected), local IPC pipe, phone pairing, Web Push (per-phone level: `all`/`important`, permission buttons in notifications), and the idle watchdog for cloud runners. |
+| `daemon/rpc.js` | RPC method table (input validation; `info.caps` for feature detection), including `autonomy` (autonomy presets) and `budget` (session cost limit). |
+| `daemon/sessions.js` | Session manager (`SessionManager` & `Session`): three kinds of sessions (repo/worktree, local folder from the terminal, Computer), per-model engine selection with the same permissions & checkpoints, streaming event parsing, permission gating (`askPermission`), the PreToolUse hook, and direct shell execution (`!`). |
+| `daemon/engine-claude.js` | Claude Agent SDK engine: `query()` options (trimmed tool list, subagents, snugcode MCP, sandbox under auto-approve, `settingSources: []` + project `CLAUDE.md`), Read/Grep widening hook for non-Claude models. |
+| `daemon/engine-codex.js` | Codex engine: one `codex app-server` process per session (OS sandbox, MCP bridge) and `decideCodex` (Codex permissions through the snugcode policy). |
+| `daemon/engine-gemini.js` | Gemini CLI engine: one `gemini --acp` process per session (local proxy token, snugcode's own `GEMINI_CLI_HOME`), fallback to the Claude Agent SDK when Gemini CLI can't be installed, and `decideGemini` (Gemini tool-call permissions through the snugcode policy). |
+| `daemon/gemini.js` | Gemini CLI: installs `@google/gemini-cli` (version pinned in `gemini-version.json`), snugcode settings & `GEMINI.md`, ACP JSON-RPC client (`AcpRpc`), `GeminiAgent` (ACP events → snugcode events, `fs/read_text_file`/`fs/write_text_file` through snugcode, plan mode, `session/load`), project instructions. |
+| `daemon/permissions.js` | Permission policy shared by all engines (pure functions): snugcode data folder, repo config files (`.claude/`, `.codex/`, `.gemini/`, `.mcp.json`, `.git/`), push to remotes, sandbox-escaping commands, "Always" rules. |
+| `daemon/files.js` | File explorer from the phone: `resolveIn` (realpath; rejects anything outside the session folder & the snugcode data folder), folder listing (hides `.git` & symlinks leading outside), reading text/images (binary detection, hash), writing with hash conflict detection, `splitPatch` + `revertChange` (revert one hunk via `git apply -R`, or one file). |
+| `daemon/pty.js` | Interactive terminal: `@lydell/node-pty` (optional), at most 4 PTYs per session, a 256 KB scrollback replayed on reopen, output batched every 16 ms, one subscriber per terminal (the phone that opened it last). |
+| `daemon/keychain.js` | `snugcode keychain on`: `secrets.json` encrypted with XChaCha20-Poly1305 using a key in the OS keychain (macOS `security`, Secret Service `secret-tool`, DPAPI on Windows → `secrets.key`); the key is cached per process, with a clear message when the keychain is locked. |
+| `daemon/sandbox.js` | OS sandbox for the Claude engine's Bash: support detection (bubblewrap + socat + namespace probe / Seatbelt), the SDK `sandbox` option (deny reading credentials, write only to the worktree & package caches, git hooks/config locked), and `info/exclude` for sandbox placeholders. |
+| `daemon/proxy.js` | Multi-route local loopback HTTP proxy (`127.0.0.1`): one local token per connection+format, the real key injected per request. Routes `anthropic` (forwarded as is; routers only: header & `_ide` sanitizing), `openai` (translated, see `translate.js`), `responses` (Codex → OpenAI endpoint). |
+| `daemon/translate.js` | Translator between Anthropic Messages ⇄ OpenAI Chat Completions (requests, SSE streams, errors, `count_tokens`): tool schemas & Gemini 3 *thought signatures*, effort from the ID suffix → `reasoning_effort`, cache tokens → `cache_read_input_tokens`. |
+| `daemon/providers.js` | Model connections: API key/endpoint detection (key patterns + API tests, format detection without calling a model), model list per connection (5-minute cache), model → connection/engine routing (`resolveRoute`), model tests (*probe*), migration of old routers. |
+| `daemon/codex.js` | Codex engine: installs `@openai/codex` (version pinned in `codex-version.json`), JSON-RPC client for `codex app-server`, sandbox profile (denies reading the snugcode data folder), ChatGPT sign-in with a device code, ChatGPT model list, and `CodexAgent` (Codex events → snugcode events, permissions through the snugcode policy). |
+| `daemon/mcp-bridge.js` | Stdio MCP server for the Codex engine: `dev_*`/`preview_screenshot` tools are forwarded to the daemon over a local channel with a per-session bridge token (it can only call that session's dev tools). |
+| `shared/providers.js` | Provider catalog (URLs, key patterns, formats), rejected keys (Claude subscription tokens, Google OAuth, admin keys), `<connection>:<model>` model references, and engine selection per connection+model (`engineFor`). |
+| `shared/engine-table.js` | Default engine table per connection kind + model pattern (filled from `npm run bench`), read by `engineFor` before the format rules. |
+| `scripts/bench.mjs` | `npm run bench`: the same coding tasks (fix a bug, add a feature, rename across files) on each engine per model, graded by tests; a pass/time/token table + a suggested `engine-table.js` row. Temporary data folder, connections copied from this PC. |
+| `daemon/updater.js` | Self-update (both `git` and `npm -g` installs): `stable` channel (tagged releases, default) / `main`, rollback to the previous version, scheduled graceful restart. |
+| `daemon/keepawake.js` | Anti-sleep service: keeps the PC's CPU & network on while the daemon runs. |
+| `daemon/github.js` | Git & GitHub REST API integration: creating `git worktree`s, branching, auto-prune, status, diff, commit, push, and PRs. |
+| `daemon/ghauth.js` | GitHub device-flow authentication manager and token status change notifications. |
+| `daemon/tui.js` | Interactive Terminal User Interface (TUI) on the PC (`snugcode` / `snug`). |
+| `daemon/term.js` | Terminal text for the TUI: colors, ANSI-aware display width, line wrapping, markdown → ANSI. |
+| `daemon/toolchain.js` | Command shell (PowerShell/bash) + automatic pnpm/yarn through corepack when not installed on the PC. |
+| `daemon/procs.js` | Background processes per session (dev servers/watchers): ring-buffer logs, port detection, killing a whole process tree. |
+| `daemon/tunnel.js` | Previews for the phone: Cloudflare quick tunnel + local token gate (Host/Origin rewrite, HMR WebSockets). `cloudflared` is downloaded by version + SHA-256 from `cloudflared-version.json`. |
+| `daemon/project.js` | Setup/dev command detection, per-repo `.env` templates (`~/.snugcode/env`). |
+| `daemon/browser.js` | Screenshots + console logs via headless Chrome/Edge (CDP), without Playwright. |
+| `daemon/devtools.js` | In-process MCP tools for the agent: `dev_start`, `dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot` (agent: DPR 1, `image:false` option, summarized console logs). |
+| `daemon/prompt.js` | snugcode's system prompt additions: only agent behavior rules (±1.9 KB), sent with every model request. Two variants: repo sessions (`SNUGCODE_SYSTEM_PROMPT`, stay in the worktree, no `git push`) and Computer mode (`SNUGCODE_COMPUTER_PROMPT`). |
+| `daemon/agents.js` | Redefinitions of the built-in subagents (Explore, Plan, general-purpose, claude) at low effort; their model is the session's light model. |
+| `daemon/checkpoint.js` | Worktree snapshots per prompt (temporary git index) and rewind. |
+| `daemon/webpush.js` | Encrypted Web Push (RFC 8291 + VAPID) to the phone when the PWA is closed. |
+| `daemon/runner.js` | Cloud runner (no PC): `bootstrapCloud` fills config/secrets from env idempotently (machine token, PIN, relay, router, model), `stopRunner` stops an idle runner (Codespaces API with a token from the phone, or exiting the container), `reportStatus` reports configuration failures to the relay, `tickUsage`/`usageSummary` track estimated core-hours per month (`runner-usage.json`, shown in the runner menu). |
+| `.devcontainer/`, `Dockerfile` | Codespaces runner: `install.sh` (onCreate, included in prebuilds when configured: Chromium, bubblewrap + socat, the snugcode package), `start.sh` (postStart: `snugcode cloud` in the background; falls back to the repo code if the global package fails), `lib.sh` (data folder `/workspaces/.snugcode` or `~/.snugcode`, logs, stage reports to the relay). `Dockerfile`: the same image for VPS/Fly.io (volume `/data`). |
+| `relay/src/index.js` | Cloudflare Worker `pocketcode-relay` + Durable Objects (`Hub` and `Pending`) as a secure message broker. See the endpoint table below. |
+| `relay/src/headers.js` | Security headers for the site (strict CSP) — one source for the assets' `_headers` and relay responses. |
+| `relay/src/alias.js` | Alias worker `snugcode` (public address `snugcode.dev`): serves the landing page (`/`) and the snugcode agent PWA (`/agent/`), and forwards every other request to the relay through a service binding. |
+| `web/app.js` | PWA entry point: boot, service worker, reconnect when the app becomes visible again, data import from the old address (`#import=`), Codespaces token from the fragment (`#gh=`). |
+| `web/sw.js` | Stale-while-revalidate service worker; cache name = hash of the assets (filled in by `build:web`). Served at the root (`/sw.js`, scope `/`) so registrations & push subscriptions of phones that installed the PWA before it moved to `/agent/` stay valid. |
+| `landing/` | snugcode Cloud landing page at `/` (static HTML/CSS/JS, copied by `build:web`). `boot.js`: old links to `/` (installed apps, `#open=`, `#gh=`, `#import=`) are forwarded to `/agent/`; the token from `#login=` is stored in `pc.token` (shared with the agent). The agent buttons open a Sign in/Sign up modal when not signed in. |
+| `web/ui/*.js` | PWA screens per module: `dom` (elements, icons, toasts, header/sheet), `auth` (sign-in & machine list, removing machines from the list), `machine` (PC connection, pairing, updates, PC GitHub sign-in, the PC settings menu), `sessions` (home, drawer, new session: Repository/Computer tabs), `session`, `renderer` (agent events), `run`, `git` (diff + per-hunk review), `files` (explorer & editor), `terminal` (xterm.js, loaded separately from `xterm.js`), `model-picker`, `push`, `progress` (stage bar + time-left estimate); shared state in `state.js` (`app.conn`, `app.current`, `app.me`). |
+| `web/eta.js` | DOM-free progress calculation: per-stage bars that slow down near the end, time left, stage durations learned per phone. |
+| `web/conn.js` | Encrypted phone ↔ PC connection: PIN pairing, device auth, text/binary E2EE channel, RPC with timeouts (30 s / 3 min for long operations), heartbeat & `wake()` (tests the socket when the app is reopened / the network comes back). |
+| `web/install.sh`, `web/install.ps1` | One-line installers served by the relay: check Node.js 22+ & git, install snugcode, `snugcode setup` (`SNUGCODE_RELAY` for your own relay). |
+| `web/codespaces.js` | DOM-free GitHub Codespaces client: find the runner fork, encrypted (sealed box) secrets scoped to the fork repo, create/find/start/stop/delete codespaces. |
+| `web/ui/cloud.js`, `web/ui/settings.js` | Cloud runner wizard & lifecycle; machine settings from the phone: Models & API keys (connections, ChatGPT sign-in with a device code, key type detection while typing), devices, PIN. |
+| `shared/sealedbox.js` | libsodium `crypto_box_seal` (X25519 + XSalsa20-Poly1305) for Codespaces secrets. |
+| `web/md.js` | Lightweight markdown for agent text + `stableCut` for incremental rendering while streaming. |
+| `web/index.html` & `style.css` | Structure and styling of the chat-style mobile interface: light/dark themes (CSS tokens), serif agent text, drawer, card composer, transform/opacity animations. |
+| `shared/crypto.js` | Shared cryptography (CPace, Ristretto255, X25519, XChaCha20-Poly1305, Scrypt, HKDF). |
+| `shared/events.js` | Agent session event model shared by daemon/PWA/TUI: event types (JSDoc), structured TodoWrite plans, activity labels, completion summaries, `EventCursor` (duplicate event filter). |
+| `shared/risk.js` | Risk levels for permission requests (`commandRisk`, `permRisk`: low/medium/high + reason) and autonomy presets (`ask`/`balanced`/`trusted`/`auto` ⇄ session flags `askEdits`/`autoLow`/`auto`). UX heuristics, not a security boundary. |
+| `shared/models.js` | AI model ID normalization, grouping of reasoning-effort variants into a virtual slider. |
+| `scripts/build-web.mjs` | Build script: landing page to the root of `relay/public`, PWA to `relay/public/agent/`, `sw.js`/fonts/installers at the root (used by both workers); `_headers` with a CSP whose `connect-src` is only the relay hosts (`PUBLIC_URL`/`LEGACY_HOSTS` or `SNUGCODE_WS_HOSTS`); `build.json` with the SHA-256 of every file for build verification. |
+| `scripts/docs-images.mjs`, `scripts/icons.mjs` | `npm run docs:images` (README images & GIFs from the real UI, needs the dev relay) and `npm run icons` (PNG/maskable/apple-touch from the SVG). |
+| `tsconfig.json` | `tsc --checkJs` for all JS (daemon, shared, web); the relay has its own tsconfig with `wrangler types`. `npm run typecheck`, also in CI. |
+| `.github/workflows/` | `ci.yml`: syntax check, typecheck, unit tests (Linux/Windows/macOS), site bundle, then e2e (agent, cloud runner, UI) on Linux. `deploy.yml`: after the CI workflow passes on `main` (`workflow_run`, using the commit that passed) and when `relay/`, `web/`, `landing/`, `shared/` changed (or manually) → `npm run deploy`, then a smoke test that the served `build.json` = the build; needs the `CLOUDFLARE_API_TOKEN` secret. `release.yml`: tag `vX.Y.Z` → tests, `build.json` attached to the GitHub release, and `npm publish --provenance` if the `NPM_TOKEN` secret exists. |
+| `test/` | `features.test.js` (`npm test`: explorer, edit conflicts, hunk revert, PTY, keychain, Gemini engine, runner quota estimate), `e2e-gemini.mjs` (`npm run test:e2e:gemini`: real Gemini CLI vs a fake Gemini API — shell permissions, writing files through ACP, `session/load`, plan mode, keys never reach Gemini CLI), `e2e-harness.mjs` (shared setup), `e2e-ui.mjs` (`npm run test:ui`: PWA in Chrome + TUI in a pty), `unit.test.js` & `providers.test.js` (`npm test`, also run by CI on Linux/Windows/macOS), `e2e-connections.mjs` (`npm run test:e2e:connections`: connections from the phone, OpenAI-only endpoints through the translator, real Codex with permissions/sandbox/MCP bridge), `e2e-agent.mjs` (`npm run test:e2e`: phone → local relay → daemon → Agent SDK → mock 9router; needs `npm run dev:relay`), `e2e-cloud.mjs` (`npm run test:e2e:cloud`: provision → `snugcode cloud` → automatic pairing → settings from the phone), `worktree.it.mjs` (git integration, needs internet), `e2e-phone.mjs` (manual phone simulation). |
 
-### Runner cloud (tanpa PC)
-Mesin di relay tidak harus PC. `POST /api/machines/provision` (akun yang login) mendaftarkan mesin `kind: 'cloud'`
-dan mengembalikan token mesinnya ke PWA. PWA lalu:
-1. membuat PIN acak (disimpan di HP untuk pairing otomatis),
-2. menyimpan token mesin, PIN, dan URL relay sebagai **Codespaces user secret** yang dienkripsi di HP dengan
-   sealed box ke public key akun GitHub, dibatasi ke repo fork snugcode milik pengguna,
-3. membuat codespace dari fork itu (`display_name = "snugcode <mid>"`, idle timeout 240 menit sebagai pengaman).
+### Cloud runner (no PC)
+Machines on the relay don't have to be PCs. `POST /api/machines/provision` (signed-in account) registers a `kind: 'cloud'`
+machine and returns its machine token to the PWA. The PWA then:
+1. creates a random PIN (stored on the phone for automatic pairing),
+2. stores the machine token, PIN, and relay URL as **Codespaces user secrets** encrypted on the phone with a
+   sealed box to the GitHub account's public key, scoped to the user's snugcode fork repo,
+3. creates a codespace from that fork (`display_name = "snugcode <mid>"`, 240-minute idle timeout as a safeguard).
 
-Di codespace, `.devcontainer/start.sh` menjalankan `snugcode cloud`: `bootstrapCloud` membaca env (idempoten —
-perubahan dari HP seperti ganti PIN/key tidak ditimpa saat runner start ulang), menghapus env rahasia, lalu
-menjalankan daemon di bawah **supervisor** (exit 75 = restart/update dari HP, exit 0 = berhenti; crash dan sinyal
-yang mengenai daemon — daemon keluar dengan 128+sinyal — menyalakannya lagi; di Codespaces supervisor mengabaikan
-SIGTERM agar `pkill node` tidak mematikan runner selagi codespace menyala). Daemon dengan
-`runtime: 'cloud'` tidak menjalankan anti-sleep/autostart, boleh start tanpa koneksi model (diisi dari HP lewat RPC
-`connAdd`/`chatgptLogin`, atau env `SNUGCODE_API_KEY`), dan memeriksa tiap menit apakah ia menganggur (tidak ada agen/`!perintah`/dev server/tunnel, tidak
-ada HP yang membuka aplikasi). Setelah `idleStopMinutes` (bawaan 30) codespace dihentikan lewat GitHub API dengan
-token `codespace` yang dikirim HP (RPC `runnerConfig`). Saat runner tidur dibuka lagi, PWA menyalakannya (`/start`);
-codespace yang menyala 45 detik tanpa runner tersambung/melapor dinyalakan ulang sekali (stop → start) agar
-`postStartCommand` menjalankan runner lagi, dan setelah itu 6 menit tanpa laporan menjadi error dengan petunjuk log.
+In the codespace, `.devcontainer/start.sh` runs `snugcode cloud`: `bootstrapCloud` reads env (idempotent —
+changes from the phone such as a new PIN/key aren't overwritten when the runner restarts), removes secret env vars, then
+runs the daemon under a **supervisor** (exit 75 = restart/update from the phone, exit 0 = stop; crashes and signals
+hitting the daemon — the daemon exits with 128+signal — start it again; on Codespaces the supervisor ignores
+SIGTERM so `pkill node` doesn't kill the runner while the codespace is running). A daemon with
+`runtime: 'cloud'` doesn't run anti-sleep/autostart, may start without a model connection (filled in from the phone via the RPCs
+`connAdd`/`chatgptLogin`, or the `SNUGCODE_API_KEY` env var), and checks every minute whether it is idle (no agent/`!command`/dev server/tunnel, no
+phone with the app open). After `idleStopMinutes` (default 30) the codespace is stopped through the GitHub API with
+the `codespace` token sent by the phone (RPC `runnerConfig`). When a sleeping runner is opened again, the PWA starts it (`/start`);
+a codespace that has been running for 45 seconds without the runner connecting/reporting is restarted once (stop → start) so that
+`postStartCommand` runs the runner again, and after that 6 minutes without a report becomes an error with a hint about the log.
 
-Selama runner belum tersambung, skrip `.devcontainer/` (dan `snugcode cloud` bila konfigurasinya gagal) melaporkan
-tahapnya ke relay (`POST /api/runner/status` dengan token mesin: `stage` installing/starting/error, `step`
-chromium/install/start, pesan + baris log terakhir). Relay menyimpannya sebagai `boot` di daftar mesin, dan PWA
-memakainya untuk progress bar serta pesan error; codespace yang menyala >6 menit tanpa laporan dianggap gagal
-(secret tidak sampai / skrip tidak jalan). Batas: maksimal 3 mesin cloud per akun (`provision` menjawab 409), dan
-wizard hanya membuat satu runner Codespaces (sisanya *Buat ulang*). Token Codespaces di HP yang ditolak GitHub (401)
-langsung dibuang dan PWA menawarkan "Hubungkan lagi". Mesin (PC maupun runner) bisa dihapus langsung dari daftar
-mesin tanpa harus tersambung.
+Until the runner is connected, the `.devcontainer/` scripts (and `snugcode cloud` when its configuration fails) report
+their stage to the relay (`POST /api/runner/status` with the machine token: `stage` installing/starting/error, `step`
+chromium/install/start, a message + the last log lines). The relay stores it as `boot` in the machine list, and the PWA
+uses it for the progress bar and error messages; a codespace running for >6 minutes without a report is considered failed
+(the secrets didn't arrive / the script didn't run). Limits: at most 3 cloud machines per account (`provision` answers 409), and
+the wizard only creates one Codespaces runner (the rest is *Recreate*). A Codespaces token on the phone that GitHub rejects (401)
+is dropped immediately and the PWA offers "Reconnect". Machines (PCs and runners) can be removed straight from the machine
+list without being connected.
 
-### Endpoint relay
-| Endpoint | Fungsi |
+### Relay endpoints
+| Endpoint | What it does |
 |---|---|
-| `GET /auth/login?kind=user\|machine\|gh` | Login GitHub (web flow). Token `state` berjenis tersendiri (tidak berlaku sebagai token user). `user` → token di `<next>#login=` (`next` = `/` atau `/agent/`, bawaan `/agent/`; `signup=1` menampilkan daftar akun di GitHub); `machine` → kode PC diperiksa, lalu **setelah** login tampil halaman konfirmasi (nama PC, kode, akun) dengan form POST ke `/auth/machine/confirm`; `gh` → token ber-scope `codespace` untuk PWA di `#gh=…&ghlogin=…` (tidak disimpan relay). Di host lama dialihkan ke `PUBLIC_URL`. |
-| `POST /auth/machine/start`, `GET /auth/machine/poll` | Penautan PC dari `snugcode setup` lewat `Pending` DO (kode berlaku 15 menit). |
-| `POST /auth/machine/confirm` | Konfirmasi penautan PC: token `link` bertanda tangan (kode PC + akun, berlaku 10 menit) yang hanya ada di halaman konfirmasi milik pengguna yang login; parameter URL tidak bisa melewatinya. |
-| `POST /api/renew` | Token login baru (30 hari) untuk token yang masih sah dan tidak dicabut; PWA memanggilnya maks. sekali sehari. |
-| `GET /api/me`, `GET /api/machines` | Akun & daftar mesin (`kind`, `provider`, `online`, `lastSeen`, `boot`). Maks 20 mesin per akun. |
-| `POST /api/logout-all` | Cabut semua token login akun (Hub menyimpan `revokedBefore`; token dengan `iat` lebih lama ditolak, HP yang tersambung ditutup dengan 4005). |
-| `POST /api/machines/provision` | Daftarkan runner cloud tanpa login dari mesinnya; mengembalikan token mesin ke PWA. |
-| `POST /api/runner/status` | Laporan tahap runner (token mesin). |
-| `DELETE /api/machines/<mid>` | Hapus mesin; soket PC & HP-nya ditutup (4003). |
-| `GET /ws/machine`, `GET /ws/phone?mid=` | WebSocket daemon & HP; frame teks atau biner `[cid][payload]`. Token lewat subprotocol `snugcode, t.<token>` (relay menjawab `snugcode`), atau `?token=` untuk klien lama. Mesin online = punya soket yang `ping` dalam 80 detik terakhir (dijawab otomatis); soket tanpa ping ditutup dengan 4006 dan mesin dicatat offline (mesin yang mati mendadak tidak menutup soketnya). |
-| `GET /api/health` | `devAuth`, `wsProto` (token WebSocket lewat subprotocol), `runnerRepo`, dan penanda host lama (`legacy`, `publicUrl`). |
-| `GET /build.json`, `/install.sh`, `/install.ps1` | Aset statis: hash build PWA, pemasang satu baris. |
+| `GET /auth/login?kind=user\|machine\|gh` | GitHub sign-in (web flow). The `state` token has its own kind (not valid as a user token). `user` → token at `<next>#login=` (`next` = `/` or `/agent/`, default `/agent/`; `signup=1` shows account creation on GitHub); `machine` → the PC code is checked, then **after** signing in a confirmation page (PC name, code, account) is shown with a POST form to `/auth/machine/confirm`; `gh` → a `codespace`-scoped token for the PWA at `#gh=…&ghlogin=…` (not stored by the relay). On old hosts it redirects to `PUBLIC_URL`. |
+| `POST /auth/machine/start`, `GET /auth/machine/poll` | PC linking from `snugcode setup` through the `Pending` DO (the code is valid for 15 minutes). |
+| `POST /auth/machine/confirm` | PC linking confirmation: a signed `link` token (PC code + account, valid for 10 minutes) that only exists on the confirmation page of the signed-in user; URL parameters can't bypass it. |
+| `POST /api/renew` | A new sign-in token (30 days) for a token that is still valid and not revoked; the PWA calls it at most once a day. |
+| `GET /api/me`, `GET /api/machines` | Account & machine list (`kind`, `provider`, `online`, `lastSeen`, `boot`). Max 20 machines per account. |
+| `POST /api/logout-all` | Revoke every sign-in token of the account (the Hub stores `revokedBefore`; tokens with an older `iat` are rejected, connected phones are closed with 4005). |
+| `POST /api/machines/provision` | Register a cloud runner without signing in from the machine itself; returns the machine token to the PWA. |
+| `POST /api/runner/status` | Runner stage report (machine token). |
+| `DELETE /api/machines/<mid>` | Remove a machine; its PC & phone sockets are closed (4003). |
+| `GET /ws/machine`, `GET /ws/phone?mid=` | Daemon & phone WebSockets; text frames or binary `[cid][payload]`. Token via the `snugcode, t.<token>` subprotocol (the relay answers `snugcode`), or `?token=` for old clients. A machine is online = it has a socket that `ping`ed in the last 80 seconds (answered automatically); sockets without pings are closed with 4006 and the machine is marked offline (machines that die suddenly don't close their socket). |
+| `GET /api/health` | `devAuth`, `wsProto` (WebSocket token via subprotocol), `runnerRepo`, and the old-host markers (`legacy`, `publicUrl`). |
+| `GET /build.json`, `/install.sh`, `/install.ps1` | Static assets: PWA build hashes, one-line installers. |
 
-Rate limit per IP (binding `LIMITER`, 30/menit) untuk `/auth/login`, `/auth/machine/start`, `/auth/machine/confirm`, `/api/machines/provision`. Model ancaman lengkap (termasuk batasan: relay juga menyajikan kode PWA) di [`docs/keamanan.md`](docs/keamanan.md). Aset PWA disajikan dengan CSP ketat (`relay/src/headers.js`).
-
----
-
-## 4. Keamanan & Kriptografi End-to-End (E2EE)
-
-Aspek keamanan `snugcode` dirancang dengan prinsip **Zero Trust** terhadap server relay:
-
-### A. Pairing Awal (CPace PAKE)
-- Pengguna menentukan PIN sederhana (6–12 karakter huruf/angka, case-insensitive) di PC saat menjalankan `snugcode setup`.
-- PIN di-hash di PC menggunakan **Scrypt KDF** (N=2¹⁵) dengan salt ID mesin (`pocketcode-pin:<machineId>`; label `pocketcode-*` di `shared/crypto.js` adalah identitas protokol dan sengaja tidak diganti saat rebranding) menghasilkan Password-Related String (PRS). PIN asli tidak pernah disimpan dalam plaintext.
-- PIN bisa diganti dari PC (`snugcode setup`/`snugcode pin`, berlaku setelah daemon di-restart) atau dari HP yang sudah terpasang (RPC `setPin`, langsung berlaku). Runner cloud memakai PIN acak yang dibuat HP dan dikirim sebagai Codespaces secret, sehingga HP pembuatnya langsung terpasang tanpa mengetik PIN.
-- Saat HP pertama kali terhubung, dilakukan pertukaran kunci **CPace** (di atas kurva *Ristretto255*).
-- Server relay hanya bertindak sebagai perantara pesan hex. Relay tidak dapat memecahkan PIN secara offline (*offline dictionary attack resistant*).
-- Jika ada upaya brute-force, setiap 5 kali kegagalan pairing dikunci sementara: 15 menit, berlipat dua tiap kunci berikutnya (maks ±16 jam). Percobaan dihitung saat `pair1` (penebak cukup melihat `pair2` untuk menguji satu tebakan). Pairing berhasil, `snugcode pin`, atau RPC `setPin` membuka kunci (`config.js`: `pinAttempt`/`resetPinLock`).
-- Keberhasilan pairing menghasilkan shared secret permanen (`deviceSecret`) 256-bit yang disimpan di `localStorage` HP dan `~/.snugcode/secrets.json` di PC.
-
-### B. Enkripsi Kanal Sesi (Session Channel)
-- Setiap kali HP tersambung ulang (*reconnect*), kedua pihak melakukan pertukaran kunci ephemeral **X25519**.
-- Kunci diturunkan bersama `deviceSecret` menggunakan **HKDF-SHA256**, menghasilkan sepasang kunci simetris **XChaCha20-Poly1305** independen (arah HP ke PC dan arah PC ke HP).
-- Dilengkapi nomor urut pesan (*monotonic sequence counter*) untuk mencegah serangan *replay attack*.
-- **Proto 2 (kanal biner)**: bila HP & relay mendukungnya (disepakati saat auth), pesan dikirim sebagai frame biner `[versi][nonce][ciphertext]` dan pesan besar dipecah per 256 KB, sehingga riwayat (4 MB), diff (2 MB), dan screenshot tidak terpotong batas 1 MB relay. Klien/daemon lama tetap memakai frame teks.
-
-### C. Setelan mesin dari HP
-- RPC `connAdd`/`connRemove`/`connections` (API key official/router, dideteksi & divalidasi dulu; key tidak pernah dikembalikan), `chatgptLogin`/`chatgptLogout` (Codex, device code), `configure` (bentuk lama: satu router), `devices`, `revoke` (koneksi perangkat langsung diputus), `setPin`, dan `runnerConfig` (khusus runner cloud: token Codespaces untuk berhenti sendiri, menit menganggur).
-- `GITHUB_TOKEN`, `GH_TOKEN`, token Codespaces, dan env bootstrap runner (`SNUGCODE_MACHINE_TOKEN`, `_PAIR_PIN`, `_ROUTER_KEY`, `_GITHUB_TOKEN`) dibuang dari environment daemon saat start (`scrubSecretEnv`), sehingga tidak terwariskan ke agen, Bash, dev server, atau `!perintah`.
+Per-IP rate limit (binding `LIMITER`, 30/minute) for `/auth/login`, `/auth/machine/start`, `/auth/machine/confirm`, `/api/machines/provision`. The full threat model (including the limit that the relay also serves the PWA code) is in [`docs/security.md`](docs/security.md). Site assets are served with a strict CSP (`relay/src/headers.js`).
 
 ---
 
-## 5. Alur Kerja Sesi & Manajemen Git Worktree
+## 4. End-to-End Encryption (E2EE) & Security
 
-`snugcode` membedakan tiga jenis sesi yang semuanya terlihat dari HP maupun terminal:
+`snugcode`'s security is designed on a **Zero Trust** principle towards the relay server:
 
-### 1. Sesi Remote (via HP / PWA)
-- Pengguna memilih repository GitHub dari daftar repositori miliknya.
-- Daemon membuat clone dasar (*bare/base*) di `~/.snugcode/workspaces/<owner>__<repo>/_base`.
-- Setiap sesi baru dibuatkan direktori **Git Worktree** terisolasi di `~/.snugcode/workspaces/<owner>__<repo>/s-<sessionId>`.
-- Worktree memiliki branch sendiri (default `snug/<sessionId>`). Agen AI bekerja murni di dalam worktree tersebut, sehingga tidak mengotori *working tree* proyek lain.
-- Terdapat pembersihan otomatis terhadap file kunci yang tertinggal (`.git/index.lock` stale pruning) dan `git worktree prune`.
+### A. Initial Pairing (CPace PAKE)
+- The user sets a simple PIN (6–12 letters/digits, case-insensitive) on the PC when running `snugcode setup`.
+- The PIN is hashed on the PC with the **Scrypt KDF** (N=2¹⁵) salted with the machine ID (`pocketcode-pin:<machineId>`; the `pocketcode-*` labels in `shared/crypto.js` are protocol identifiers and were deliberately not changed during the rebrand), producing a Password-Related String (PRS). The original PIN is never stored in plaintext.
+- The PIN can be changed from the PC (`snugcode setup`/`snugcode pin`, effective after restarting the daemon) or from an already-paired phone (RPC `setPin`, effective immediately). Cloud runners use a random PIN created by the phone and sent as a Codespaces secret, so the phone that created it is paired without typing a PIN.
+- When a phone connects for the first time, a **CPace** key exchange (over the *Ristretto255* curve) takes place.
+- The relay only acts as a hex message middleman. It can't crack the PIN offline (*offline dictionary attack resistant*).
+- Against brute force, every 5 failed pairings lock pairing temporarily: 15 minutes, doubling with each subsequent lock (max ±16 hours). Attempts are counted at `pair1` (a guesser only needs to see `pair2` to test one guess). A successful pairing, `snugcode pin`, or the `setPin` RPC unlocks it (`config.js`: `pinAttempt`/`resetPinLock`).
+- A successful pairing produces a permanent 256-bit shared secret (`deviceSecret`) stored in the phone's `localStorage` and in `~/.snugcode/secrets.json` on the PC.
 
-### 2. Sesi Lokal (via Terminal PC)
-- Pengguna cukup membuka terminal di folder proyek lokal mana pun dan mengetik `snugcode` (atau `snug`).
-- Folder aktif tersebut langsung menjadi sesi lokal (*direct directory* tanpa clone).
-- Sesi tersebut otomatis muncul di aplikasi HP dengan badge **"terminal"**. Pengguna bisa melanjutkan percakapan atau memonitor progress dari HP saat berjalan menjauh dari PC.
-- Menghapus sesi lokal hanya menghapus riwayatnya; folder pengguna tidak pernah dihapus. Template `.env` tidak tersedia.
+### B. Session Channel Encryption
+- Every time the phone reconnects, both sides perform an ephemeral **X25519** key exchange.
+- Keys are derived together with the `deviceSecret` using **HKDF-SHA256**, producing a pair of independent symmetric **XChaCha20-Poly1305** keys (phone → PC and PC → phone).
+- Messages carry a *monotonic sequence counter* to prevent *replay attacks*.
+- **Proto 2 (binary channel)**: when the phone & relay support it (agreed during auth), messages are sent as binary frames `[version][nonce][ciphertext]` and large messages are split into 256 KB chunks, so history (4 MB), diffs (2 MB), and screenshots aren't cut off by the relay's 1 MB limit. Old clients/daemons keep using text frames.
 
-### 3. Sesi Komputer (Mode Komputer)
-- Dibuat dari HP (Sesi baru → tab **Komputer**, folder awal opsional; bawaan home), dari TUI (`/computer`, pemilih sesi), atau `snugcode --computer` / `-c` (folder aktif).
-- Meta sesi: `computer: true`, `repo: 'Komputer'`, `cwd` folder pilihan; tanpa clone, worktree, atau branch baru. System prompt memakai `SNUGCODE_COMPUTER_PROMPT` (akses seluruh komputer, tidak dibatasi satu repo).
-- Izin: tool baca dan edit file lolos tanpa bertanya **di mana pun** (bukan hanya di dalam `cwd`), kecuali mode *Tinjau edit* / mode rencana. Bash yang tidak read-only dan tool lain tetap lewat prompt izin/auto-izin. Penolakan folder data `~/.snugcode`, prompt wajib untuk push/`gh` dan `secrets.json` tetap berlaku.
-- Tidak ada checkpoint & rewind (RPC `rewind` ditolak) dan tidak ada template `.env`. Git status/diff dicoba di `cwd`; bila bukan repo, dikembalikan kosong dengan `notRepo`.
-- Menghapus sesi hanya menghapus riwayat `.jsonl`; file di PC tidak disentuh.
-- Catatan: mode ini juga tersedia di runner cloud (bekerja di dalam container runner).
-
-### 4. Sistem Izin (Permission Gating)
-- Agen AI Claude Code dapat memanggil berbagai tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, dll.
-- SDK berjalan dengan `permissionMode: 'default'`, jadi setiap tool yang tidak aman lewat `canUseTool` di daemon.
-- **Daftar tool eksplisit** (`AGENT_TOOLS`): `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Agent`, `AskUserQuestion`, `ExitPlanMode`, `WebFetch`, `WebSearch` + tool MCP `mcp__snugcode__*`. `EnterPlanMode` dilarang (mode rencana hanya diatur pengguna).
-- **Safe Tools**: `TodoWrite`, `WebSearch`, `ToolSearch`, `BashOutput`, subagent `Task`/`Agent`, tool dev non-eksekusi (`dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot` ke localhost), dan tool baca (`Read`, `Glob`, `Grep`, `LS`) **yang sasarannya di dalam worktree** (atau folder config Claude milik agen) langsung diizinkan otomatis. Membaca di luar worktree, `WebFetch`, dan screenshot URL non-localhost meminta izin (atau auto-izin) agar isi file tidak bisa diam-diam dikirim ke luar lewat prompt injection; screenshot `file:` selalu bertanya.
-- **Folder data `~/.snugcode`** (API key, login ChatGPT Codex, token GitHub, secret perangkat, template `.env`, binary; kecuali worktree, plans, dan *membaca* folder config Claude milik agen) selalu ditolak untuk tool file, juga saat auto-izin. Menulis ke folder config Claude tetap ditolak karena `settings.json` di sana bisa memasang hook. Perintah Bash yang menyebut `secrets.json` atau subfolder data snugcode selalu meminta izin dan tidak bisa "Selalu diizinkan".
-- **Checkpoint**: snapshot worktree per prompt berjalan paralel dengan start-up agen; tool yang bisa mengubah file baru dijalankan setelah snapshot selesai.
-- **Edit file**: `Write`/`Edit`/`MultiEdit` yang sasarannya di dalam worktree langsung diterapkan (setiap prompt punya checkpoint, jadi bisa di-rewind). *Tinjau edit* (menu sesi di HP / `/edits` di terminal, disimpan sebagai `askEdits`) membuat setiap edit menunggu persetujuan dengan cuplikan mini-diff. Edit di luar worktree dan di mode rencana selalu bertanya.
-- **Perintah `Bash`** yang tidak read-only (Claude Code sendiri meloloskan perintah baca seperti `ls`, `grep`, `git status`) meminta keputusan pengguna:
-  - *Izinkan* (sekali)
-  - *Selalu* — memakai saran aturan Claude Code untuk perintah itu (mis. `Bash(npm test *)`), bukan seluruh Bash. Aturan berlaku langsung di proses berjalan, disimpan sebagai `allowRules` di `sessions/index.json`, dan diteruskan lewat `settings.permissions.allow` ke proses berikutnya. Perintah gabungan (`npm test && rm …`) tetap bertanya untuk bagian yang tidak cocok. Tool tanpa saran aturan (mis. `dev_start`) memakai "Selalu" per tool seperti sebelumnya.
-  - *Tolak*
-- Hook `PreToolUse` berjalan untuk tool yang bisa mengubah file (`Bash`, `Write`, `Edit`, `dev_start`, …), termasuk yang lolos lewat aturan tanpa melewati `canUseTool`: menahannya sampai checkpoint prompt tersimpan, dan memaksa prompt izin (`permissionDecision: 'ask'`) untuk push/`gh pr create` dan perintah yang menyebut `secrets.json`, walau cocok dengan aturan "Selalu" seperti `Bash(git *)`.
-- **Aksi Kritis**: Perintah yang menulis ke remote — `git push` (termasuk `git -C dir push`, `git -c k=v push`), `gh pr create|merge`, `gh release create`, `gh repo create|delete|fork` — **selalu meminta izin eksplisit** terlepas dari auto-izin, dan tidak bisa "Selalu diizinkan". Deteksi berbasis pola teks perintah: ini pengaman dari kekeliruan agen, bukan sandbox (skrip yang memanggil `git push` dari dalam file tidak terdeteksi).
-- **Tingkat risiko & preset otonomi** (`shared/risk.js`): setiap kartu izin membawa `risk` (rendah/sedang/tinggi + alasan) dan `undo` (perubahan bisa di-rewind). Risiko tinggi di PWA tampil merah tanpa *Selalu* dan tidak membawa `pid` di Web Push (tidak bisa dijawab dari notifikasi). Preset: *Tanya semua* (`askEdits`), *Seimbang* (bawaan), *Rutin otomatis* (`autoLow`: Bash/`dev_start` berisiko rendah — test/lint/typecheck/build tanpa `; & | > $()` — lolos tanpa bertanya), *Penuh* (`auto`).
-- **Biaya sesi**: `total_cost_usd` Agent SDK adalah total berjalan per proses (proses yang melanjutkan transcript mulai dari total tersimpan); `Session.account` mengubahnya menjadi `cost` per giliran + `spent` sesi (`meta.spentUsd`). `meta.budgetUsd`: peringatan di 80%, `send` ditolak saat tercapai.
-- **Mode ⚡ Auto-Izin**: Pengguna dapat menyalakan toggle auto-izin dari HP/terminal untuk membiarkan agen bekerja mandiri tanpa interupsi, kecuali untuk aksi kritis di atas.
-- **Sandbox OS saat auto-izin** (`daemon/sandbox.js`): daftar hitam regex tidak cukup (`cat ~/.snug*/s*.json` lolos), jadi proses `claude` sesi auto-izin dijalankan dengan opsi `sandbox` Agent SDK: `denyRead` folder data (sama dengan profil Codex), `allowWrite` hanya `workspaces/` (atau home di Mode Komputer) + cache paket, `denyWrite` hook & config git, jaringan keluar `*`. `autoAllowBashIfSandboxed: false`, jadi keputusan tetap lewat `askPermission`; Bash lolos otomatis hanya bila proses itu memang ber-sandbox (auto-izin yang dinyalakan di tengah proses tanpa sandbox tetap bertanya sampai prompt berikutnya). `dangerouslyDisableSandbox` selalu bertanya dan tidak bisa "Selalu". Diukur dengan SDK asli: worktree, `git commit`, `npm` registry tetap jalan; `localhost` host tidak terjangkau, karena itu bawaannya hanya untuk auto-izin (`config.sandbox`: `auto` | `always` | `off`).
-- **Konfigurasi repo**: `settingSources: []` — `.claude/settings.json` repo tidak dimuat (hook/izin/env/`apiKeyHelper` dari repo bisa ditulis siapa saja); `CLAUDE.md` & `.claude/CLAUDE.md` dibaca sendiri (`projectInstructions`, maks 40 KB). Edit ke `.claude/`, `.codex/`, `.mcp.json`, `.git/` selalu bertanya di kedua engine.
+### C. Machine settings from the phone
+- RPCs `connAdd`/`connRemove`/`connections` (official/router API keys, detected & validated first; keys are never returned), `chatgptLogin`/`chatgptLogout` (Codex, device code), `configure` (old form: one router), `devices`, `revoke` (the device's connection is cut immediately), `setPin`, and `runnerConfig` (cloud runners only: Codespaces token for stopping itself, idle minutes).
+- `GITHUB_TOKEN`, `GH_TOKEN`, Codespaces tokens, and runner bootstrap env vars (`SNUGCODE_MACHINE_TOKEN`, `_PAIR_PIN`, `_ROUTER_KEY`, `_GITHUB_TOKEN`) are removed from the daemon's environment at start (`scrubSecretEnv`), so they aren't inherited by the agent, Bash, dev servers, or `!commands`.
 
 ---
 
-## 6. Koneksi Model, Engine (Harness) & Router
+## 5. Session Workflow & Git Worktree Management
 
-### Koneksi
-Pengguna menyambungkan model dari HP (**Pengaturan PC → Model & API key**, RPC `connAdd`/`connRemove`/`chatgptLogin`), dari terminal (`snugcode connect`), atau lewat env runner (`SNUGCODE_API_KEY`/`SNUGCODE_API_URL`). Satu koneksi = satu kredensial, disimpan di `secrets.connections[id]` (`kind`, `key`, URL `anthropic`/`openai`, `formats`). ID = jenis provider (`anthropic`, `openai`, `chatgpt`, `gemini`, `openrouter`, `deepseek`, `moonshot`, `zai`, `xai`, `groq`) atau `router`, `router2`, … untuk router/endpoint sendiri.
+`snugcode` distinguishes three kinds of sessions, all visible from both the phone and the terminal:
 
-- **Deteksi** (`detectConnection`): key terlarang ditolak dengan alasan (token langganan Claude `sk-ant-oat…`, OAuth Google `ya29.…`, admin key). Pola key menentukan kandidat provider (`sk-ant-api…` → Anthropic, `AIza…` → Gemini, `sk-or-v1-…` → OpenRouter, `sk-proj-…` → OpenAI, `xai-…`, `gsk_…`, key GLM, dll.); key ambigu (`sk-…`) diuji ke beberapa provider bersamaan. Key yang tidak dikenali butuh URL (router). Format endpoint dideteksi dengan POST body kosong ke `/v1/messages`, `/chat/completions`, `/responses` (400/422 = ada, 404/405 = tidak ada) sehingga tidak memakan token. Endpoint format Anthropic pihak ketiga (DeepSeek, Kimi, GLM, OpenRouter) juga diverifikasi dengan cara ini.
-- **Referensi model**: `<koneksi>:<id model>` (mis. `anthropic:claude-opus-5-5-high`, `chatgpt:gpt-5.5`). Model koneksi `router` ditulis tanpa awalan (`cc/claude-opus-5-5`), jadi config & sesi lama tetap berlaku; router lama (`config.routerUrl` + `secrets.routerKey`) dipindahkan otomatis menjadi koneksi `router` dan tetap dicerminkan ke field lama.
-- **Daftar model**: `modelsAll` menggabungkan semua koneksi (koneksi yang gagal dilaporkan terpisah); model non-chat (embedding, audio, gambar) dan model yang menyatakan tidak mendukung tool dibuang.
+### 1. Remote Sessions (via phone / PWA)
+- The user picks a GitHub repository from their list of repositories.
+- The daemon creates a base clone (*bare/base*) in `~/.snugcode/workspaces/<owner>__<repo>/_base`.
+- Every new session gets an isolated **Git Worktree** directory at `~/.snugcode/workspaces/<owner>__<repo>/s-<sessionId>`.
+- The worktree has its own branch (default `snug/<sessionId>`). The AI agent works purely inside that worktree, so it doesn't pollute other projects' *working trees*.
+- Leftover lock files are cleaned up automatically (`.git/index.lock` stale pruning) and `git worktree prune` is run.
+
+### 2. Local Sessions (via the PC terminal)
+- The user just opens a terminal in any local project folder and types `snugcode` (or `snug`).
+- That folder becomes a local session directly (*direct directory*, no clone).
+- The session automatically shows up in the phone app with a **"terminal"** badge. The user can continue the conversation or monitor progress from the phone while walking away from the PC.
+- Deleting a local session only deletes its history; the user's folder is never deleted. `.env` templates aren't available.
+
+### 3. Computer Sessions (Computer mode)
+- Created from the phone (New session → **Computer** tab, optional starting folder; default home), from the TUI (`/computer`, session picker), or with `snugcode --computer` / `-c` (current folder).
+- Session meta: `computer: true`, `repo: 'Computer'`, `cwd` the chosen folder; no clone, worktree, or new branch. The system prompt uses `SNUGCODE_COMPUTER_PROMPT` (access to the whole computer, not limited to one repo).
+- Permissions: file read and edit tools pass without asking **anywhere** (not just inside `cwd`), except in *Review edits* / plan mode. Non-read-only Bash and other tools still go through the permission prompt/auto-approve. Denial of the `~/.snugcode` data folder and the mandatory prompts for push/`gh` and `secrets.json` still apply.
+- No checkpoints & rewind (the `rewind` RPC is rejected) and no `.env` templates. Git status/diff is attempted in `cwd`; if it isn't a repo, an empty result with `notRepo` is returned.
+- Deleting the session only deletes the `.jsonl` history; files on the PC aren't touched.
+- Note: this mode is also available on cloud runners (working inside the runner container).
+
+### 4. Permission Gating
+- The Claude Code AI agent can call various tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, etc.
+- The SDK runs with `permissionMode: 'default'`, so every unsafe tool goes through `canUseTool` in the daemon.
+- **Explicit tool list** (`AGENT_TOOLS`): `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Agent`, `AskUserQuestion`, `ExitPlanMode`, `WebFetch`, `WebSearch` + the MCP tools `mcp__snugcode__*`. `EnterPlanMode` is forbidden (plan mode is only set by the user).
+- **Safe Tools**: `TodoWrite`, `WebSearch`, `ToolSearch`, `BashOutput`, subagents `Task`/`Agent`, non-executing dev tools (`dev_stop`, `dev_logs`, `dev_list`, `preview_screenshot` of localhost), and read tools (`Read`, `Glob`, `Grep`, `LS`) **whose target is inside the worktree** (or the agent's own Claude config folder) are allowed automatically. Reading outside the worktree, `WebFetch`, and screenshots of non-localhost URLs ask for permission (or auto-approve) so file contents can't be quietly sent out through prompt injection; `file:` screenshots always ask.
+- **The `~/.snugcode` data folder** (API keys, Codex ChatGPT sign-in, GitHub token, device secrets, `.env` templates, binaries; except worktrees, plans, and *reading* the agent's own Claude config folder) is always denied for file tools, including under auto-approve. Writing to the Claude config folder is still denied because a `settings.json` there could install hooks. Bash commands that mention `secrets.json` or snugcode data subfolders always ask and can't be "Always allowed".
+- **Checkpoints**: the per-prompt worktree snapshot runs in parallel with the agent's start-up; tools that can change files only run after the snapshot is done.
+- **File edits**: `Write`/`Edit`/`MultiEdit` targeting the worktree apply immediately (every prompt has a checkpoint, so it can be rewound). *Review edits* (session menu on the phone / `/edits` in the terminal, stored as `askEdits`) makes every edit wait for approval with a mini-diff preview. Edits outside the worktree and in plan mode always ask.
+- **`Bash` commands** that aren't read-only (Claude Code itself lets read commands like `ls`, `grep`, `git status` through) ask the user to decide:
+  - *Allow* (once)
+  - *Always* — uses Claude Code's suggested rule for that command (e.g. `Bash(npm test *)`), not all of Bash. The rule applies immediately in the running process, is stored as `allowRules` in `sessions/index.json`, and is passed via `settings.permissions.allow` to the next process. Compound commands (`npm test && rm …`) still ask for the part that doesn't match. Tools without a suggested rule (e.g. `dev_start`) use a per-tool "Always" as before.
+  - *Deny*
+- The `PreToolUse` hook runs for tools that can change files (`Bash`, `Write`, `Edit`, `dev_start`, …), including those that pass through rules without going through `canUseTool`: it holds them until the prompt checkpoint is saved, and forces a permission prompt (`permissionDecision: 'ask'`) for push/`gh pr create` and commands mentioning `secrets.json`, even when they match an "Always" rule such as `Bash(git *)`.
+- **Critical actions**: commands that write to a remote — `git push` (including `git -C dir push`, `git -c k=v push`), `gh pr create|merge`, `gh release create`, `gh repo create|delete|fork` — **always ask for explicit permission** regardless of auto-approve, and can't be "Always allowed". Detection is based on the command's text pattern: a safeguard against agent mistakes, not a sandbox (a script that calls `git push` from inside a file isn't detected).
+- **Risk levels & autonomy presets** (`shared/risk.js`): every permission card carries a `risk` (low/medium/high + reason) and `undo` (the change can be rewound). High risk is shown in red in the PWA without *Always* and doesn't carry a `pid` in Web Push (can't be answered from the notification). Presets: *Ask everything* (`askEdits`), *Balanced* (default), *Routine auto* (`autoLow`: low-risk Bash/`dev_start` — tests/lint/typecheck/builds without `; & | > $()` — pass without asking), *Full* (`auto`).
+- **Session cost**: the Agent SDK's `total_cost_usd` is a running total per process (a process that resumes a transcript starts from the stored total); `Session.account` turns it into a per-turn `cost` + session `spent` (`meta.spentUsd`). `meta.budgetUsd`: a warning at 80%, `send` is rejected once it is reached.
+- **⚡ Auto-approve mode**: the user can turn on the auto-approve toggle from the phone/terminal to let the agent work on its own without interruptions, except for the critical actions above.
+- **OS sandbox under auto-approve** (`daemon/sandbox.js`): a regex blocklist isn't enough (`cat ~/.snug*/s*.json` gets through), so the `claude` process of auto-approve sessions runs with the Agent SDK `sandbox` option: `denyRead` on the data folder (same as the Codex profile), `allowWrite` only for `workspaces/` (or home in Computer mode) + package caches, `denyWrite` for git hooks & config, outbound network `*`. `autoAllowBashIfSandboxed: false`, so decisions still go through `askPermission`; Bash passes automatically only if that process is actually sandboxed (auto-approve turned on mid-process without a sandbox keeps asking until the next prompt). `dangerouslyDisableSandbox` always asks and can't be "Always". Measured with the real SDK: the worktree, `git commit`, and the `npm` registry keep working; the host's `localhost` isn't reachable, which is why it is only the default for auto-approve (`config.sandbox`: `auto` | `always` | `off`).
+- **Repo configuration**: `settingSources: []` — the repo's `.claude/settings.json` isn't loaded (repo hooks/permissions/env/`apiKeyHelper` could be written by anyone); `CLAUDE.md` & `.claude/CLAUDE.md` are read by snugcode itself (`projectInstructions`, max 40 KB). Edits to `.claude/`, `.codex/`, `.mcp.json`, `.git/` always ask in both engines.
+
+---
+
+## 6. Model Connections, Engines (Harnesses) & Routers
+
+### Connections
+Users connect models from the phone (**PC settings → Models & API keys**, RPCs `connAdd`/`connRemove`/`chatgptLogin`), from the terminal (`snugcode connect`), or via runner env vars (`SNUGCODE_API_KEY`/`SNUGCODE_API_URL`). One connection = one credential, stored in `secrets.connections[id]` (`kind`, `key`, `anthropic`/`openai` URLs, `formats`). ID = the provider kind (`anthropic`, `openai`, `chatgpt`, `gemini`, `openrouter`, `deepseek`, `moonshot`, `zai`, `xai`, `groq`) or `router`, `router2`, … for routers/your own endpoints.
+
+- **Detection** (`detectConnection`): forbidden keys are rejected with a reason (Claude subscription tokens `sk-ant-oat…`, Google OAuth `ya29.…`, admin keys). Key patterns determine provider candidates (`sk-ant-api…` → Anthropic, `AIza…` → Gemini, `sk-or-v1-…` → OpenRouter, `sk-proj-…` → OpenAI, `xai-…`, `gsk_…`, GLM keys, etc.); ambiguous keys (`sk-…`) are tested against several providers at once. Unrecognized keys need a URL (router). The endpoint format is detected with an empty POST body to `/v1/messages`, `/chat/completions`, `/responses` (400/422 = exists, 404/405 = doesn't) so no tokens are spent. Third-party Anthropic-format endpoints (DeepSeek, Kimi, GLM, OpenRouter) are verified the same way.
+- **Model references**: `<connection>:<model id>` (e.g. `anthropic:claude-opus-5-5-high`, `chatgpt:gpt-5.5`). Models of the `router` connection are written without a prefix (`cc/claude-opus-5-5`), so old configs & sessions keep working; the old router (`config.routerUrl` + `secrets.routerKey`) is migrated automatically into a `router` connection and still mirrored to the old fields.
+- **Model list**: `modelsAll` merges all connections (failing connections are reported separately); non-chat models (embeddings, audio, images) and models that declare no tool support are dropped.
 
 ### Engine per model
-`engineFor(koneksi, model)` (shared/providers.js) memilih harness:
+`engineFor(connection, model)` (shared/providers.js) picks the harness:
 
-| Kondisi | Engine | Jalur |
+| Condition | Engine | Path |
 |---|---|---|
-| Koneksi `chatgpt` | **Codex** | login ChatGPT milik Codex (`CODEX_HOME`) |
-| Endpoint punya Responses API dan model GPT (atau koneksi `openai`) | **Codex** | provider kustom Codex → proxy (rute `responses`) |
-| Endpoint punya format Anthropic | **Claude Agent SDK** | proxy (rute `anthropic`), diteruskan apa adanya |
-| Baris `shared/engine-table.js` cocok (saat ini: koneksi `gemini` + model `gemini-*`) | **Gemini CLI** | `GOOGLE_GEMINI_BASE_URL` → proxy (rute `gemini`, format Gemini API asli) |
-| Hanya OpenAI Chat Completions | **Claude Agent SDK** | proxy (rute `openai`) + penerjemah format |
+| `chatgpt` connection | **Codex** | Codex's own ChatGPT sign-in (`CODEX_HOME`) |
+| The endpoint has the Responses API and the model is GPT (or an `openai` connection) | **Codex** | Codex custom provider → proxy (`responses` route) |
+| The endpoint has the Anthropic format | **Claude Agent SDK** | proxy (`anthropic` route), forwarded as is |
+| A `shared/engine-table.js` row matches (currently: `gemini` connection + `gemini-*` models) | **Gemini CLI** | `GOOGLE_GEMINI_BASE_URL` → proxy (`gemini` route, native Gemini API format) |
+| OpenAI Chat Completions only | **Claude Agent SDK** | proxy (`openai` route) + format translator |
 
-`SNUGCODE_ENGINE=claude|codex|gemini` memaksa engine itu bila endpoint-nya mendukung (dipakai juga oleh `npm run bench`). Sesi menyimpan referensi model, bukan engine; ganti model ke koneksi/engine lain membuat proses agen baru pada prompt berikutnya.
+`SNUGCODE_ENGINE=claude|codex|gemini` forces that engine when the endpoint supports it (also used by `npm run bench`). Sessions store the model reference, not the engine; switching to a model on another connection/engine creates a new agent process on the next prompt.
 
-### Engine Codex (`daemon/codex.js`)
-- Dipasang sekali ke `~/.snugcode/tools/codex` saat pertama dibutuhkan (versi dipatok; protokol app-server masih eksperimental). Satu proses `codex app-server` per sesi, dipakai ulang antar prompt; thread Codex disimpan di meta sesi (`codexThreadId`) dan dilanjutkan dengan `thread/resume`.
-- `approvalPolicy: 'untrusted'`: setiap perintah masuk ke daemon (`item/commandExecution/requestApproval`) dan diputuskan kebijakan snugcode yang sama dengan engine Claude (`decideCodex`): aksi baca saja menurut parser Codex lolos (kecuali menyentuh folder data), aturan "Selalu" per pola perintah, auto-izin, push/`gh` & `secrets.json` selalu bertanya. Perubahan file di dalam worktree diterapkan (kecuali *Tinjau edit*/mode rencana); pertanyaan `request_user_input` jadi kartu AskUserQuestion di HP.
-- Sandbox: profil izin `snugcode` (extends `:workspace`, jaringan aktif) menolak membaca `secrets.json`, `config.json`, `codex/`, `claude/`, `env/`, `sessions/`, `daemon.log` di tingkat OS (bubblewrap/Seatbelt). Ketersediaan sandbox diuji sekali (`codex sandbox … echo`); bila tidak tersedia (container tanpa user namespace) Codex berjalan tanpa sandbox OS, pengguna diberi tahu, dan izin tetap lewat snugcode.
-- Checkpoint diambil sebelum giliran Codex dimulai (Codex tidak punya hook "tunggu sebelum tool"). Mode rencana = sandbox `readOnly` untuk giliran itu.
-- Tool dev snugcode tersedia lewat `mcp_servers.snugcode` → `daemon/mcp-bridge.js` → kanal lokal daemon (token jembatan per sesi; `dev_start` & screenshot URL luar tetap lewat izin).
-- Event: delta pesan & reasoning → teks/thinking, `commandExecution`/`fileChange`/`mcpToolCall`/`webSearch` → kartu tool + hasil, `turn/plan/updated` → kartu rencana, `thread/tokenUsage/updated` → token & cache per giliran, `turn/completed` → ringkasan selesai.
+### Codex engine (`daemon/codex.js`)
+- Installed once into `~/.snugcode/tools/codex` when first needed (version pinned; the app-server protocol is still experimental). One `codex app-server` process per session, reused across prompts; the Codex thread is stored in the session meta (`codexThreadId`) and resumed with `thread/resume`.
+- `approvalPolicy: 'untrusted'`: every command goes to the daemon (`item/commandExecution/requestApproval`) and is decided by the same snugcode policy as the Claude engine (`decideCodex`): read-only actions according to Codex's parser pass (unless they touch the data folder), "Always" rules per command pattern, auto-approve, push/`gh` & `secrets.json` always ask. File changes inside the worktree are applied (except under *Review edits*/plan mode); `request_user_input` questions become AskUserQuestion cards on the phone.
+- Sandbox: the `snugcode` permission profile (extends `:workspace`, network on) denies reading `secrets.json`, `config.json`, `codex/`, `claude/`, `env/`, `sessions/`, `daemon.log` at the OS level (bubblewrap/Seatbelt). Sandbox availability is tested once (`codex sandbox … echo`); when unavailable (containers without user namespaces) Codex runs without an OS sandbox, the user is told, and permissions still go through snugcode.
+- The checkpoint is taken before a Codex turn starts (Codex has no "wait before tool" hook). Plan mode = a `readOnly` sandbox for that turn.
+- snugcode dev tools are available through `mcp_servers.snugcode` → `daemon/mcp-bridge.js` → the daemon's local channel (per-session bridge token; `dev_start` & screenshots of external URLs still go through permissions).
+- Events: message & reasoning deltas → text/thinking, `commandExecution`/`fileChange`/`mcpToolCall`/`webSearch` → tool cards + results, `turn/plan/updated` → plan card, `thread/tokenUsage/updated` → tokens & cache per turn, `turn/completed` → completion summary.
 
-### Engine Gemini CLI (`daemon/gemini.js`, `daemon/engine-gemini.js`)
-- Dipasang sekali ke `~/.snugcode/tools/gemini` (versi dipatok di `gemini-version.json`); bila gagal (mis. offline), model Gemini dijalankan Claude Agent SDK lewat penerjemah dengan catatan di sesi. Satu proses `gemini --acp` per sesi; sesi Gemini disimpan di meta (`geminiSessionId`) dan dilanjutkan dengan `session/load` (riwayat yang diputar ulang diabaikan).
-- Otentikasi metode `gateway`: `GOOGLE_GEMINI_BASE_URL` = proxy lokal, `GEMINI_API_KEY` = token lokal (dikirim sebagai `x-goog-api-key`, ditukar proxy dengan key asli). Kredensial Google lain di env dibuang. `GEMINI_CLI_HOME` = `~/.snugcode/gemini/<repo|computer>` berisi `settings.json` (auto-update, statistik & telemetri mati, folder trust aktif, `enter_plan_mode` dimatikan) dan `GEMINI.md` = `geminiPrompt`.
-- Folder kerja tidak pernah ditandai tepercaya: `.gemini/settings.json` repo (MCP, hook, `discoveryCommand`) tidak dimuat. Konsekuensinya Gemini CLI juga tidak menjalankan server MCP stdio (tanpa tool `dev_*`; dev server lewat shell latar belakang Gemini) dan tidak memuat instruksi proyek — `GEMINI.md`/`AGENTS.md`/`CLAUDE.md` di root folder kerja disisipkan di prompt pertama sesi baru.
-- Izin (`session/request_permission` → `decideGemini`): `execute` → kebijakan Bash (`decideCodex('command')`; Gemini CLI tanpa sandbox OS, jadi `unsandboxedAuto` membuat perintah tetap bertanya saat auto-izin), `edit`/`delete`/`move` → kebijakan edit dengan diff dari ACP, `switch_mode` → ExitPlanMode, `fetch` → WebFetch/WebSearch, lainnya bertanya.
-- File di dalam folder kerja dibaca/ditulis lewat klien (`fs/read_text_file`, `fs/write_text_file`): folder data snugcode ditolak, tulis menunggu checkpoint. File yang belum ada dibaca sebagai teks kosong (Gemini CLI 0.64 tidak mengenali error ENOENT lewat ACP).
-- Event: `agent_message_chunk`/`agent_thought_chunk` → teks/thinking, `tool_call`/`tool_call_update` → kartu tool (shell = Bash, edit = Edit dengan diff) + hasil, `plan` → kartu rencana, `usage_update` → konteks %, hasil `session/prompt` → ringkasan selesai (token & cache). Model per prompt lewat `session/set_model` (akhiran effort dibuang), mode rencana lewat `session/set_mode plan`.
+### Gemini CLI engine (`daemon/gemini.js`, `daemon/engine-gemini.js`)
+- Installed once into `~/.snugcode/tools/gemini` (version pinned in `gemini-version.json`); if that fails (e.g. offline), Gemini models run on the Claude Agent SDK through the translator with a note in the session. One `gemini --acp` process per session; the Gemini session is stored in the meta (`geminiSessionId`) and resumed with `session/load` (the replayed history is ignored).
+- `gateway` auth method: `GOOGLE_GEMINI_BASE_URL` = the local proxy, `GEMINI_API_KEY` = a local token (sent as `x-goog-api-key`, swapped by the proxy for the real key). Other Google credentials in env are dropped. `GEMINI_CLI_HOME` = `~/.snugcode/gemini/<repo|computer>` containing `settings.json` (auto-update, stats & telemetry off, folder trust on, `enter_plan_mode` disabled) and `GEMINI.md` = `geminiPrompt`.
+- The working folder is never marked trusted: the repo's `.gemini/settings.json` (MCP, hooks, `discoveryCommand`) isn't loaded. As a consequence Gemini CLI also doesn't run stdio MCP servers (no `dev_*` tools; dev servers through Gemini's background shell) and doesn't load project instructions — `GEMINI.md`/`AGENTS.md`/`CLAUDE.md` in the root of the working folder are injected into the first prompt of a new session.
+- Permissions (`session/request_permission` → `decideGemini`): `execute` → the Bash policy (`decideCodex('command')`; Gemini CLI has no OS sandbox, so `unsandboxedAuto` makes commands keep asking under auto-approve), `edit`/`delete`/`move` → the edit policy with the diff from ACP, `switch_mode` → ExitPlanMode, `fetch` → WebFetch/WebSearch, everything else asks.
+- Files inside the working folder are read/written through the client (`fs/read_text_file`, `fs/write_text_file`): the snugcode data folder is denied, writes wait for the checkpoint. Files that don't exist yet are read as empty text (Gemini CLI 0.64 doesn't recognize ENOENT errors over ACP).
+- Events: `agent_message_chunk`/`agent_thought_chunk` → text/thinking, `tool_call`/`tool_call_update` → tool cards (shell = Bash, edit = Edit with diff) + results, `plan` → plan card, `usage_update` → context %, the `session/prompt` result → completion summary (tokens & cache). The model per prompt via `session/set_model` (effort suffix dropped), plan mode via `session/set_mode plan`.
 
-### Router (9router, OmniRoute, LiteLLM, …)
-Router tetap didukung sebagai koneksi biasa (key + URL). Header SDK disanitasi dan suffix `_ide` dibuang hanya untuk koneksi router. Router yang meneruskan langganan Claude/Antigravity (provider `cc/`, `ag/`) berisiko bagi akun pengguna (lihat §1 butir 6).
+### Routers (9router, OmniRoute, LiteLLM, …)
+Routers are still supported as regular connections (key + URL). SDK headers are sanitized and the `_ide` suffix is stripped only for router connections. Routers that forward Claude/Antigravity subscriptions (providers `cc/`, `ag/`) are a risk to the user's account (see §1 item 6).
 
 ### Virtual Effort Level Slider
-- Model Gemini membagi tingkat reasoning per ID terpisah (misal `ag/gemini-3.8-flash-low`, `-medium`, `-high`). `snugcode` menyatukannya menjadi **1 pilihan model dengan slider tingkat effort**.
-- Model koneksi selain router membawa daftar effort-nya sendiri (`efforts`): Claude 4.5+/5 di koneksi Anthropic (`low`–`max`, opsi `effort` Agent SDK), GPT di OpenAI/ChatGPT (diteruskan ke Codex per giliran), Gemini 2.5+/3 (`low`/`medium`/`high`, ikut di ID dan diterjemahkan proxy menjadi `reasoning_effort`).
-- Untuk model native Claude di router (`cc/claude-opus-5-5`, `cc/claude-sonnet-5-5`, atau `claude-*` tanpa provider), daemon menyediakan slider virtual (*auto*, *low*, *medium*, *high*, *max*) yang memetakan ID virtual (mis. `cc/claude-opus-5-5-high`) ke model asli + opsi `effort` Agent SDK. Ganti model/effort diterapkan ke proses yang hidup (`setModel` / `applyFlagSettings({ effortLevel })`).
+- Gemini models split reasoning levels into separate IDs (e.g. `ag/gemini-3.8-flash-low`, `-medium`, `-high`). `snugcode` merges them into **1 model choice with an effort-level slider**.
+- Models of non-router connections carry their own effort list (`efforts`): Claude 4.5+/5 on Anthropic connections (`low`–`max`, the Agent SDK `effort` option), GPT on OpenAI/ChatGPT (passed to Codex per turn), Gemini 2.5+/3 (`low`/`medium`/`high`, part of the ID and translated by the proxy into `reasoning_effort`).
+- For native Claude models on a router (`cc/claude-opus-5-5`, `cc/claude-sonnet-5-5`, or `claude-*` without a provider), the daemon provides a virtual slider (*auto*, *low*, *medium*, *high*, *max*) mapping virtual IDs (e.g. `cc/claude-opus-5-5-high`) to the real model + the Agent SDK `effort` option. Model/effort switches are applied to the live process (`setModel` / `applyFlagSettings({ effortLevel })`).
 
-### Model Ringan Subagen
-- Koneksi selain router: model ringan dari **koneksi yang sama** dan keluarga model yang sama (Claude → Haiku terbaru, Gemini → Flash terbaru varian `-low`, DeepSeek → `-flash`/`-chat`, GLM → `-air`/`-flash`); koneksi OpenAI/ChatGPT (Codex) mengatur subagennya sendiri.
-- Router lama: subagen (Explore, Plan, general-purpose) dan tugas utilitas (mis. ringkasan WebFetch) memakai **model ringan** yang dipilih otomatis oleh `lightModel()` di `shared/models.js`, hanya dari dua pilihan:
-  - Model utama Claude (`cc/` atau `claude-*` tanpa provider): **Claude Haiku 5.5** (`cc/claude-haiku-5-5`), lalu **Gemini 3.8 Flash**.
-  - Model utama lain (`ag/`, `gemini/`, …): **Gemini 3.8 Flash** (varian `-low`, provider yang sama didahulukan), lalu **Claude Haiku 5.5**.
-  - Keduanya tidak ada di router: memakai model utama.
-- Diteruskan lewat `CLAUDE_CODE_SUBAGENT_MODEL` + `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (tanpa `_FORCE`, subagen bawaan tetap memakai model utama) dan `ANTHROPIC_DEFAULT_HAIKU_MODEL`. Effort subagen diatur di `daemon/agents.js` (Explore `low`, lainnya `medium`); tanpa itu subagen mewarisi effort model utama.
-- Daftar model router diambil di latar belakang saat daemon start (cache 5 menit, boleh basi), jadi prompt tidak pernah menunggu request `/models`. Model ringan untuk model default terlihat di menu PC (HP) dan `snugcode status`; tidak bisa diganti manual.
-- Model `claude-*` di provider lain (mis. `ag/claude-opus-4-6-thinking`) **tidak** diberi slider virtual: router-nya tidak mengenal effort, jadi ID diteruskan apa adanya.
+### Light Subagent Model
+- Non-router connections: a light model from **the same connection** and the same model family (Claude → latest Haiku, Gemini → latest Flash `-low` variant, DeepSeek → `-flash`/`-chat`, GLM → `-air`/`-flash`); OpenAI/ChatGPT (Codex) connections manage their own subagents.
+- Old routers: subagents (Explore, Plan, general-purpose) and utility tasks (e.g. WebFetch summaries) use a **light model** picked automatically by `lightModel()` in `shared/models.js`, from only two options:
+  - Claude main model (`cc/` or `claude-*` without a provider): **Claude Haiku 5.5** (`cc/claude-haiku-5-5`), then **Gemini 3.8 Flash**.
+  - Other main models (`ag/`, `gemini/`, …): **Gemini 3.8 Flash** (`-low` variant, same provider first), then **Claude Haiku 5.5**.
+  - Neither on the router: the main model is used.
+- Passed via `CLAUDE_CODE_SUBAGENT_MODEL` + `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (without `_FORCE`, built-in subagents keep using the main model) and `ANTHROPIC_DEFAULT_HAIKU_MODEL`. Subagent effort is set in `daemon/agents.js` (Explore `low`, the rest `medium`); without it subagents inherit the main model's effort.
+- The router's model list is fetched in the background when the daemon starts (5-minute cache, may be stale), so prompts never wait for a `/models` request. The light model for the default model is shown in the PC menu (phone) and `snugcode status`; it can't be changed manually.
+- `claude-*` models on other providers (e.g. `ag/claude-opus-4-6-thinking`) **don't** get a virtual slider: their router doesn't know about effort, so the ID is passed as is.
 
-### Efisiensi langkah untuk model non-Claude
-- Setiap langkah agen = satu request model, jadi jumlah langkah yang menentukan kecepatan. Untuk model non-Claude (mis. Gemini), hook `PreToolUse` `Read|Grep` (`widenToolInput` di `daemon/sessions.js`) melebarkan Read potongan (offset/limit) dari file ≤ 2000 baris / 64 KB menjadi seluruh file, dan Grep tanpa `output_mode` menjadi baris yang cocok + nomor baris (`head_limit` 100). File biner, gambar, PDF, notebook, dan folder data snugcode tidak disentuh; izin tetap lewat `canUseTool`. Model Claude (termasuk `claude-*` di provider lain) tidak dilebarkan.
-- Pengaturan env lain untuk menghemat token: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, `BASH_MAX_OUTPUT_LENGTH=15000`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+### Step efficiency for non-Claude models
+- Every agent step = one model request, so the number of steps determines speed. For non-Claude models (e.g. Gemini), the `PreToolUse` `Read|Grep` hook (`widenToolInput` in `daemon/sessions.js`) widens partial Reads (offset/limit) of files ≤ 2000 lines / 64 KB to the whole file, and Greps without `output_mode` to matching lines + line numbers (`head_limit` 100). Binary files, images, PDFs, notebooks, and the snugcode data folder aren't touched; permissions still go through `canUseTool`. Claude models (including `claude-*` on other providers) aren't widened.
+- Other env settings to save tokens: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, `BASH_MAX_OUTPUT_LENGTH=15000`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
 
-### Pemeriksaan Model (Probe)
-- Banyak model AI upstream yang sudah dihentikan (*deprecated*) tetap mengembalikan status HTTP 200 dengan payload teks error ("*...is no longer available*").
-- Daftar model diambil dari `/models` tiap koneksi dan disaring ke model yang tidak menyatakan `tools: false`.
-- Saat pengguna memilih model di HP, `probeRoute` (`daemon/providers.js`) mengirim satu pesan probe kecil dalam format rute model itu (Messages, Chat Completions, atau Responses; ChatGPT tidak diuji) (*stream probe*) dan menampilkan "✓ siap · 1.2s" atau alasan gagalnya (termasuk deteksi teks "no longer available"). Probe hanya menguji bahwa model menjawab, bukan kemampuan *tool calling*.
+### Model Checks (Probe)
+- Many discontinued (*deprecated*) upstream AI models still return HTTP 200 with an error text payload ("*...is no longer available*").
+- The model list is fetched from each connection's `/models` and filtered to models that don't declare `tools: false`.
+- When the user picks a model on the phone, `probeRoute` (`daemon/providers.js`) sends one small probe message in that model's route format (Messages, Chat Completions, or Responses; ChatGPT isn't tested) (*stream probe*) and shows "✓ ready · 1.2s" or the reason it failed (including detection of the "no longer available" text). The probe only tests that the model answers, not its *tool calling* ability.
 
 ---
 
-## 7. Analisis Mendalam Isu `_ide` pada Claude Opus 5.5
+## 7. Deep Dive: the `_ide` Issue with Claude Opus 5.5
 
-### Masalah yang Terjadi
-Saat pengguna memilih model Claude Opus 5.5 (`cc/claude-opus-5-5`), agen gagal mengeksekusi tool dan mengulang pesan error:
+### The problem
+When the user picked Claude Opus 5.5 (`cc/claude-opus-5-5`), the agent failed to run tools and kept repeating the error:
 ```text
 <tool_use_error>Error: No such tool available: Bash_ide</tool_use_error>
 ```
-Meskipun model mencoba memanggil kembali dengan nama yang dianggapnya benar, error tersebut terus terulang.
+Even when the model retried with the name it considered correct, the error kept recurring.
 
-### Akar Masalah (Root Cause)
-1. **Routing Akun Claude Code IDE Upstream**:
-   Di 9router, prefix `cc/*` (Claude Code) di-route ke backend Anthropic yang terintegrasi dengan **Claude Code IDE Extension (VS Code / JetBrains companion)**.
-2. **Injeksi Suffix `_ide`**:
-   Pada integrasi IDE, upstream secara otomatis mengubah nama tool yang dideklarasikan oleh client dengan menambahkan akhiran `_ide` (misalnya `Bash` menjadi `Bash_ide`, `Read` menjadi `Read_ide`, `Edit` menjadi `Edit_ide`), dan menandai tool CLI standar sebagai "*This tool is currently unavailable*".
-3. **Ketidaksesuaian Registri Tool di SDK**:
-   `snugcode` menjalankan `@anthropic-ai/claude-agent-sdk` di PC dalam mode CLI/Agent. SDK mendaftarkan tool native dengan nama standar: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. Ketika response stream dari model Claude Opus 5.5 mengembalikan nama tool `Bash_ide`, SDK menolak karena `Bash_ide` tidak terdaftar di internal harness SDK.
+### Root Cause
+1. **Upstream Claude Code IDE account routing**:
+   In 9router, the `cc/*` (Claude Code) prefix is routed to an Anthropic backend integrated with the **Claude Code IDE Extension (VS Code / JetBrains companion)**.
+2. **`_ide` suffix injection**:
+   In the IDE integration, upstream automatically renames tools declared by the client by appending `_ide` (e.g. `Bash` becomes `Bash_ide`, `Read` becomes `Read_ide`, `Edit` becomes `Edit_ide`), and marks the standard CLI tools as "*This tool is currently unavailable*".
+3. **Tool registry mismatch in the SDK**:
+   `snugcode` runs `@anthropic-ai/claude-agent-sdk` on the PC in CLI/Agent mode. The SDK registers native tools with the standard names: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`. When Claude Opus 5.5's response stream returns the tool name `Bash_ide`, the SDK rejects it because `Bash_ide` isn't registered in the SDK's internal harness.
 
-### Solusi Permanen via Loopback Proxy Sanitizer (`daemon/proxy.js`)
-`snugcode` memiliki loopback proxy lokal pada `127.0.0.1` (port acak) yang berada tepat di antara Claude Agent SDK dan 9router. Proxy ini dilengkapi dengan fungsi **Tool Name Sanitizer**:
-- Menghapus header `accept-encoding` sehingga stream response tidak terkompresi.
-- Menulis ulang respons SSE (`text/event-stream`) dan JSON secara streaming **per baris utuh**: event SSE dan JSON selalu diakhiri baris baru, jadi pola nama tool tidak pernah terbelah oleh batas chunk TCP. Karakter UTF-8 multi-byte yang terpotong di antara dua chunk disambung ulang dengan `StringDecoder`. Respons lain diteruskan apa adanya.
-- Memotong suffix `_ide` pada nama tool (`"name":"Bash_ide"` -> `"name":"Bash"`, `"name":"Read_ide"` -> `"name":"Read"`).
-- Bila koneksi ke router putus di tengah stream, koneksi ke SDK ikut diputus agar SDK melihat error dan mencoba ulang (tidak menggantung). Router yang tidak bisa dihubungi dijawab `502` berformat error Anthropic. Tombol Stop ikut membatalkan request ke router.
-- Proses `claude` hanya memegang **token lokal acak** milik proxy (bukan key 9router); proxy menukarnya dengan key asli. Request tanpa token itu ditolak 401, sehingga program lain di PC tidak bisa memakai key pengguna, dan Bash agen tidak bisa membaca key dari env.
-- Satu proses `claude` per sesi dibiarkan hidup di antara prompt (streaming input Agent SDK) dan ditutup setelah 5 menit menganggur (maksimal 3 proses menganggur sekaligus; yang paling lama tidak dipakai ditutup lebih dulu). Proses disiapkan di latar belakang saat sesi dibuka (pre-warm), jadi prompt pertama tidak menunggu spawn + resume. Ganti model/effort tidak membuat proses baru; proses baru (dengan `resume`) hanya bila model ringan, binary, atau URL berubah.
-- Diuji di `test/unit.test.js` dengan memotong stream di setiap posisi di dalam `"Bash_ide"` dan di tengah karakter multi-byte, serta end-to-end dengan `cc/claude-opus-5-5`.
+### Permanent fix via the Loopback Proxy Sanitizer (`daemon/proxy.js`)
+`snugcode` has a local loopback proxy on `127.0.0.1` (random port) sitting right between the Claude Agent SDK and 9router. The proxy has a **Tool Name Sanitizer**:
+- Removes the `accept-encoding` header so the response stream isn't compressed.
+- Rewrites SSE (`text/event-stream`) and JSON responses in streaming fashion **per whole line**: SSE events and JSON always end in a newline, so the tool-name pattern is never split by a TCP chunk boundary. Multi-byte UTF-8 characters split across two chunks are rejoined with `StringDecoder`. Other responses are forwarded as is.
+- Strips the `_ide` suffix from tool names (`"name":"Bash_ide"` -> `"name":"Bash"`, `"name":"Read_ide"` -> `"name":"Read"`).
+- If the connection to the router drops mid-stream, the connection to the SDK is dropped too so the SDK sees an error and retries (doesn't hang). An unreachable router is answered with a `502` in Anthropic error format. The Stop button also cancels the request to the router.
+- The `claude` process only holds the proxy's **random local token** (not the 9router key); the proxy swaps it for the real key. Requests without that token are rejected with 401, so other programs on the PC can't use the user's key, and the agent's Bash can't read the key from env.
+- One `claude` process per session is kept alive between prompts (Agent SDK streaming input) and closed after 5 minutes idle (at most 3 idle processes at once; the least recently used is closed first). The process is prepared in the background when the session opens (pre-warm), so the first prompt doesn't wait for spawn + resume. Switching model/effort doesn't create a new process; a new process (with `resume`) is only created when the light model, binary, or URL changes.
+- Tested in `test/unit.test.js` by cutting the stream at every position inside `"Bash_ide"` and in the middle of multi-byte characters, and end-to-end with `cc/claude-opus-5-5`.
 
 ---
 
-## 8. Fitur-Fitur Unggulan Lainnya
+## 8. Other Notable Features
 
-### A. Remote Self-Update 1-Klik dari HP (`daemon/updater.js`)
-- PC dapat memeriksa dan memperbarui instalasi `snugcode` secara jarak jauh.
-- Mendukung dua mode instalasi:
-  - **Git Checkout**: Menjalankan `git fetch`, memvalidasi working tree, `git pull --ff-only origin main`, lalu `npm install --omit=dev --include=optional`.
-  - **Global npm**: kanal `stable` (bawaan, `config.updateChannel` / `SNUGCODE_UPDATE_CHANNEL`) memasang rilis GitHub bertag terbaru (`github:arfakaisar/snugcode#vX.Y.Z`) bila versinya lebih baru dari `package.json`; selama repo belum punya rilis, atau kanal `main`, commit terbaru main dipasang dan dipatok (`#<sha>`). Spec terpasang dicatat (`installedSpec`, `installedCommit`), spec sebelumnya di `previousSpec` untuk **rollback** (`snugcode update --rollback`, RPC `rollback`, tombol di sheet Pembaruan PC).
-  - **Rilis**: `npm version minor && git push --follow-tags` → workflow Release memeriksa tag = versi `package.json`, menjalankan test, dan membuat rilis GitHub.
-- **Binary Native Claude Terjamin Ada** (`daemon/nativebin.js`): Agent SDK membawa `claude.exe` lewat paket per-platform opsional (`@anthropic-ai/claude-agent-sdk-win32-x64`, dst.) yang bisa dilewati npm tanpa error. Semua sesi/daemon dihentikan sebelum update (agar file tidak terkunci di Windows), lalu keberadaan binary diverifikasi setelah install. Sebelum tiap prompt, sesi juga memeriksa binary dan menampilkan perintah perbaikan bila hilang. Fallback manual: isi `"claudeExecutable": "C:\\path\\ke\\claude.exe"` di `~/.snugcode/config.json`.
-- **Deteksi Otomatis Push Baru**: Daemon secara otomatis memeriksa commit baru setiap 10 menit. Begitu commit baru dideteksi, banner pembaruan dinamis muncul seketika di bagian atas layar HP pengguna.
-- **Detached Restart**: Daemon menunggu ~1 detik agar balasan RPC terkirim, berhenti, lalu helper child process independen (*detached*) menyalakan daemon baru ~2 detik kemudian. HP terputus beberapa detik lalu otomatis *reconnect* tanpa campur tangan manual di PC. Di runner cloud (`SNUGCODE_SUPERVISED=1`) daemon keluar dengan kode 75 dan supervisor `snugcode cloud` yang menyalakannya lagi.
-- **Progress di HP**: pembaruan dari HP tampil sebagai tahap *pasang → restart → tersambung lagi* dengan perkiraan sisa waktu.
+### A. 1-Tap Remote Self-Update from the Phone (`daemon/updater.js`)
+- The PC can check for and update its `snugcode` installation remotely.
+- Supports two install modes:
+  - **Git checkout**: runs `git fetch`, validates the working tree, `git pull --ff-only origin main`, then `npm install --omit=dev --include=optional`.
+  - **Global npm**: the `stable` channel (default, `config.updateChannel` / `SNUGCODE_UPDATE_CHANNEL`) installs the latest tagged GitHub release (`github:arfakaisar/snugcode#vX.Y.Z`) when its version is newer than `package.json`; while the repo has no releases, or on the `main` channel, the latest main commit is installed and pinned (`#<sha>`). The installed spec is recorded (`installedSpec`, `installedCommit`), the previous spec in `previousSpec` for **rollback** (`snugcode update --rollback`, RPC `rollback`, a button in the PC Update sheet).
+  - **Releases**: `npm version minor && git push --follow-tags` → the Release workflow checks that the tag = the `package.json` version, runs the tests, and creates a GitHub release.
+- **Native Claude binary guaranteed** (`daemon/nativebin.js`): the Agent SDK ships `claude.exe` through optional per-platform packages (`@anthropic-ai/claude-agent-sdk-win32-x64`, etc.) that npm can skip without an error. All sessions/daemons are stopped before updating (so files aren't locked on Windows), then the binary's presence is verified after install. Before every prompt, the session also checks the binary and shows a fix command if it's missing. Manual fallback: set `"claudeExecutable": "C:\\path\\to\\claude.exe"` in `~/.snugcode/config.json`.
+- **Automatic detection of new pushes**: the daemon checks for new commits every 10 minutes. As soon as one is detected, a dynamic update banner appears at the top of the user's phone screen.
+- **Detached restart**: the daemon waits ~1 second so the RPC reply is sent, stops, then an independent (*detached*) helper child process starts a new daemon ~2 seconds later. The phone disconnects for a few seconds then *reconnects* automatically without manual intervention on the PC. On cloud runners (`SNUGCODE_SUPERVISED=1`) the daemon exits with code 75 and the `snugcode cloud` supervisor starts it again.
+- **Progress on the phone**: updates from the phone show as *install → restart → reconnected* stages with an estimate of the time left.
 
 ### B. Anti-Sleep Service (`daemon/keepawake.js`)
-Mencegah PC masuk ke mode tidur (*system sleep*) selama daemon berjalan (dimulai saat daemon start, berhenti saat daemon berhenti; tidak dipakai di runner cloud):
-- **Windows (win32)**: Memanggil Windows API `SetThreadExecutionState(0x80000041)` via background PowerShell. Mode ini mengaktifkan **Away Mode**, memungkinkan monitor/layar PC mati untuk hemat energi, namun CPU dan koneksi jaringan tetap bekerja penuh.
-- **macOS (darwin)**: Menjalankan utilitas bawaan `caffeinate -s -w <pid>`.
-- **Linux**: Menggunakan `systemd-inhibit --what=sleep`.
+Prevents the PC from going to sleep (*system sleep*) while the daemon runs (starts when the daemon starts, stops when it stops; not used on cloud runners):
+- **Windows (win32)**: calls the Windows API `SetThreadExecutionState(0x80000041)` via a background PowerShell. This enables **Away Mode**, letting the monitor/screen turn off to save energy while the CPU and network keep working fully.
+- **macOS (darwin)**: runs the built-in `caffeinate -s -w <pid>` utility.
+- **Linux**: uses `systemd-inhibit --what=sleep`.
 
 ### C. Direct Shell Execution (`!`)
-Di dalam chat (baik di HP maupun terminal PC), pesan yang diawali tanda seru (`!`) langsung dieksekusi sebagai perintah shell OS di direktori sesi (menggunakan PowerShell di Windows atau bash di macOS/Linux), misalnya:
+In the chat (on the phone or the PC terminal), messages starting with an exclamation mark (`!`) are executed directly as OS shell commands in the session directory (PowerShell on Windows or bash on macOS/Linux), for example:
 ```bash
 !npm test
 !git status
 !dir
 ```
-Output perintah di-stream secara real-time ke layar HP (maks. 512 KB, dihentikan setelah 10 menit). Untuk perintah yang berjalan terus (dev server), pakai **Run & Preview**. pnpm/yarn yang tidak terpasang disiapkan otomatis lewat corepack (`daemon/toolchain.js`), juga untuk Bash agen dan proses Run.
+Command output is streamed in real time to the phone screen (max 512 KB, stopped after 10 minutes). For long-running commands (dev servers), use **Run & Preview**. pnpm/yarn that aren't installed are set up automatically through corepack (`daemon/toolchain.js`), also for the agent's Bash and Run processes.
 
-### D. Run & Preview (lihat hasil web app dari HP sebelum commit)
-- Tombol **▶** di header sesi → **Jalankan**. Perintah setup (`npm ci`, `pnpm install`, `yarn install`, `bun install`) dan dev (script `dev`/`start`/`serve`/`preview`; juga `python manage.py runserver` dan `npx serve` untuk situs statis) terdeteksi otomatis, atau bisa diketik manual. Bisa juga ditimpa lewat `.snugcode.json` (atau `.pocketcode.json` lama) di root repo: `{ "setup": "…", "dev": "…" }`.
-- Proses berjalan di latar belakang tanpa memblokir agen. Env `PORT` diisi port bebas, dan `{port}` di perintah diganti port yang sama. Port terdeteksi dari log.
-- **Preview di HP**: Cloudflare quick tunnel ke gerbang lokal `127.0.0.1`. Link berisi token rahasia (dikirim hanya lewat kanal E2EE), lalu ditukar menjadi cookie HttpOnly. Tanpa token, link ditolak 401. Host/Origin ditulis ulang ke `localhost` sehingga HMR Vite/Next berjalan. Tunnel tertutup saat proses berhenti.
-- **Screenshot** halaman dari HP (Chrome/Edge headless di PC) beserta error konsol. Satu tap meneruskan error ke agen.
-- Agen memakai tool yang sama (`dev_start`, `preview_screenshot`, …) untuk memverifikasi UI sendiri.
-- **Template .env**: menu sesi → *Simpan .env sebagai template*. File itu dipulihkan otomatis di worktree baru repo yang sama.
-- Kebutuhan: `cloudflared` (diunduh otomatis ke `~/.snugcode/bin`, atau isi `cloudflaredExecutable` di config) dan Chrome/Edge/Chromium untuk screenshot (`browserExecutable` di config bila tidak terdeteksi).
+### D. Run & Preview (see your web app from the phone before committing)
+- The **▶** button in the session header → **Run**. Setup commands (`npm ci`, `pnpm install`, `yarn install`, `bun install`) and dev commands (`dev`/`start`/`serve`/`preview` scripts; also `python manage.py runserver` and `npx serve` for static sites) are detected automatically, or can be typed manually. They can also be overridden with `.snugcode.json` (or the old `.pocketcode.json`) in the repo root: `{ "setup": "…", "dev": "…" }`.
+- The process runs in the background without blocking the agent. The `PORT` env var is set to a free port, and `{port}` in the command is replaced with the same port. The port is detected from the logs.
+- **Preview on the phone**: a Cloudflare quick tunnel to a local gate on `127.0.0.1`. The link contains a secret token (sent only over the E2EE channel), which is then exchanged for an HttpOnly cookie. Without the token, the link is rejected with 401. Host/Origin are rewritten to `localhost` so Vite/Next HMR works. The tunnel closes when the process stops.
+- **Screenshots** of the page from the phone (headless Chrome/Edge on the PC) with console errors. One tap forwards the errors to the agent.
+- The agent uses the same tools (`dev_start`, `preview_screenshot`, …) to verify its own UI.
+- **.env template**: session menu → *Save .env as template*. That file is restored automatically in new worktrees of the same repo.
+- Requirements: `cloudflared` (downloaded automatically to `~/.snugcode/bin`, or set `cloudflaredExecutable` in the config) and Chrome/Edge/Chromium for screenshots (`browserExecutable` in the config if not detected).
 
-### E. Kolaborasi dengan agen
-- **Kirim gambar** dari kamera/galeri/clipboard (dikompres di HP, maks. 4 per pesan).
-- **Agen bertanya** (`AskUserQuestion`): opsi tap di HP, pilihan angka di terminal. Selalu menunggu pengguna, juga saat auto-izin aktif.
-- **Mode rencana** (tombol **+** → *Mode rencana* / `/plan`): agen hanya membaca, lalu mengajukan rencana. *Setujui & kerjakan* mematikan mode rencana dan agen mulai mengerjakan.
-- **Checkpoint & rewind**: tiap prompt menyimpan snapshot worktree (termasuk perubahan yang belum di-commit; `node_modules` dikecualikan). Tombol ↺ di prompt atau `/rewind` mengembalikan semua file.
-- **Web Push**: aktifkan dari menu → *Izinkan notifikasi*. Notifikasi muncul saat agen selesai, butuh izin, atau bertanya, walau PWA ditutup (iOS: tambahkan ke Home Screen dulu).
+### E. Collaborating with the agent
+- **Send images** from the camera/gallery/clipboard (compressed on the phone, max 4 per message).
+- **The agent asks** (`AskUserQuestion`): tap options on the phone, numbered choices in the terminal. Always waits for the user, even under auto-approve.
+- **Plan mode** (**+** button → *Plan mode* / `/plan`): the agent only reads, then proposes a plan. *Approve & build* turns off plan mode and the agent starts working.
+- **Checkpoints & rewind**: every prompt stores a worktree snapshot (including uncommitted changes; `node_modules` excluded). The ↺ button on a prompt or `/rewind` restores all files.
+- **Web Push**: turn on from the menu → *Allow notifications*. Notifications appear when the agent finishes, needs permission, or asks a question, even when the PWA is closed (iOS: add it to the Home Screen first).
 
-### F. File explorer, review diff & terminal dari HP
-- **File** (menu sesi): telusuri worktree (`files`), baca teks/gambar (`fileRead`; >400 KB hanya lewat kanal biner), edit & file baru (`fileWrite` dengan hash: file yang sudah berubah di PC ditolak). Agen diberi tahu di prompt berikutnya bahwa pengguna mengubah file (`userChanged` → `meta.note`). *Tanya agen* mengisi composer dengan path file.
-- **Review diff** (layar Git): diff diparse per file/hunk; komentar per baris atau hunk dikumpulkan lalu *Kirim ke agen* sebagai satu pesan berisi kutipan kode. *Batalkan hunk/file* (`revert`, ditolak saat agen berjalan): `git apply -R` untuk satu hunk, `git checkout HEAD --` untuk satu file, file baru dihapus.
-- **Terminal** (menu sesi): PTY di PC (`termOpen`/`termAttach`/`termIn`/`termResize`/`termClose`, event `term`), xterm.js dimuat saat pertama dibuka, baris tombol Esc/Tab/Ctrl/Alt/panah/Tempel/Salin/^C/Home/End, aset xterm di-prefetch saat idle ketika sesi dibuka, input dikumpulkan per 8 ms. Di layar sentuh, ketikan keyboard HP (komposisi IME) dikirim langsung sebagai selisih isi textarea xterm (`imeDelta`), bukan menunggu kata di-commit; cubit dua jari mengubah ukuran huruf. Shell tetap hidup saat layar ditutup atau koneksi putus (output terakhir diputar ulang); terminal yang hidup membuat runner cloud tidak dianggap menganggur. Butuh paket opsional `@lydell/node-pty`.
+### F. File explorer, diff review & terminal from the phone
+- **Files** (session menu): browse the worktree (`files`), read text/images (`fileRead`; >400 KB only over the binary channel), edit & create files (`fileWrite` with a hash: files that changed on the PC are rejected). The agent is told on the next prompt that the user changed files (`userChanged` → `meta.note`). *Ask the agent* fills the composer with the file path.
+- **Diff review** (Git screen): the diff is parsed per file/hunk; comments per line or hunk are collected and then *Send to agent* as one message containing the quoted code. *Revert hunk/file* (`revert`, rejected while the agent is running): `git apply -R` for one hunk, `git checkout HEAD --` for one file, new files are deleted.
+- **Terminal** (session menu): a PTY on the PC (`termOpen`/`termAttach`/`termIn`/`termResize`/`termClose`, `term` event), xterm.js loaded when first opened, a key row Esc/Tab/Ctrl/Alt/arrows/Paste/Copy/^C/Home/End, xterm assets prefetched while idle when a session opens, input batched every 8 ms. On touch screens, phone keyboard typing (IME composition) is sent directly as a diff of the xterm textarea contents (`imeDelta`) instead of waiting for the word to be committed; a two-finger pinch changes the font size. The shell stays alive when the screen is closed or the connection drops (the latest output is replayed); a live terminal keeps a cloud runner from being considered idle. Needs the optional `@lydell/node-pty` package.
 
-### G. Keychain OS untuk `secrets.json`
-- `snugcode keychain on|off|status`. Saat aktif, `secrets.json` berisi `{ snugcodeKeychain: 1, kc, n, c }` (XChaCha20-Poly1305, AAD `snugcode-secrets-v1`); kunci 256-bit hanya di keychain OS, satu item per folder data. Mode file dipertahankan saat menulis ulang. Bila kunci tidak bisa dibuka, daemon berhenti dengan pesan jelas (tidak pernah menimpa dengan secrets kosong). `secrets.key` (DPAPI) ikut dilindungi dari agen.
+### G. OS keychain for `secrets.json`
+- `snugcode keychain on|off|status`. When on, `secrets.json` contains `{ snugcodeKeychain: 1, kc, n, c }` (XChaCha20-Poly1305, AAD `snugcode-secrets-v1`); the 256-bit key only exists in the OS keychain, one item per data folder. The file mode is preserved when rewriting. If the key can't be opened, the daemon stops with a clear message (it never overwrites with empty secrets). `secrets.key` (DPAPI) is also protected from the agent.
 
 ---
 
-## 9. Panduan Konfigurasi & Perintah CLI
+## 9. Configuration Guide & CLI Commands
 
-### Prasyarat
+### Prerequisites
 - **Node.js 22+**
 - **Git**
-- **Akun ChatGPT** atau **API key model** apa pun (Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, atau router seperti 9router/OmniRoute)
-- Akun **GitHub**
+- A **ChatGPT account** or any **model API key** (Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, or a router such as 9router/OmniRoute)
+- A **GitHub** account
 
-### Instalasi & Setup di PC
+### Install & Setup on the PC
 ```bash
-# Pasang secara global
+# Install globally
 npm i -g github:arfakaisar/snugcode
 
-# Jalankan wizard interaktif setup
+# Run the interactive setup wizard
 snugcode setup
 
-# Aktifkan service latar belakang & jalankan saat PC booting
+# Enable the background service & run it when the PC boots
 snugcode autostart on
 ```
 
-### Daftar Perintah CLI Lengkap
+### Full CLI Command List
 
-| Perintah | Deskripsi |
+| Command | Description |
 |---|---|
-| `snugcode` / `snug` | Membuka interactive Terminal UI pada direktori aktif saat ini. |
-| `snugcode "prompt"` | Membuka TUI dan langsung mengirimkan prompt instruksi awal. |
-| `snugcode --pick` | Membuka pemilih sesi aktif (termasuk sesi yang dibuat dari HP). |
-| `snugcode --computer` / `-c` | Membuka TUI dengan sesi Mode Komputer di direktori aktif. |
-| `snugcode setup` | Menjalankan ulang panduan konfigurasi (API key, model, GitHub, PIN). |
-| `snugcode login` | Login ulang GitHub saja (token dicabut/kedaluwarsa); langsung berlaku tanpa restart bila daemon berjalan. |
-| `snugcode connect <key> [--url URL]` | Menyambungkan API key model; jenis & format dideteksi otomatis (lewat daemon bila berjalan). |
-| `snugcode connect chatgpt` | Login ChatGPT lewat Codex (daemon harus berjalan); kode bisa diselesaikan di HP. |
-| `snugcode connect` / `snugcode disconnect <id>` | Daftar koneksi model / menghapus satu koneksi. |
-| `snugcode start` | Menjalankan daemon di foreground terminal ini. |
-| `snugcode stop` | Menghentikan daemon yang sedang berjalan di background. |
-| `snugcode restart` | Me-restart daemon background. |
-| `snugcode update` | Memeriksa dan menginstal pembaruan snugcode terbaru dari GitHub. |
-| `snugcode autostart on\|off` | Mengaktifkan/menonaktifkan auto-start daemon saat user login OS. |
-| `snugcode clean` | Memindai & menghapus worktree, repo, dan log yatim (dibatalkan bila `sessions/index.json` tidak terbaca). |
-| `snugcode pin` | Mengganti PIN pairing dan membuka kunci lockout sekarang juga (restart daemon agar berlaku). |
-| `snugcode update --rollback` | Kembali ke versi sebelum pembaruan terakhir (instalasi npm). `--channel stable\|main` mengganti kanal pembaruan. |
-| `snugcode devices` | Melihat daftar perangkat HP yang saat ini terpasang (*paired*). |
-| `snugcode revoke <id\|all>` | Mencabut izin akses perangkat HP tertentu atau semua perangkat (restart daemon agar berlaku). |
-| `snugcode status` | Menampilkan ringkasan konfigurasi: runtime, relay, akun, model & model ringan, login GitHub, jumlah HP, status kunci PIN, keychain. |
-| `snugcode keychain on\|off\|status` | Mengenkripsi `secrets.json` dengan kunci di keychain OS / mengembalikannya ke teks biasa / status (lihat §8.G). |
-| `snugcode cloud` | Runner cloud: konfigurasi dari env (`daemon/runner.js`), daemon di bawah supervisor (`--no-supervise` untuk langsung). |
-| `snugcode help` | Daftar perintah. |
+| `snugcode` / `snug` | Opens the interactive Terminal UI in the current directory. |
+| `snugcode "prompt"` | Opens the TUI and sends an initial prompt right away. |
+| `snugcode --pick` | Opens the active session picker (including sessions created from the phone). |
+| `snugcode --computer` / `-c` | Opens the TUI with a Computer mode session in the current directory. |
+| `snugcode setup` | Re-runs the configuration guide (API key, model, GitHub, PIN). |
+| `snugcode login` | Signs in to GitHub again only (token revoked/expired); takes effect without a restart if the daemon is running. |
+| `snugcode connect <key> [--url URL]` | Connects a model API key; type & format detected automatically (through the daemon if running). |
+| `snugcode connect chatgpt` | ChatGPT sign-in through Codex (the daemon must be running); the code can be completed on the phone. |
+| `snugcode connect` / `snugcode disconnect <id>` | Lists model connections / removes one connection. |
+| `snugcode start` | Runs the daemon in the foreground of this terminal. |
+| `snugcode stop` | Stops the daemon running in the background. |
+| `snugcode restart` | Restarts the background daemon. |
+| `snugcode update` | Checks for and installs the latest snugcode update from GitHub. |
+| `snugcode autostart on\|off` | Enables/disables auto-starting the daemon at OS login. |
+| `snugcode clean` | Scans & removes orphaned worktrees, repos, and logs (aborted if `sessions/index.json` can't be read). |
+| `snugcode pin` | Changes the pairing PIN and unlocks the lockout right away (restart the daemon for it to take effect). |
+| `snugcode update --rollback` | Goes back to the version before the last update (npm installs). `--channel stable\|main` switches the update channel. |
+| `snugcode devices` | Lists the phones currently paired. |
+| `snugcode revoke <id\|all>` | Revokes access of a specific phone or all phones (restart the daemon for it to take effect). |
+| `snugcode status` | Shows a configuration summary: runtime, relay, account, model & light model, GitHub sign-in, number of phones, PIN lock status, keychain. |
+| `snugcode keychain on\|off\|status` | Encrypts `secrets.json` with a key in the OS keychain / turns it back into plain text / status (see §8.G). |
+| `snugcode cloud` | Cloud runner: configuration from env (`daemon/runner.js`), daemon under a supervisor (`--no-supervise` to run it directly). |
+| `snugcode help` | List of commands. |
 
-Flag non-interaktif `setup`: `--router`, `--key`, `--model`, `--github device|cred|pat|skip`, `--github-token <token>`, `--skip-github`, `--relay`, `--name`, `--pin`, `--relink`, `--no-browser`.
+Non-interactive `setup` flags: `--router`, `--key`, `--model`, `--github device|cred|pat|skip`, `--github-token <token>`, `--skip-github`, `--relay`, `--name`, `--pin`, `--relink`, `--no-browser`.
 
-### Struktur Penyimpanan Data Lokal (`~/.snugcode/`)
-- Lokasi bisa diganti dengan `SNUGCODE_HOME`; instalasi lama yang sudah punya `~/.pocketcode` tetap memakai folder itu. Runner Codespaces: `/workspaces/.snugcode`; Docker: `/data`.
-- `config.json`: Konfigurasi umum (nama mesin, ID, URL relay, router URL, default model, `runtime`, `runner`, `installedCommit`).
-- `secrets.json`: Kredensial lokal (token relay mesin, token GitHub, PIN PRS, device secret & langganan push HP terdaftar, token lokal IPC, token Codespaces runner). Izin berkas dibatasi (mode 600 di UNIX). Ditulis atomik (tmp + rename).
-- `daemon.log`, `daemon.pid`, `daemon.sock`: Log, ID proses, dan unix socket IPC untuk TUI (Windows: named pipe `\\.\pipe\pocketcode-<hash>`). Runner cloud: `cloud.log` & `install.log`.
-- `workspaces/<owner>__<repo>/`: Base clone (`_base`, disimpan 3 hari setelah sesi terakhir dihapus) dan direktori git worktree per sesi coding (`s-<id>`).
-- `sessions/`: `index.json` (daftar sesi; bila rusak disimpan sebagai `index.json.broken-*` dan sesi dipulihkan dari worktree) dan riwayat event JSONL per sesi (`<sessionId>.jsonl`).
-- `env/`: Template `.env` per repo. `bin/`: `cloudflared` dan shim pnpm/yarn (`bin/pm`). `tools/`: corepack, `codex/`, `gemini/` (dipasang saat pertama dibutuhkan).
-- `codex/`, `gemini/`: `CODEX_HOME` dan `GEMINI_CLI_HOME` milik snugcode. `secrets.key`: kunci DPAPI (Windows, `keychain on`). `runner-usage.json`: perkiraan core-jam runner Codespaces.
-- `claude/`: Direktori konfigurasi khusus Agent SDK (`CLAUDE_CONFIG_DIR`, termasuk `plans/`) terpisah dari instalasi Claude Code pengguna.
+### Local Data Storage Layout (`~/.snugcode/`)
+- The location can be changed with `SNUGCODE_HOME`; older installs that already have `~/.pocketcode` keep using that folder. Codespaces runners: `/workspaces/.snugcode`; Docker: `/data`.
+- `config.json`: general configuration (machine name, ID, relay URL, router URL, default model, `runtime`, `runner`, `installedCommit`).
+- `secrets.json`: local credentials (machine relay token, GitHub token, PIN PRS, device secrets & push subscriptions of paired phones, local IPC token, runner Codespaces token). File permissions restricted (mode 600 on UNIX). Written atomically (tmp + rename).
+- `daemon.log`, `daemon.pid`, `daemon.sock`: log, process ID, and the IPC unix socket for the TUI (Windows: named pipe `\\.\pipe\pocketcode-<hash>`). Cloud runners: `cloud.log` & `install.log`.
+- `workspaces/<owner>__<repo>/`: the base clone (`_base`, kept 3 days after the last session is deleted) and one git worktree directory per coding session (`s-<id>`).
+- `sessions/`: `index.json` (session list; if corrupted it is saved as `index.json.broken-*` and sessions are recovered from the worktrees) and the per-session JSONL event history (`<sessionId>.jsonl`).
+- `env/`: `.env` templates per repo. `bin/`: `cloudflared` and pnpm/yarn shims (`bin/pm`). `tools/`: corepack, `codex/`, `gemini/` (installed when first needed).
+- `codex/`, `gemini/`: snugcode's own `CODEX_HOME` and `GEMINI_CLI_HOME`. `secrets.key`: DPAPI key (Windows, `keychain on`). `runner-usage.json`: estimated Codespaces runner core-hours.
+- `claude/`: Agent SDK configuration directory (`CLAUDE_CONFIG_DIR`, including `plans/`), separate from the user's own Claude Code install.
 
 ---
 
-## 10. Status Pengembangan & Roadmap Masa Depan
+## 10. Development Status & Future Roadmap
 
-- [x] Enkripsi End-to-End dengan CPace (Ristretto255) & XChaCha20-Poly1305.
-- [x] Remote Self-Update & Deteksi Push Otomatis 1-Klik dari HP.
-- [x] Anti-Sleep System (Windows Away Mode, macOS Caffeinate, Linux systemd-inhibit).
-- [x] Dukungan Model Claude Opus 5.5, Sonnet 5.5 & Gemini via 9router.
-- [x] Normalisasi Otomatis Tool Name Suffix `_ide` via Local Loopback Proxy.
-- [x] Git Worktree Isolation & Stale Lock Cleanup.
-- [x] Prompt izin Write/Edit dengan mini-diff; deteksi push/`gh` yang lebih ketat.
-- [x] CI GitHub Actions (unit test + build web di Linux/Windows/macOS).
-- [x] Run & Preview: dev server latar belakang + tunnel bertoken ke HP + screenshot.
-- [x] Tool MCP agen untuk menjalankan dan melihat hasil UI sendiri.
-- [x] Web Push Notification saat PWA ditutup di latar belakang.
-- [x] Kirim gambar / screenshot ke agen dari kamera/galeri HP.
-- [x] AskUserQuestion, mode rencana, checkpoint & rewind per prompt.
-- [x] Runner cloud tanpa PC: GitHub Codespaces (dibuat & dinyalakan dari HP) dan Docker; setelan mesin (model & API key, PIN, perangkat) dari HP.
-- [x] Mode Komputer (sesi dengan akses seluruh PC) di HP dan terminal.
-- [x] Hook pelebar Read/Grep untuk model non-Claude (±3× lebih sedikit request model).
-- [x] Laporan tahap runner, progress bar dengan perkiraan sisa, hapus mesin dari daftar, sambung ulang izin Codespaces.
-- [x] Workflow Deploy (relay + PWA dari GitHub Actions).
-- [x] Koneksi multi-provider: login ChatGPT (Codex) & API key apa pun dengan deteksi otomatis; engine per model (Claude Agent SDK / Codex), penerjemah format OpenAI, sandbox OS untuk Codex.
-- [x] Engine Gemini CLI (ACP) untuk model Gemini, dan benchmark harness per model (`npm run bench` → `shared/engine-table.js`).
-- [x] Pengamanan: sandbox OS untuk auto-izin engine Claude, setelan proyek tidak dimuat, konfigurasi repo dilindungi, token relay terpisah jenis & bisa dicabut, konfirmasi penautan PC, CSP PWA, rate limit, kunci PIN berbatas waktu.
-- [x] Rilis bertag (kanal stable) + rollback; notifikasi push "runner berhenti".
-- [x] Perkiraan kuota Codespaces (core-jam dicatat runner) dan prebuild codespace (`onCreateCommand`, panduan di `.devcontainer/README.md`).
-- [x] Integrasi keychain OS (macOS Keychain / Secret Service / DPAPI) untuk `secrets.json`.
-- [x] Terminal interaktif PTY penuh di HP.
-- [x] File explorer/editor ringan dan review diff per hunk dengan komentar ke agen.
-- [x] Penautan PC yang tidak bisa dilewati, CSP `connect-src` sempit, token WebSocket lewat subprotocol, perpanjangan login, cloudflared terverifikasi, deploy setelah CI + build terverifikasi, docs/keamanan.md.
-- [x] Heartbeat & timeout RPC, kartu izin bertingkat risiko, preset otonomi, biaya & batas biaya sesi, izin dari notifikasi, pemasang satu baris, kontras WCAG AA.
-- [ ] Tunnel preview E2EE lewat relay sendiri. Ditunda: preview harus di origin terpisah dari PWA (kode preview satu origin bisa membaca token & secret perangkat di storage PWA), dan Service Worker tidak bisa meneruskan WebSocket HMR.
-- [ ] Amazon Bedrock & Google Vertex AI (proxy perlu penandatanganan SigV4 / token OAuth layanan).
+- [x] End-to-end encryption with CPace (Ristretto255) & XChaCha20-Poly1305.
+- [x] Remote self-update & automatic 1-tap push detection from the phone.
+- [x] Anti-sleep system (Windows Away Mode, macOS caffeinate, Linux systemd-inhibit).
+- [x] Support for Claude Opus 5.5, Sonnet 5.5 & Gemini via 9router.
+- [x] Automatic normalization of the `_ide` tool-name suffix via the local loopback proxy.
+- [x] Git worktree isolation & stale lock cleanup.
+- [x] Write/Edit permission prompts with mini-diffs; stricter push/`gh` detection.
+- [x] GitHub Actions CI (unit tests + web build on Linux/Windows/macOS).
+- [x] Run & Preview: background dev servers + token-protected tunnel to the phone + screenshots.
+- [x] Agent MCP tools to run and see its own UI.
+- [x] Web Push notifications when the PWA is closed in the background.
+- [x] Send images / screenshots to the agent from the phone's camera/gallery.
+- [x] AskUserQuestion, plan mode, per-prompt checkpoints & rewind.
+- [x] Cloud runner without a PC: GitHub Codespaces (created & started from the phone) and Docker; machine settings (models & API keys, PIN, devices) from the phone.
+- [x] Computer mode (sessions with access to the whole PC) on the phone and terminal.
+- [x] Read/Grep widening hook for non-Claude models (±3× fewer model requests).
+- [x] Runner stage reports, progress bars with time-left estimates, removing machines from the list, reconnecting Codespaces permission.
+- [x] Deploy workflow (relay + PWA from GitHub Actions).
+- [x] Multi-provider connections: ChatGPT sign-in (Codex) & any API key with automatic detection; engine per model (Claude Agent SDK / Codex), OpenAI format translator, OS sandbox for Codex.
+- [x] Gemini CLI engine (ACP) for Gemini models, and a per-model harness benchmark (`npm run bench` → `shared/engine-table.js`).
+- [x] Hardening: OS sandbox for Claude engine auto-approve, project settings not loaded, repo configuration protected, relay tokens separated by kind & revocable, PC linking confirmation, PWA CSP, rate limiting, time-limited PIN locks.
+- [x] Tagged releases (stable channel) + rollback; "runner stopped" push notifications.
+- [x] Codespaces quota estimate (core-hours tracked by the runner) and codespace prebuilds (`onCreateCommand`, guide in `.devcontainer/README.md`).
+- [x] OS keychain integration (macOS Keychain / Secret Service / DPAPI) for `secrets.json`.
+- [x] Full interactive PTY terminal on the phone.
+- [x] Lightweight file explorer/editor and per-hunk diff review with comments to the agent.
+- [x] Unbypassable PC linking, narrow CSP `connect-src`, WebSocket token via subprotocol, sign-in renewal, verified cloudflared, deploy after CI + verified builds, docs/security.md.
+- [x] Heartbeat & RPC timeouts, risk-graded permission cards, autonomy presets, session cost & cost limits, permissions from notifications, one-line installer, WCAG AA contrast.
+- [x] Landing page at snugcode.dev, app (snugcode agent) at snugcode.dev/agent/, English UI & docs.
+- [ ] E2EE preview tunnel through our own relay. Postponed: the preview must be on an origin separate from the PWA (same-origin preview code could read tokens & device secrets in the PWA's storage), and a Service Worker can't forward HMR WebSockets.
+- [ ] Amazon Bedrock & Google Vertex AI (the proxy needs SigV4 signing / service OAuth tokens).

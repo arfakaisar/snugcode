@@ -1,21 +1,21 @@
-// Klien GitHub Codespaces untuk runner cloud (tanpa DOM, bisa diuji di Node).
+// GitHub Codespaces client for cloud runners (no DOM, testable in Node).
 //
-// Runner = codespace dari fork repo snugcode milik pengguna (berisi .devcontainer/ yang menjalankan
-// `snugcode cloud`). Token mesin, PIN, dan URL relay dikirim sebagai Codespaces user secret yang
-// dienkripsi di HP (sealed box ke public key akun GitHub), dibatasi ke repo fork itu saja.
-// Token GitHub di sini ber-scope `codespace` dan hanya disimpan di HP.
+// Runner = a codespace from the user's fork of the snugcode repo (its .devcontainer/ runs
+// `snugcode cloud`). Machine token, PIN, and relay URL are sent as Codespaces user secrets
+// encrypted on the phone (sealed box to the GitHub account's public key), scoped to that fork only.
+// The GitHub token here has the `codespace` scope and is stored only on the phone.
 import { sealedBox } from '../shared/sealedbox.js';
 import { b64, unb64 } from '../shared/crypto.js';
 
 const API = 'https://api.github.com';
 export const SECRET_NAMES = ['SNUGCODE_MACHINE_TOKEN', 'SNUGCODE_PAIR_PIN', 'SNUGCODE_RELAY'];
-// Nama tampilan codespace menyimpan ID mesin: runner bisa ditemukan lagi dari HP lain.
+// The codespace display name holds the machine ID: the runner can be found again from another phone.
 export const displayName = (mid) => 'snugcode ' + mid;
-// Batas maksimal GitHub. Runner sendiri berhenti jauh lebih cepat saat menganggur (lihat daemon/runner.js);
-// batas panjang ini hanya pengaman agar tugas agen yang lama tidak terhenti di tengah jalan.
+// GitHub's maximum. The runner stops itself much sooner when idle (see daemon/runner.js);
+// this long limit is only a safeguard so long agent tasks aren't cut off midway.
 export const IDLE_TIMEOUT = 240;
 
-// PIN acak untuk pairing otomatis (6–12 huruf/angka, lihat PIN_RE). Tanpa huruf/angka yang mirip.
+// Random PIN for automatic pairing (6–12 letters/digits, see PIN_RE). No look-alike characters.
 export function randomPin(n = 10) {
   const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
   let out = '';
@@ -26,7 +26,7 @@ export function randomPin(n = 10) {
 }
 
 export class Codespaces {
-  // onAuthError: dipanggil saat GitHub menolak token (401) — mis. untuk membuang token lama di HP.
+  // onAuthError: called when GitHub rejects the token (401) — e.g. to drop the stale token on the phone.
   /** @param {string} token @param {{ fetchImpl?: typeof fetch, onAuthError?: () => void }} [opts] */
   constructor(token, { fetchImpl = globalThis.fetch.bind(globalThis), onAuthError } = {}) {
     this.token = token;
@@ -48,7 +48,7 @@ export class Codespaces {
     if (r.status === 204 || r.status === 202) return r.status === 202 ? await r.json().catch(() => null) : null;
     const data = await r.json().catch(() => null);
     if (!r.ok) {
-      const e = /** @type {Error & { status?: number }} */ (new Error(r.status === 401 ? 'Izin GitHub Codespaces di HP ini tidak berlaku lagi (dicabut atau kedaluwarsa).' : `GitHub ${r.status}: ${data?.message || 'gagal'}`));
+      const e = /** @type {Error & { status?: number }} */ (new Error(r.status === 401 ? 'This phone’s GitHub Codespaces access is no longer valid (revoked or expired).' : `GitHub ${r.status}: ${data?.message || 'failed'}`));
       e.status = r.status;
       if (r.status === 401) this.onAuthError?.();
       throw e;
@@ -60,7 +60,7 @@ export class Codespaces {
     return this.req('GET', '/user');
   }
 
-  // Repo runner milik pengguna: repo upstream itu sendiri (pemiliknya), fork bernama sama, atau fork yang diganti namanya.
+  // The user's runner repo: the upstream itself (its owner), a same-named fork, or a renamed fork.
   async findRunnerRepo(login, upstream) {
     const [owner, name] = upstream.split('/');
     const same = (n) => !!n && n.toLowerCase() === upstream.toLowerCase();
@@ -75,7 +75,7 @@ export class Codespaces {
     return forks.find((f) => f.owner?.login?.toLowerCase() === login.toLowerCase()) || null;
   }
 
-  // Secret dienkripsi di sini; GitHub hanya menyimpan ciphertext dan menyuntikkannya ke codespace repo `repoId`.
+  // Secrets are encrypted here; GitHub only stores ciphertext and injects it into codespaces of repo `repoId`.
   async setSecrets(values, repoId) {
     const { key_id, key } = await this.req('GET', '/user/codespaces/secrets/public-key');
     const pk = unb64(key);
@@ -104,7 +104,7 @@ export class Codespaces {
     return this.req('GET', `/user/codespaces/${encodeURIComponent(name)}`);
   }
 
-  // Codespace runner untuk mesin `mid`: dari nama yang diingat, atau dicari lewat nama tampilan.
+  // Runner codespace for machine `mid`: by the remembered name, or looked up by display name.
   async find(mid, name) {
     if (name) {
       try {
@@ -116,7 +116,7 @@ export class Codespaces {
     return (await this.list()).find((c) => c.display_name === displayName(mid)) || null;
   }
 
-  // 409 = sedang menyala / sudah menyala: bukan kegagalan.
+  // 409 = starting / already running: not a failure.
   async start(name) {
     try {
       return await this.req('POST', `/user/codespaces/${encodeURIComponent(name)}/start`);
@@ -144,22 +144,22 @@ export class Codespaces {
   }
 }
 
-// Status codespace → teks singkat untuk layar HP.
+// Codespace state → short text for the phone screen.
 export function stateText(state) {
   return (
     {
-      Queued: 'mengantre di GitHub…',
-      Provisioning: 'menyiapkan mesin…',
-      Created: 'dibuat…',
-      Starting: 'menyala…',
-      Rebuilding: 'membangun ulang…',
-      Updating: 'memperbarui…',
-      Available: 'menyala · menunggu snugcode tersambung…',
-      ShuttingDown: 'sedang berhenti…',
-      Shutdown: 'berhenti',
-      Failed: 'gagal dibuat',
-      Unavailable: 'tidak tersedia',
-      Deleted: 'sudah dihapus',
+      Queued: 'queued at GitHub…',
+      Provisioning: 'preparing the machine…',
+      Created: 'created…',
+      Starting: 'starting…',
+      Rebuilding: 'rebuilding…',
+      Updating: 'updating…',
+      Available: 'running · waiting for snugcode to connect…',
+      ShuttingDown: 'stopping…',
+      Shutdown: 'stopped',
+      Failed: 'failed to create',
+      Unavailable: 'unavailable',
+      Deleted: 'deleted',
     }[state] || String(state || '…').toLowerCase()
   );
 }

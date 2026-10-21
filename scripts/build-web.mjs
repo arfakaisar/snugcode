@@ -77,7 +77,7 @@ const stamped = sw.replace(/const CACHE = '[^']*';/, `const CACHE = 'snugcode-${
 if (stamped === sw) throw new Error('sw.js: baris `const CACHE = ...` tidak ditemukan');
 fs.writeFileSync(path.join(out, 'sw.js'), stamped);
 // SHA-256 tiap file yang disajikan (build.json, ikut di rilis GitHub): siapa pun bisa membandingkan PWA yang
-// dilayani relay dengan hasil build dari kode sumber (`npm ci && npm run build:web`). Lihat docs/keamanan.md.
+// dilayani relay dengan hasil build dari kode sumber (`npm ci && npm run build:web`). Lihat docs/security.md.
 const files = {};
 const walk = (dir) => {
   for (const f of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {

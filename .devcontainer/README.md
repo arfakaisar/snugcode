@@ -1,32 +1,32 @@
 # snugcode runner
 
-Codespace ini menjalankan **daemon snugcode** — agen Claude Code yang kamu kendalikan dari aplikasi
-snugcode di HP. Kamu tidak perlu melakukan apa pun di sini.
+This codespace runs the **snugcode daemon** — a Claude Code agent you control from the snugcode
+app on your phone. You don't need to do anything here.
 
-- Log runner: `/workspaces/.snugcode/cloud.log`; log pemasangan: `install.log` di folder yang sama
-  (bila `/workspaces` tidak bisa ditulis, folder data pindah ke `~/.snugcode`).
-- Tahap dan error saat runner menyala juga dikirim ke aplikasi, jadi biasanya log tidak perlu dibuka.
+- Runner log: `/workspaces/.snugcode/cloud.log`; install log: `install.log` in the same folder
+  (if `/workspaces` isn't writable, the data folder moves to `~/.snugcode`).
+- Stages and errors while the runner starts are also sent to the app, so you usually don't need the logs.
 - Status: `snugcode status`
-- Daemon yang mati dinyalakan lagi oleh supervisor; SIGTERM ke supervisor diabaikan (`pkill node` tidak mematikan
-  runner). Untuk menghentikannya: `snugcode stop`. Bila runner tetap tidak tersambung, aplikasi menyalakan ulang
-  codespace ini sekali secara otomatis.
-- Runner berhenti sendiri setelah 30 menit tidak dipakai (bisa diubah di aplikasi: Pengaturan runner →
-  Berhenti otomatis), dan menyala lagi saat kamu membuka runner "Cloud" di aplikasi.
-- Repo yang dikerjakan agen ada di `/workspaces/.snugcode/workspaces/`, satu worktree per sesi.
-- Jangan hapus codespace ini dari GitHub bila masih dipakai; untuk berhenti memakai runner, hapus dari
-  aplikasi (daftar mesin → ⋯ → Hapus) agar codespace, secret, dan mesinnya ikut terhapus.
+- A daemon that dies is restarted by the supervisor; SIGTERM to the supervisor is ignored (`pkill node` doesn't kill
+  the runner). To stop it: `snugcode stop`. If the runner still won't connect, the app restarts
+  this codespace once automatically.
+- The runner stops itself after 30 idle minutes (configurable in the app: Runner settings →
+  Auto stop), and starts again when you open the "Cloud" runner in the app.
+- The repos the agent works on live in `/workspaces/.snugcode/workspaces/`, one worktree per session.
+- Don't delete this codespace from GitHub while it's still in use; to stop using the runner, remove it from
+  the app (machine list → ⋯ → Remove) so the codespace, secret, and machine are removed too.
 
-## Prebuild (opsional): runner baru lebih cepat
+## Prebuild (optional): faster new runners
 
-Tanpa prebuild, membuat runner butuh ±3–5 menit (memasang Chromium, bubblewrap, dan snugcode). Dengan prebuild,
-semua itu sudah ada di snapshot dan runner menyala dalam ±1 menit. Prebuild diatur di setelan repo **fork**-mu
-(GitHub tidak menyediakan API untuk ini):
+Without a prebuild, creating a runner takes ~3–5 minutes (installing Chromium, bubblewrap, and snugcode). With a prebuild,
+all of that is already in the snapshot and the runner starts in ~1 minute. Prebuilds are configured in your **fork**'s
+repo settings (GitHub has no API for this):
 
-1. Buka fork snugcode-mu → **Settings → Codespaces → Set up prebuild**.
-2. Branch `main`, konfigurasi `.devcontainer/devcontainer.json`, region yang sama dengan codespace-mu.
-3. Trigger: **On configuration change** (prebuild hanya dibuat ulang saat `.devcontainer/` berubah; snugcode
-   memperbarui dirinya sendiri setelah menyala).
+1. Open your snugcode fork → **Settings → Codespaces → Set up prebuild**.
+2. Branch `main`, configuration `.devcontainer/devcontainer.json`, the same region as your codespace.
+3. Trigger: **On configuration change** (the prebuild is only rebuilt when `.devcontainer/` changes; snugcode
+   updates itself after starting).
 
-Snapshot prebuild memakai kuota penyimpanan Codespaces (gratis 15 GB-bulan untuk akun Free), dan setiap build
-memakai core-jam Actions. Pemakaian core-jam runner bulan ini (perkiraan) tampil di aplikasi: menu runner →
-Runner cloud.
+Prebuild snapshots use Codespaces storage quota (15 GB-month free on Free accounts), and every build
+uses Actions core-hours. This month's runner core-hour usage (estimate) is shown in the app: runner menu →
+Cloud runner.

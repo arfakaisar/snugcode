@@ -1,12 +1,12 @@
-// Kebijakan izin agen yang dipakai bersama engine Claude (canUseTool) dan Codex (decideCodex):
-// folder data snugcode, file konfigurasi repo yang bisa mengubah perilaku tool, push ke remote,
-// dan aturan "Selalu". Fungsi murni: tidak bergantung pada state sesi.
+// Agent permission policy shared by the Claude engine (canUseTool) and Codex (decideCodex):
+// the snugcode data folder, repo config files that can change tool behavior, pushes to remotes,
+// and "Always" rules. Pure functions: no dependency on session state.
 import fs from 'node:fs';
 import path from 'node:path';
 import { HOME, WORKSPACES, CLAUDE_DIR } from './config.js';
 import { DEV_START } from './devtools.js';
 
-// Diteruskan ke SDK lewat settings.plansDirectory, jadi lokasinya pasti (bukan ~/.claude milik pengguna).
+// Passed to the SDK via settings.plansDirectory, so its location is fixed (not the user's ~/.claude).
 export const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 export const isInside = (p, dir) => {
@@ -14,15 +14,15 @@ export const isInside = (p, dir) => {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
 
-// Folder data snugcode berisi key 9router, token GitHub, secret perangkat, template .env repo,
-// dan binary yang dijalankan daemon: agen tidak boleh menyentuhnya (termasuk saat auto-izin).
-// Pengecualian: worktree sesi, folder plans, dan BACA folder config Claude milik agen sendiri
-// (output tool besar disimpan Claude Code di sana lalu dibaca kembali). Menulis ke folder config
-// Claude tetap ditolak: settings.json di sana bisa memasang hook yang lolos dari sistem izin.
+// The snugcode data folder holds 9router keys, GitHub tokens, device secrets, repo .env templates,
+// and binaries the daemon runs: the agent must never touch it (including under auto-approve).
+// Exceptions: session worktrees, the plans folder, and READING the agent's own Claude config folder
+// (Claude Code stores large tool output there and reads it back). Writing to the Claude config
+// folder is still denied: a settings.json there could install hooks that bypass the permission system.
 export const isSensitivePath = (p, { write = false } = {}) =>
   within(p, HOME) && !within(p, WORKSPACES) && !within(p, PLANS_DIR) && (write || !within(p, CLAUDE_DIR));
-// Path yang sudah di-realpath (file explorer) dibandingkan juga dengan realpath folder data: di macOS
-// folder sementara /var/… adalah symlink ke /private/var/…, begitu juga home yang dipindah lewat symlink.
+// Paths already realpath'd (file explorer) are also compared with the data folder's realpath: on macOS
+// the temp folder /var/… is a symlink to /private/var/…, as is a home moved via symlink.
 const realDirs = new Map();
 function realDir(dir) {
   let r = realDirs.get(dir);
@@ -30,19 +30,19 @@ function realDir(dir) {
   try {
     r = fs.realpathSync(dir);
   } catch {
-    return dir; // belum ada: jangan di-cache, bisa dibuat kemudian
+    return dir; // doesn't exist yet: don't cache, it may be created later
   }
   realDirs.set(dir, r);
   return r;
 }
 const within = (p, dir) => isInside(p, dir) || isInside(p, realDir(dir));
-// Hanya penangkap kasus jelas untuk Bash; perlindungan sebenarnya adalah sandbox OS (lihat sandbox.js).
+// Only catches obvious cases for Bash; the real protection is the OS sandbox (see sandbox.js).
 export const SECRET_CMD_RE = /secrets\.(?:json|key)|\.(?:snugcode|pocketcode)[\\/]+(?:secrets|config|sessions|claude|codex|gemini|env|bin|tools)\b|\$\{?(?:SNUGCODE|POCKETCODE)_HOME\b/i;
 
-// File di repo yang mengubah perilaku tool tanpa dijalankan pengguna: setelan & hook Claude Code
-// (.claude/), konfigurasi Codex (.codex/) & Gemini CLI (.gemini/), server MCP proyek (.mcp.json), dan isi .git (hook, config
-// core.fsmonitor/hooksPath yang dijalankan saat daemon memanggil git). Mengubahnya selalu bertanya,
-// termasuk saat auto-izin: README/issue yang berisi prompt injection tidak boleh memasang hook diam-diam.
+// Repo files that change tool behavior without the user running anything: Claude Code settings & hooks
+// (.claude/), Codex (.codex/) & Gemini CLI (.gemini/) config, project MCP servers (.mcp.json), and .git contents (hooks, config
+// core.fsmonitor/hooksPath that run when the daemon calls git). Changing them always asks,
+// even under auto-approve: a README/issue with a prompt injection must not silently install hooks.
 const PROTECTED_DIRS = new Set(['.git', '.claude', '.codex', '.gemini']);
 export function isProtectedRepoPath(p, cwd) {
   const rel = path.relative(cwd, p);
@@ -51,7 +51,7 @@ export function isProtectedRepoPath(p, cwd) {
   return parts.some((x) => PROTECTED_DIRS.has(x.toLowerCase())) || (parts.length === 1 && parts[0].toLowerCase() === '.mcp.json');
 }
 
-// Path yang disentuh tool file (Glob dengan pola absolut: bagian sebelum karakter glob pertama).
+// Paths touched by file tools (Glob with an absolute pattern: the part before the first glob character).
 export function toolPaths(tool, input = {}, cwd) {
   const out = [input.file_path, input.notebook_path, input.path].filter((p) => typeof p === 'string' && p);
   if (tool === 'Glob' && typeof input.pattern === 'string' && path.isAbsolute(input.pattern)) out.push(input.pattern.split(/[*?[{]/)[0] || input.pattern);
@@ -67,20 +67,20 @@ export const isLocalUrl = (u) => {
   }
 };
 
-// Perintah yang menulis ke remote selalu meminta izin, termasuk saat auto-izin aktif.
-// Opsi global git di depan subcommand ikut dikenali: `git -C dir push`, `git -c k=v push`.
+// Commands that write to a remote always ask, even with auto-approve on.
+// git global options before the subcommand are recognized too: `git -C dir push`, `git -c k=v push`.
 const GIT_PUSH_RE = /\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:"[^"]*"|'[^']*'|\S+)|--?[\w-]+(?:=(?:"[^"]*"|'[^']*'|\S+))?))*\s+push\b/i;
 const GH_WRITE_RE = /\bgh(?:\.exe)?\s+(?:pr\s+(?:create|merge)|release\s+create|repo\s+(?:create|delete|fork))\b/i;
 export const isRemoteWrite = (tool, input) => (tool === 'Bash' || tool === DEV_START) && (GIT_PUSH_RE.test(input?.command || '') || GH_WRITE_RE.test(input?.command || ''));
-// Perintah yang minta dijalankan di luar sandbox OS (Claude Code mengulang perintah yang gagal karena sandbox).
+// Commands asking to run outside the OS sandbox (Claude Code retries commands that failed due to the sandbox).
 export const escapesSandbox = (tool, input) => tool === 'Bash' && input?.dangerouslyDisableSandbox === true;
-// Push, perintah yang menyentuh kredensial / keluar dari sandbox, pertanyaan, dan rencana tidak pernah bisa "Selalu".
+// Pushes, commands touching credentials / escaping the sandbox, questions, and plans can never be "Always".
 export const neverAlways = (tool, input) =>
   isRemoteWrite(tool, input) || SECRET_CMD_RE.test(input?.command || '') || escapesSandbox(tool, input) || tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
 
-// Aturan "Selalu" dari saran Claude Code untuk permintaan izin ini, mis. Bash(npm test *):
-// cukup perintah sejenis yang lolos, bukan semua Bash. Tanpa saran aturan (Edit di luar
-// worktree, tool MCP, …) "Selalu" berlaku untuk seluruh tool tersebut.
+// The "Always" rule from Claude Code's suggestion for this permission request, e.g. Bash(npm test *):
+// only similar commands pass, not all of Bash. Without a suggested rule (Edit outside the
+// worktree, MCP tools, …) "Always" applies to the whole tool.
 /** @returns {{ toolName: string, ruleContent: string }[]} */
 export function suggestedRules(tool, suggestions) {
   return (Array.isArray(suggestions) ? suggestions : [])
@@ -89,8 +89,8 @@ export function suggestedRules(tool, suggestions) {
     .filter((r) => r?.toolName === tool && typeof r.ruleContent === 'string' && r.ruleContent);
 }
 export const ruleText = (r) => `${r.toolName}(${r.ruleContent})`;
-// Aturan "Bash(npm test *)" cocok dengan perintah berawalan "npm test" (dipakai engine Codex;
-// engine Claude mencocokkannya sendiri lewat settings.permissions.allow).
+// The rule "Bash(npm test *)" matches commands starting with "npm test" (used by the Codex engine;
+// the Claude engine matches it itself via settings.permissions.allow).
 export function ruleMatches(rule, command) {
   const m = String(rule).match(/^Bash\((.*)\)$/);
   if (!m) return false;

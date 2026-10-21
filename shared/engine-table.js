@@ -1,11 +1,11 @@
-// Engine bawaan per jenis koneksi + pola model, di atas aturan format di engineFor (shared/providers.js).
-// Diisi dari hasil benchmark (`npm run bench`, scripts/bench.mjs): tugas yang sama dijalankan di tiap
-// engine untuk satu model, lalu engine dengan tingkat lulus tertinggi (seri: lebih cepat, lebih hemat)
-// dipilih. Baris tanpa hasil bench memakai alasan desain ("harness resmi pembuat model").
-// Bisa ditimpa per mesin dengan env SNUGCODE_ENGINE=claude (paksa Claude Agent SDK).
+// Default engine per connection type + model pattern, on top of the format rules in engineFor (shared/providers.js).
+// Filled from benchmark results (`npm run bench`, scripts/bench.mjs): the same tasks run on each
+// engine for one model, and the engine with the highest pass rate (ties: faster, cheaper) is
+// picked. Rows without bench results use the design rationale ("the model maker's official harness").
+// Can be overridden per machine with env SNUGCODE_ENGINE=claude (force the Claude Agent SDK).
 /** @type {{ kind: string, model: string, engine: 'claude' | 'codex' | 'gemini', why: string }[]} */
 export const ENGINE_TABLE = [
-  // Gemini CLI = harness resmi Google untuk Gemini (format API asli, tanpa penerjemah). Butuh API key
-  // Google AI (koneksi `gemini`); router yang hanya melayani format OpenAI/Anthropic tetap lewat Claude Agent SDK.
-  { kind: 'gemini', model: '^gemini-', engine: 'gemini', why: 'harness resmi Google' },
+  // Gemini CLI = Google's official harness for Gemini (native API format, no translator). Needs a Google AI
+  // API key (`gemini` connection); routers that only speak OpenAI/Anthropic format still go through the Claude Agent SDK.
+  { kind: 'gemini', model: '^gemini-', engine: 'gemini', why: 'Google\'s official harness' },
 ];

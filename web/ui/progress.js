@@ -1,17 +1,17 @@
-// Progress untuk proses lama (runner cloud, pembaruan PC, clone repo, push): bar yang terus bergerak,
-// tahap aktif, waktu berjalan, dan perkiraan sisa — supaya jelas prosesnya berjalan, bukan macet.
+// Progress for long operations (cloud runner, PC update, repo clone, push): an always-moving bar,
+// active step, elapsed time, and estimated time left — so it's clear the process is running, not stuck.
 //
-// Tahap ditentukan pemanggil dari sinyal nyata (status codespace, laporan runner, balasan RPC). Di dalam
-// satu tahap bar maju mengikuti perkiraan durasinya dan melambat mendekati akhir, jadi tidak pernah
-// "selesai" sebelum tahapnya benar-benar selesai. Durasi tiap tahap dipelajari dari proses sebelumnya
-// di HP ini (localStorage), sehingga perkiraan makin tepat.
+// Steps are driven by the caller from real signals (codespace state, runner reports, RPC replies). Within
+// a step the bar follows its estimated duration and slows near the end, so it never looks "done" before
+// the step really is. Each step's duration is learned from earlier runs on this phone (localStorage),
+// so estimates get better over time.
 import { store } from '../conn.js';
 import { h, ic } from './dom.js';
 import { fmtClock, fmtLeft, learn, overall, remaining } from '../eta.js';
 
 /**
- * @param {string} flow kunci untuk durasi yang dipelajari, mis. 'cloud-create'
- * @param {{ id: string, label: string, est: number }[]} steps est = perkiraan detik
+ * @param {string} flow key for learned durations, e.g. 'cloud-create'
+ * @param {{ id: string, label: string, est: number }[]} steps est = estimated seconds
  * @param {{ now?: () => number }} [opts]
  */
 export function progress(flow, steps, { now = () => Date.now() } = {}) {
@@ -43,12 +43,12 @@ export function progress(flow, steps, { now = () => Date.now() } = {}) {
     const e = ests[cur];
     const inStep = (now() - stepAt) / 1000;
     const left = remaining(ests, cur, inStep);
-    time.textContent = `${fmtClock(elapsed)} · ${inStep > e * 1.3 && left < 5 ? 'sebentar lagi…' : fmtLeft(left)}`;
-    // Jauh melewati perkiraan: tetap terlihat hidup, dengan keterangan jujur.
+    time.textContent = `${fmtClock(elapsed)} · ${inStep > e * 1.3 && left < 5 ? 'almost there…' : fmtLeft(left)}`;
+    // Far past the estimate: keep looking alive, with an honest note.
     el.classList.toggle('slow', inStep > e * 2 + 20);
   };
   const paint = () => {
-    label.textContent = finished ? 'Selesai' : steps[cur].label;
+    label.textContent = finished ? 'Done' : steps[cur].label;
     items.forEach((li, i) => {
       li.className = finished || i < cur ? 'done' : i === cur ? 'now' : '';
       li.firstChild.replaceChildren(finished || i < cur ? ic('check') : i === cur ? h('span', { class: 'spinner' }) : '');
@@ -60,7 +60,7 @@ export function progress(flow, steps, { now = () => Date.now() } = {}) {
 
   return {
     el,
-    /** Pindah ke tahap `id` (tahap sebelumnya dianggap selesai). Tahap yang sama/sebelumnya diabaikan. */
+    /** Move to step `id` (earlier steps count as done). The same or an earlier step is ignored. */
     step(id, text) {
       const i = steps.findIndex((s) => s.id === id);
       if (finished || failed || i < 0) return;
@@ -75,7 +75,7 @@ export function progress(flow, steps, { now = () => Date.now() } = {}) {
     note(text) {
       detail.textContent = text || '';
     },
-    // Selesai: durasi nyata tiap tahap dicatat (rata-rata bergerak) untuk perkiraan berikutnya.
+    // Done: each step's real duration is recorded (moving average) for the next estimate.
     done(text) {
       if (finished) return;
       took[steps[cur].id] = (now() - stepAt) / 1000;

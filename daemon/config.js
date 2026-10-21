@@ -1,22 +1,22 @@
-// Penyimpanan state daemon di ~/.snugcode.
-//   config.json  : pengaturan biasa (relay, model, nama PC)
-//   secrets.json : token & kunci (izin file 600 di macOS/Linux)
+// Daemon state storage in ~/.snugcode.
+//   config.json  : regular settings (relay, model, PC name)
+//   secrets.json : tokens & keys (file mode 600 on macOS/Linux)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { isSealed, openSealed, seal, enableKeychain, disableKeychain } from './keychain.js';
 
-// Instalasi lama (sebelum ganti nama dari pocketcode) tetap memakai ~/.pocketcode bila folder itu sudah ada:
-// worktree, riwayat agen, dan pairing HP tersimpan dengan path absolut di dalamnya.
+// Old installs (before the rename from pocketcode) keep using ~/.pocketcode if that folder exists:
+// worktrees, agent history, and phone pairings are stored there with absolute paths.
 const LEGACY_HOME = path.join(os.homedir(), '.pocketcode');
 const NEW_HOME = path.join(os.homedir(), '.snugcode');
 export const HOME =
   process.env.SNUGCODE_HOME || process.env.POCKETCODE_HOME || (!fs.existsSync(NEW_HOME) && fs.existsSync(LEGACY_HOME) ? LEGACY_HOME : NEW_HOME);
 
-// Kanal lokal daemon <-> terminal (TUI): named pipe di Windows, unix socket di
-// macOS/Linux. Unik per folder data agar beberapa instalasi tidak bentrok. Prefiks 'pocketcode-' sengaja
-// dipertahankan: terminal versi baru tetap bisa bicara dengan daemon yang masih versi lama.
+// Local daemon <-> terminal (TUI) channel: a named pipe on Windows, a unix socket on
+// macOS/Linux. Unique per data folder so multiple installs don't clash. The 'pocketcode-' prefix is deliberately
+// kept: newer terminals can still talk to a daemon that's still on an old version.
 export const IPC_PATH =
   process.platform === 'win32'
     ? '\\\\.\\pipe\\pocketcode-' + createHash('sha1').update(HOME.toLowerCase()).digest('hex').slice(0, 12)
@@ -36,9 +36,9 @@ function readJson(file, fallback) {
   }
 }
 
-// Tulis atomik (tmp + rename): crash, mati listrik, atau disk penuh di tengah penulisan
-// tidak pernah meninggalkan file yang terpotong. Rename di Windows bisa sesaat ditolak
-// (EPERM/EBUSY) bila file sedang dibaca antivirus/indexer, jadi dicoba ulang sebentar.
+// Atomic write (tmp + rename): a crash, power loss, or full disk mid-write
+// never leaves a truncated file. Rename on Windows can be briefly refused
+// (EPERM/EBUSY) while antivirus/indexers read the file, so it's retried for a moment.
 export function writeJson(file, data, mode, { pretty = true } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
@@ -53,9 +53,9 @@ export function writeJson(file, data, mode, { pretty = true } = {}) {
   }
 }
 
-// Daftar sesi (sessions/index.json). `ok: false` berarti file ADA tapi tidak terbaca: pemanggil
-// wajib menganggap daftar sesi tidak diketahui (jangan jalankan pembersih yang menghapus
-// worktree "yatim" berdasarkan daftar kosong). File rusak disimpan sebagai cadangan.
+// Session list (sessions/index.json). `ok: false` means the file EXISTS but can't be read: callers
+// must treat the session list as unknown (don't run a cleaner that deletes
+// "orphan" worktrees based on an empty list). A corrupted file is kept as a backup.
 export const SESSION_INDEX = path.join(SESSIONS_DIR, 'index.json');
 export function readSessionIndex({ quarantine = false } = {}) {
   let raw;
@@ -83,16 +83,16 @@ export function saveConfig(cfg) {
   writeJson(CONFIG_FILE, cfg, 0o644);
 }
 
-// secrets.json bisa terenkripsi dengan kunci di keychain OS (`snugcode keychain on`, lihat keychain.js).
-// Gagal membuka file terenkripsi = error (bukan secrets kosong yang lalu menimpa file aslinya).
+// secrets.json may be encrypted with a key in the OS keychain (`snugcode keychain on`, see keychain.js).
+// Failing to open an encrypted file = an error (not empty secrets that then overwrite the real file).
 export function loadSecrets() {
   let raw = readJson(SECRETS_FILE, {});
   if (isSealed(raw)) raw = openSealed(raw, HOME);
   return { devices: {}, pinFails: 0, ...raw };
 }
 
-// Kunci pairing PIN: setelah 5 percobaan gagal, pairing dikunci sementara (15 menit, berlipat dua tiap
-// kunci berikutnya, maks ±16 jam), bukan permanen. Pairing yang berhasil / PIN baru membuka kunci.
+// PIN pairing lockout: after 5 failed attempts pairing is locked temporarily (15 minutes, doubling with each
+// subsequent lock, max ~16 hours), not permanently. A successful pairing / new PIN unlocks it.
 export const MAX_PIN_FAILS = 5;
 const PIN_LOCK_MS = 15 * 60 * 1000;
 export function resetPinLock(sec) {
@@ -101,11 +101,11 @@ export function resetPinLock(sec) {
   delete sec.pinLockouts;
 }
 export const pinLockedUntil = (sec, now = Date.now()) => (sec.pinLockUntil > now ? sec.pinLockUntil : 0);
-/** Catat satu percobaan pairing. @returns {{ ok: true, left: number } | { ok: false, until: number }} */
+/** Record one pairing attempt. @returns {{ ok: true, left: number } | { ok: false, until: number }} */
 export function pinAttempt(sec, now = Date.now()) {
   const until = pinLockedUntil(sec, now);
   if (until) return { ok: false, until };
-  // Kunci sudah lewat (atau kunci permanen dari versi lama): mulai putaran baru.
+  // The lock has expired (or a permanent lock from an old version): start a new round.
   if (sec.pinFails >= MAX_PIN_FAILS) sec.pinFails = 0;
   sec.pinFails = (sec.pinFails || 0) + 1;
   if (sec.pinFails >= MAX_PIN_FAILS) {
@@ -114,8 +114,8 @@ export function pinAttempt(sec, now = Date.now()) {
   }
   return { ok: true, left: MAX_PIN_FAILS - sec.pinFails };
 }
-// Mode (terenkripsi atau tidak) mengikuti file di disk, jadi `snugcode keychain on|off` saat daemon
-// berjalan langsung berlaku untuk penyimpanan berikutnya daemon itu.
+// The mode (encrypted or not) follows the file on disk, so `snugcode keychain on|off` while the daemon
+// runs applies right away to that daemon's next save.
 export function saveSecrets(sec) {
   const cur = readJson(SECRETS_FILE, null);
   writeJson(SECRETS_FILE, isSealed(cur) ? seal(sec, HOME, cur.kc) : sec, 0o600);
@@ -123,32 +123,32 @@ export function saveSecrets(sec) {
 
 export const secretsSealed = () => isSealed(readJson(SECRETS_FILE, null));
 
-/** @param {boolean} on @returns {string} nama keychain yang dipakai / dilepas */
+/** @param {boolean} on @returns {string} name of the keychain used / released */
 export function setKeychain(on) {
   const cur = readJson(SECRETS_FILE, {});
   const sec = loadSecrets();
   if (on) {
-    if (isSealed(cur)) return 'sudah aktif';
+    if (isSealed(cur)) return 'already on';
     const b = enableKeychain(HOME);
     writeJson(SECRETS_FILE, seal(sec, HOME, b.name), 0o600);
     return b.label;
   }
-  if (!isSealed(cur)) return 'sudah mati';
+  if (!isSealed(cur)) return 'already off';
   writeJson(SECRETS_FILE, sec, 0o600);
   disableKeychain(HOME);
-  return 'mati';
+  return 'off';
 }
 
 export function ensureDirs() {
   for (const d of [HOME, WORKSPACES, SESSIONS_DIR, CLAUDE_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 
-// Runner cloud (Codespaces / container): daemon yang sama, tanpa fitur khusus PC (anti-sleep,
-// autostart) dan bisa dikonfigurasi sepenuhnya dari HP. Lihat `snugcode cloud` di cli.js.
+// Cloud runner (Codespaces / container): the same daemon, without PC-only features (anti-sleep,
+// autostart) and fully configurable from the phone. See `snugcode cloud` in cli.js.
 export const isCloud = (cfg) => cfg?.runtime === 'cloud';
 
-// Kredensial di environment yang tidak boleh terwariskan ke proses agen, Bash-nya, dev server, dan `!perintah`:
-// token GitHub (Codespaces selalu mengisi GITHUB_TOKEN) dan env bootstrap runner cloud.
+// Credentials in the environment that must not be inherited by the agent process, its Bash, dev servers, and `!commands`:
+// GitHub tokens (Codespaces always sets GITHUB_TOKEN) and the cloud runner's bootstrap env.
 export const SECRET_ENV_RE =
   /^(GITHUB_TOKEN|GH_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GITHUB_CODESPACE_TOKEN|(SNUGCODE|POCKETCODE)_(MACHINE_TOKEN|PAIR_PIN|ROUTER_KEY|GITHUB_TOKEN|RUNNER_TOKEN|API_KEY|CODEX_TOKEN|BRIDGE))$/i;
 export function scrubSecretEnv(env = process.env) {
@@ -156,7 +156,7 @@ export function scrubSecretEnv(env = process.env) {
   return env;
 }
 
-// Base URL untuk Claude Code: tanpa /v1 karena Claude Code menambahkan /v1/messages sendiri.
+// Base URL for Claude Code: without /v1 because Claude Code appends /v1/messages itself.
 export function anthropicBaseUrl(routerUrl) {
   return routerUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
 }

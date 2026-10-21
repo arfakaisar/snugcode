@@ -1,11 +1,11 @@
-// snugcode — Manajemen autostart lintas platform (Windows Startup, macOS launchd, Linux systemd).
+// snugcode — cross-platform autostart management (Windows Startup, macOS launchd, Linux systemd).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const AUTOSTART_UNIT = 'snugcode';
-// Nama sebelum ganti merek: entri autostart lama dipindahkan otomatis (lihat migrateLegacyAutostart).
+// Names from before the rebrand: old autostart entries are migrated automatically (see migrateLegacyAutostart).
 const LEGACY_UNIT = 'pocketcode';
 
 function fileFor(unit) {
@@ -74,8 +74,8 @@ WantedBy=default.target
   return file;
 }
 
-// Matikan & hapus satu entri autostart. Unit launchd/systemd tidak dihentikan bila `keepRunning`:
-// dipakai saat migrasi dari dalam daemon yang justru dijalankan oleh unit lama itu.
+// Disable & remove one autostart entry. The launchd/systemd unit is not stopped when `keepRunning`:
+// used when migrating from inside a daemon that was started by that very old unit.
 function removeUnit(unit, { keepRunning = false } = {}) {
   const file = fileFor(unit);
   if (process.platform === 'darwin' && !keepRunning) {
@@ -100,15 +100,15 @@ export function disableAutostart() {
   return removeUnit(AUTOSTART_UNIT);
 }
 
-// Entri autostart dari sebelum ganti nama: hapus agar tidak ada dua daemon saat login. Mengembalikan
-// true bila entri lama ditemukan (pemanggil lalu menulis entri baru untuk CLI yang aktif).
+// Autostart entries from before the rename: remove them so two daemons don't start at login. Returns
+// true if an old entry was found (the caller then writes a new entry for the active CLI).
 export function migrateLegacyAutostart() {
   if (!fs.existsSync(fileFor(LEGACY_UNIT))) return false;
   removeUnit(LEGACY_UNIT, { keepRunning: true });
   return true;
 }
 
-// Pastikan skrip autostart selalu memanggil file CLI yang aktif/terbaru jika autostart pernah dinyalakan.
+// Make sure the autostart script always calls the active/latest CLI file if autostart was ever enabled.
 export function syncAutostart(cliPath, nodePath = process.execPath) {
   if (!isAutostartEnabled()) return false;
   try {
@@ -117,7 +117,7 @@ export function syncAutostart(cliPath, nodePath = process.execPath) {
       return true;
     }
     const current = fs.readFileSync(autostartFilePath(), 'utf8');
-    // Jika path CLI atau node berubah, perbarui file autostart
+    // If the CLI or node path changed, update the autostart file
     if (!current.includes(cliPath) || !current.includes(nodePath)) {
       writeAutostart(cliPath, nodePath);
       return true;

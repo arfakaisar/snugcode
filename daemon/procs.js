@@ -1,5 +1,5 @@
-// Proses jangka panjang per sesi (dev server, watcher, install): berjalan terpisah
-// dari agen tanpa batas waktu, log disimpan di ring buffer, port terdeteksi otomatis.
+// Long-running processes per session (dev server, watcher, install): run separately
+// from the agent with no time limit, logs kept in a ring buffer, ports detected automatically.
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
@@ -12,7 +12,7 @@ const isWin = process.platform === 'win32';
 
 export const stripAnsi = (s) => s.replace(ANSI_RE, '');
 
-// Hentikan proses beserta anak-anaknya (npm → node → vite).
+// Stop a process and its children (npm → node → vite).
 function killTree(p) {
   if (p.exitCode !== null || p.signalCode !== null) return;
   if (isWin) spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => p.kill());
@@ -42,7 +42,7 @@ export function freePort() {
   });
 }
 
-// localhost: dev server bisa listen di ::1 saja (Node 17+), jadi jangan paksa IPv4.
+// localhost: dev servers may listen on ::1 only (Node 17+), so don't force IPv4.
 export function portOpen(port, timeout = 600) {
   return new Promise((resolve) => {
     const s = net.connect({ host: 'localhost', port, autoSelectFamily: true });
@@ -58,8 +58,8 @@ export function procName(cmd) {
   return (m?.[1] || 'proc').slice(0, 32);
 }
 
-// Log per proses sebagai ring buffer potongan: menambah output tidak menyalin ulang 256KB
-// log lama setiap chunk (dulu `log = (log + text).slice(-LOG_MAX)` saat npm install membanjir).
+// Per-process log as a ring buffer of chunks: appending output doesn't re-copy 256KB
+// of old log on every chunk (formerly `log = (log + text).slice(-LOG_MAX)` while npm install flooded).
 class LogBuffer {
   constructor(max = LOG_MAX) {
     this.max = max;
@@ -99,22 +99,22 @@ export class ProcManager {
 
   get(name) {
     const p = this.procs.get(name);
-    if (!p) throw new Error(`Proses "${name}" tidak ada`);
+    if (!p) throw new Error(`No process named "${name}"`);
     return p;
   }
 
   async start(cmd, name = procName(cmd)) {
     cmd = String(cmd || '').trim();
-    if (!cmd) throw new Error('Perintah kosong');
+    if (!cmd) throw new Error('Empty command');
     const busy = () => {
-      if (this.procs.get(name)?.status === 'running') throw new Error(`Proses "${name}" masih berjalan. Stop dulu.`);
+      if (this.procs.get(name)?.status === 'running') throw new Error(`Process "${name}" is still running. Stop it first.`);
     };
     busy();
-    // PORT: dipakai Next/Express/CRA/Remix dkk. Vite mengabaikannya, tapi port-nya terbaca dari log.
-    // "{port}" di perintah diganti port yang sama (lintas shell, tanpa sintaks env var).
+    // PORT: used by Next/Express/CRA/Remix etc. Vite ignores it, but its port is read from the log.
+    // "{port}" in the command is replaced by the same port (works across shells, no env var syntax).
     const port = await freePort();
     const env = await toolchainEnv(cmd, { ...process.env, PORT: String(port), BROWSER: 'none', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
-    busy(); // start lain dengan nama sama bisa menyelip selama menunggu di atas
+    busy(); // another start with the same name may slip in while waiting above
     const child = shellSpawn(cmd.replaceAll('{port}', port), { cwd: this.cwd, detached: !isWin, env });
     let exited;
     const out = new LogBuffer();
@@ -133,7 +133,7 @@ export class ProcManager {
     const onData = (d) => {
       const text = stripAnsi(d.toString());
       out.push(text);
-      // Banjir output (npm install, build): kirim bagian terbarunya saja ke klien.
+      // Output flood (npm install, build): only send the latest part to clients.
       p.buf = (p.buf + text).slice(-32 * 1024);
       if (!p.timer) p.timer = setTimeout(flush, 150);
       if (!p.port) {
@@ -155,7 +155,7 @@ export class ProcManager {
       this.onChange(this.summary(p));
     });
     this.onChange(this.summary(p));
-    // Server yang tidak mencetak URL: cek port dari env PORT setelah sempat start.
+    // Servers that don't print a URL: check the port from env PORT once it has had time to start.
     p.probe = setInterval(async () => {
       if (p.port || p.status !== 'running') return clearInterval(p.probe);
       if (await portOpen(p.hintPort)) this.setPort(p, p.hintPort);
@@ -171,7 +171,7 @@ export class ProcManager {
     this.onChange(this.summary(p));
   }
 
-  // Tunggu sampai port terdeteksi (atau proses berhenti / waktu habis).
+  // Wait until a port is detected (or the process stops / time runs out).
   waitPort(name, ms = 30000) {
     const p = this.get(name);
     if (p.port || p.status !== 'running') return Promise.resolve(p.port);
@@ -189,7 +189,7 @@ export class ProcManager {
     return this.get(name).log.slice(-tail);
   }
 
-  // Proses yang masih jalan dihentikan; yang sudah berhenti dihapus dari daftar.
+  // Running processes are stopped; stopped ones are removed from the list.
   stop(name) {
     const p = this.get(name);
     clearInterval(p.probe);
@@ -198,7 +198,7 @@ export class ProcManager {
     killTree(p.child);
   }
 
-  // Tunggu (maks. 3 detik) sampai semua proses benar-benar mati, agar file worktree tidak terkunci.
+  // Wait (max 3 seconds) until every process is really dead, so worktree files aren't locked.
   stopAll() {
     const running = [...this.procs.values()].filter((p) => p.status === 'running');
     for (const p of running) this.stop(p.name);

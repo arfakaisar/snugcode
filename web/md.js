@@ -1,5 +1,5 @@
-// Markdown ringan untuk teks agen (tanpa dependensi): paragraf, judul, list, tabel, kutipan,
-// blok kode, dan inline (`kode`, **tebal**, *miring*, tautan). Semua teks di-escape dulu.
+// Lightweight markdown for agent text (no dependencies): paragraphs, headings, lists, tables, quotes,
+// code blocks, and inline (`code`, **bold**, *italic*, links). All text is escaped first.
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export function inlineMd(s) {
@@ -12,10 +12,10 @@ export function inlineMd(s) {
 }
 
 function codeBlock(code, lang, copyIcon) {
-  return `<div class="code"><div class="ch"><span>${esc(lang || 'kode')}</span><button class="copybtn" data-copy>${copyIcon}<span>salin</span></button></div><pre><code>${esc(code)}</code></pre></div>`;
+  return `<div class="code"><div class="ch"><span>${esc(lang || 'code')}</span><button class="copybtn" data-copy>${copyIcon}<span>copy</span></button></div><pre><code>${esc(code)}</code></pre></div>`;
 }
 
-// `copyIcon`: HTML ikon tombol salin pada blok kode.
+// `copyIcon`: HTML for the copy button icon on code blocks.
 export function md(src, { copyIcon = '' } = {}) {
   const L = src.split('\n');
   const out = [];
@@ -75,9 +75,9 @@ export function md(src, { copyIcon = '' } = {}) {
   return out.join('');
 }
 
-// Posisi akhir blok markdown yang sudah pasti selesai di `src`, dipindai mulai `from` (yang
-// selalu berada di batas blok): sesudah baris kosong terakhir yang tidak di dalam blok kode.
-// Teks yang masih di-stream sebelum posisi ini tidak akan berubah tampilannya lagi.
+// End of the markdown blocks in `src` that are definitely complete, scanning from `from` (always
+// at a block boundary): after the last blank line outside a code block.
+// Streamed text before this position won't change its rendering anymore.
 export function stableCut(src, from = 0) {
   let cut = from;
   let fence = false;

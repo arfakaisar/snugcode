@@ -1,4 +1,4 @@
-// snugcode — Mencegah PC tertidur selama daemon berjalan.
+// snugcode — keeps the PC awake while the daemon is running.
 import { spawn } from 'node:child_process';
 
 /** @param {{ log?: (msg: string) => void }} [opts] */

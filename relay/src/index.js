@@ -1,11 +1,11 @@
 // snugcode relay — Cloudflare Worker + Durable Objects.
 //
-// Relay hanya meneruskan pesan antara HP dan PC. Isi percakapan dienkripsi
-// end-to-end (lihat shared/crypto.js), jadi relay tidak bisa membacanya.
+// The relay only forwards messages between phones and PCs. Conversations are encrypted
+// end-to-end (see shared/crypto.js), so the relay can't read them.
 //
-//   Hub (1 DO per akun GitHub)   : daftar PC milik akun + soket WebSocket.
-//   Pending (1 DO per kode login) : menghubungkan login GitHub di browser
-//                                   dengan daemon yang sedang menunggu.
+//   Hub (1 DO per GitHub account)   : the account's PC list + WebSocket sockets.
+//   Pending (1 DO per login code)   : connects a GitHub login in the browser
+//                                     with the daemon that's waiting.
 import { DurableObject } from 'cloudflare:workers';
 import { securityHeaders, PAGE_HEADERS } from './headers.js';
 
@@ -30,7 +30,7 @@ function randomCode() {
 }
 
 async function hmacKey(env) {
-  if (!env.TOKEN_SECRET) throw new Error('TOKEN_SECRET belum di-set');
+  if (!env.TOKEN_SECRET) throw new Error('TOKEN_SECRET is not set');
   return crypto.subtle.importKey('raw', enc.encode(env.TOKEN_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 async function signToken(env, payload) {
@@ -52,8 +52,8 @@ async function verifyToken(env, token) {
   }
 }
 
-// Tujuan setelah login user: landing page (`/`) atau snugcode agent (`/agent/`, bawaan). Hanya path dari daftar ini
-// agar link login tidak bisa dipakai mengalihkan token ke tempat lain (open redirect).
+// Where to go after a user login: the landing page (`/`) or snugcode agent (`/agent/`, default). Only paths from this list,
+// so login links can't be used to redirect the token elsewhere (open redirect).
 const NEXT = ['/', '/agent/'];
 const nextPath = (v) => (NEXT.includes(v) ? v : '/agent/');
 
@@ -72,7 +72,7 @@ function page(title, body, status = 200) {
   );
 }
 
-// Aset (landing page di `/`, snugcode agent di `/agent/`) lewat env.ASSETS: security header ditambahkan (aset langsung dari worker alias memakai _headers).
+// Assets (landing page at `/`, snugcode agent at `/agent/`) via env.ASSETS: security headers are added (assets served directly by the alias worker use _headers).
 async function asset(env, request) {
   const res = await env.ASSETS.fetch(request);
   const headers = new Headers(res.headers);
@@ -81,8 +81,8 @@ async function asset(env, request) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
-// Frame biner PC <-> relay: [panjang cid 1B][cid ASCII][payload terenkripsi]. HP hanya
-// melihat payload. Relay tidak mem-parse isi (lihat shared/crypto.js: sealBin/frameWithCid).
+// Binary PC <-> relay frame: [cid length 1B][cid ASCII][encrypted payload]. The phone only
+// sees the payload. The relay doesn't parse the contents (see shared/crypto.js: sealBin/frameWithCid).
 function withCid(cid, payload) {
   const id = enc.encode(cid);
   const p = new Uint8Array(payload);
@@ -97,21 +97,21 @@ const dec = new TextDecoder();
 const hub = (env, sub) => env.HUB.get(env.HUB.idFromName('u:' + sub));
 const pending = (env, code) => env.PENDING.get(env.PENDING.idFromName('p:' + code));
 const USER_TTL = 30 * 24 * 3600 * 1000;
-// Batas mesin per akun (PC + runner cloud): mencegah Hub tumbuh tanpa batas.
+// Machine limit per account (PCs + cloud runners): keeps the Hub from growing without bound.
 const MAX_MACHINES = 20;
-// Mesin yang mati mendadak (codespace dihentikan, PC dicabut listriknya, jaringan hilang) tidak sempat
-// menutup soketnya, dan Cloudflare bisa menahan soket itu tanpa batas: mesin tampak online terus. Daemon
-// mengirim `ping` tiap 25 detik (dijawab otomatis tanpa membangunkan DO), jadi soket yang tidak ping selama
-// ini dianggap mati. Bisa diperkecil lewat var MACHINE_STALE_MS (uji).
+// Machines that die suddenly (codespace stopped, PC unplugged, network gone) don't get to
+// close their socket, and Cloudflare may hold that socket indefinitely: the machine looks online forever. The daemon
+// sends a `ping` every 25 seconds (answered automatically without waking the DO), so a socket that hasn't pinged for
+// this long is considered dead. Can be lowered via the MACHINE_STALE_MS var (tests).
 const STALE_MS = 80_000;
-// Selama ada HP tersambung, soket mesin diperiksa berkala (alarm) agar HP yang sedang menunggu diberi tahu.
+// While a phone is connected, machine sockets are checked periodically (alarm) so waiting phones are notified.
 const SWEEP_MS = 30_000;
 
-// extra: { kind: 'cloud', provider: 'codespace' | 'container' } untuk runner cloud (tanpa PC).
+// extra: { kind: 'cloud', provider: 'codespace' | 'container' } for cloud runners (no PC).
 async function registerMachine(env, user, name, extra = {}) {
   const mid = randomId(9);
   const r = await hub(env, user.id).fetch('https://hub/register', { method: 'POST', body: JSON.stringify({ mid, name, ...extra }) });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Gagal mendaftarkan mesin');
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed to register the machine');
   const token = await signToken(env, { kind: 'machine', sub: user.id, login: user.login, mid });
   return { token, mid, login: user.login };
 }
@@ -124,21 +124,21 @@ async function githubUser(env, code, redirectUri) {
     body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: redirectUri }),
   });
   const t = await tr.json();
-  if (!t.access_token) throw new Error(t.error_description || 'GitHub menolak login');
+  if (!t.access_token) throw new Error(t.error_description || 'GitHub rejected the login');
   const ur = await fetch('https://api.github.com/user', {
     headers: { authorization: 'Bearer ' + t.access_token, 'user-agent': 'snugcode-relay', accept: 'application/vnd.github+json' },
   });
-  if (!ur.ok) throw new Error('Gagal membaca profil GitHub');
+  if (!ur.ok) throw new Error('Failed to read the GitHub profile');
   const u = await ur.json();
   return { id: String(u.id), login: u.login, token: t.access_token };
 }
 
 const MAX_CLOUD = 3;
-// Runner cloud: repo yang di-fork pengguna untuk Codespaces (berisi .devcontainer snugcode).
+// Cloud runner: the repo users fork for Codespaces (contains snugcode's .devcontainer).
 const runnerRepo = (env) => env.RUNNER_REPO || 'arfakaisar/snugcode';
 
-// Token user sah = tanda tangan benar, jenis 'user', punya akun (sub), dan tidak dicabut lewat
-// "Keluar dari semua perangkat" (iat sebelum revokedBefore akun itu). Token lama tanpa iat dianggap 0.
+// A valid user token = correct signature, kind 'user', has an account (sub), and not revoked via
+// "Sign out of all devices" (iat before that account's revokedBefore). Old tokens without iat count as 0.
 async function userFromToken(env, token) {
   const p = await verifyToken(env, token);
   if (!p || p.kind !== 'user' || !p.sub) return null;
@@ -147,7 +147,7 @@ async function userFromToken(env, token) {
 }
 const authUser = (env, request) => userFromToken(env, (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''));
 
-// Rate limit per IP untuk endpoint yang membuat state (binding opsional `LIMITER`, lihat wrangler.jsonc).
+// Per-IP rate limit for endpoints that create state (optional `LIMITER` binding, see wrangler.jsonc).
 async function limited(env, request, scope) {
   if (!env.LIMITER) return false;
   const ip = request.headers.get('cf-connecting-ip') || 'local';
@@ -155,8 +155,8 @@ async function limited(env, request, scope) {
   return !success;
 }
 
-// Token WebSocket: lewat subprotocol `snugcode, t.<token>` (tidak tercatat di log URL), atau `?token=`
-// untuk klien lama. Respons 101 harus memilih subprotocol `snugcode` (lihat Hub /ws).
+// WebSocket token: via the subprotocol `snugcode, t.<token>` (not recorded in URL logs), or `?token=`
+// for old clients. The 101 response must select the `snugcode` subprotocol (see Hub /ws).
 const WS_PROTO = 'snugcode';
 function wsToken(request, url) {
   const protos = (request.headers.get('sec-websocket-protocol') || '').split(',').map((s) => s.trim());
@@ -164,18 +164,18 @@ function wsToken(request, url) {
   return t ? t.slice(2) : url.searchParams.get('token');
 }
 
-// Setelah login GitHub: konfirmasi eksplisit (POST + token bertanda tangan) sebelum PC ditautkan ke akun.
+// After the GitHub login: an explicit confirmation (POST + signed token) before the PC is linked to the account.
 async function linkPage(env, pc, user) {
   const r = await pending(env, pc).fetch('https://p/peek');
-  if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
+  if (!r.ok) return page('Invalid code', '<p>The PC login code was not found or has expired. Run <code>snugcode setup</code> again.</p>', 404);
   const { name } = await r.json();
   const t = await signToken(env, { kind: 'link', pc, sub: user.id, login: user.login, exp: Date.now() + 10 * 60 * 1000 });
   return page(
-    'Hubungkan PC?',
-    `<p>PC <b>${esc(name)}</b> (kode <code>${esc(pc)}</code>) minta ditautkan ke akun GitHub <b>@${esc(user.login)}</b>.</p>` +
-      `<p>Lanjutkan hanya bila kode ini sama dengan yang tampil di terminal PC-mu sendiri. Bila kamu menerima link ini dari orang lain, tutup halaman ini.</p>` +
+    'Connect this PC?',
+    `<p>PC <b>${esc(name)}</b> (code <code>${esc(pc)}</code>) wants to be linked to the GitHub account <b>@${esc(user.login)}</b>.</p>` +
+      `<p>Only continue if this code matches the one shown in your own PC's terminal. If someone else sent you this link, close this page.</p>` +
       `<form method="post" action="/auth/machine/confirm"><input type="hidden" name="t" value="${esc(t)}">` +
-      `<button style="font:inherit;background:#7ee787;color:#0b0e14;padding:10px 16px;border:0;border-radius:8px;font-weight:600;cursor:pointer">Ya, hubungkan PC ini</button></form>`,
+      `<button style="font:inherit;background:#7ee787;color:#0b0e14;padding:10px 16px;border:0;border-radius:8px;font-weight:600;cursor:pointer">Yes, connect this PC</button></form>`,
   );
 }
 
@@ -185,38 +185,38 @@ export default {
     const path = url.pathname;
     const devAuth = env.DEV_AUTH === '1';
     const legacy = !!env.PUBLIC_URL && String(env.LEGACY_HOSTS || '').split(',').map((s) => s.trim()).includes(url.host);
-    // Login selalu di alamat utama: callback OAuth App GitHub hanya boleh satu host.
+    // Login always happens on the main address: a GitHub OAuth App callback may only have one host.
     if (legacy && path === '/auth/login') return Response.redirect(env.PUBLIC_URL + path + url.search, 302);
 
     if (!devAuth && ['/auth/login', '/auth/machine/start', '/auth/machine/confirm', '/api/machines/provision'].includes(path) && (await limited(env, request, path))) {
-      return path.startsWith('/api/') || request.method === 'POST' ? json({ error: 'Terlalu banyak permintaan. Coba lagi sebentar lagi.' }, 429) : page('Terlalu banyak permintaan', '<p>Coba lagi dalam satu menit.</p>', 429);
+      return path.startsWith('/api/') || request.method === 'POST' ? json({ error: 'Too many requests. Try again in a moment.' }, 429) : page('Too many requests', '<p>Try again in a minute.</p>', 429);
     }
 
     // ---------- Login GitHub (web flow) ----------
     if (path === '/auth/login') {
-      // gh: token GitHub ber-scope `codespace` untuk PWA (membuat & menyalakan runner Codespaces).
+      // gh: a `codespace`-scoped GitHub token for the PWA (creating & starting Codespaces runners).
       const k = url.searchParams.get('kind');
       const kind = k === 'machine' || k === 'gh' ? k : 'user';
-      if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Mode dev', '<p>Runner Codespaces butuh OAuth App GitHub (GITHUB_CLIENT_ID).</p>');
+      if (kind === 'gh' && devAuth && !env.GITHUB_CLIENT_ID) return page('Dev mode', '<p>Codespaces runners need a GitHub OAuth App (GITHUB_CLIENT_ID).</p>');
       const pc = url.searchParams.get('pc') || '';
       const next = nextPath(url.searchParams.get('next'));
-      // Kode PC harus masih menunggu. Konfirmasi penautan ditampilkan SETELAH login GitHub (lihat linkPage):
-      // konfirmasi sebelum login bisa dilewati cukup dengan menambahkan parameter ke link.
+      // The PC code must still be waiting. The link confirmation is shown AFTER the GitHub login (see linkPage):
+      // a confirmation before login could be skipped just by adding a parameter to the link.
       if (kind === 'machine') {
         const r = await pending(env, pc).fetch('https://p/peek');
-        if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>', 404);
+        if (!r.ok) return page('Invalid code', '<p>The PC login code was not found or has expired. Run <code>snugcode setup</code> again.</p>', 404);
       }
       if (devAuth && !env.GITHUB_CLIENT_ID) {
-        return page('Mode dev', `<p>GITHUB_CLIENT_ID belum di-set. Login dev:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input type="hidden" name="next" value="${esc(next)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Masuk</button></form>`);
+        return page('Dev mode', `<p>GITHUB_CLIENT_ID is not set. Dev login:</p><form action="/auth/dev/login"><input type="hidden" name="kind" value="${esc(kind)}"><input type="hidden" name="pc" value="${esc(pc)}"><input type="hidden" name="next" value="${esc(next)}"><input name="login" placeholder="username" style="font:inherit;padding:6px"> <button>Sign in</button></form>`);
       }
-      // Jenis 'state' terpisah: token state terlihat di URL dan tidak boleh lolos sebagai token user.
+      // A separate 'state' kind: the state token is visible in the URL and must never pass as a user token.
       const state = await signToken(env, { kind: 'state', for: kind, pc, next, n: randomId(), exp: Date.now() + 10 * 60 * 1000 });
       const gh = new URL('https://github.com/login/oauth/authorize');
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', url.origin + '/auth/callback');
       gh.searchParams.set('state', state);
       gh.searchParams.set('scope', kind === 'gh' ? 'codespace' : '');
-      // Tombol "Daftar" di landing page: orang tanpa akun GitHub bisa membuatnya di tengah alur login.
+      // The "Sign up" button on the landing page: people without a GitHub account can create one mid-login.
       gh.searchParams.set('allow_signup', url.searchParams.get('signup') === '1' ? 'true' : 'false');
       return Response.redirect(gh.toString(), 302);
     }
@@ -226,24 +226,24 @@ export default {
       try {
         if (path === '/auth/callback') {
           const st = await verifyToken(env, url.searchParams.get('state'));
-          if (!st || st.kind !== 'state') return page('Login kedaluwarsa', '<p>Silakan ulangi dari awal.</p>');
+          if (!st || st.kind !== 'state') return page('Login expired', '<p>Please start over.</p>');
           ({ for: kind, pc, next } = st);
           user = await githubUser(env, url.searchParams.get('code'), url.origin + '/auth/callback');
         } else {
           kind = url.searchParams.get('kind');
-          if (kind === 'gh') return page('Mode dev', '<p>Runner Codespaces butuh login GitHub asli.</p>');
+          if (kind === 'gh') return page('Dev mode', '<p>Codespaces runners need a real GitHub login.</p>');
           pc = url.searchParams.get('pc') || '';
           next = url.searchParams.get('next');
           const login = (url.searchParams.get('login') || '').trim();
-          if (!login) return page('Login dev', '<p>Username kosong.</p>');
+          if (!login) return page('Dev login', '<p>Empty username.</p>');
           user = { id: 'dev:' + login, login };
         }
       } catch (e) {
-        return page('Login gagal', `<p>${esc(e.message)}</p>`);
+        return page('Login failed', `<p>${esc(e.message)}</p>`);
       }
       if (kind === 'gh') {
-        // Token tidak disimpan relay: diteruskan ke PWA lewat fragmen URL (tidak pernah dikirim ke server).
-        // Login tetap diperiksa PWA terhadap akun relay-nya sebelum dipakai.
+        // The token isn't stored by the relay: it's handed to the PWA via the URL fragment (never sent to the server).
+        // The PWA still checks the login against its relay account before using it.
         return Response.redirect(url.origin + '/agent/#gh=' + encodeURIComponent(user.token) + '&ghlogin=' + encodeURIComponent(user.login), 302);
       }
       if (kind === 'machine') return linkPage(env, pc, user);
@@ -251,7 +251,7 @@ export default {
       return Response.redirect(url.origin + nextPath(next) + '#login=' + encodeURIComponent(token), 302);
     }
 
-    // ---------- Login daemon (kode menunggu) ----------
+    // ---------- Daemon login (waiting code) ----------
     if (path === '/auth/machine/start' && request.method === 'POST') {
       const { name } = await request.json().catch(() => ({}));
       const code = randomCode();
@@ -264,33 +264,33 @@ export default {
       return new Response(r.body, r);
     }
 
-    // Konfirmasi penautan PC (POST dari linkPage). Token `link` bertanda tangan hanya ada di halaman milik
-    // pengguna yang baru login, jadi link/form dari situs lain tidak bisa menautkan PC ke akunnya.
+    // PC link confirmation (POST from linkPage). The signed `link` token only exists on the page of the
+    // user who just signed in, so links/forms from other sites can't link a PC to their account.
     if (path === '/auth/machine/confirm' && request.method === 'POST') {
       const form = await request.formData().catch(() => null);
       const t = await verifyToken(env, String(form?.get('t') || ''));
-      if (!t || t.kind !== 'link' || !t.pc || !t.sub) return page('Konfirmasi kedaluwarsa', '<p>Ulangi dari link di terminal PC (<code>snugcode setup</code>).</p>', 400);
+      if (!t || t.kind !== 'link' || !t.pc || !t.sub) return page('Confirmation expired', '<p>Start again from the link in your PC terminal (<code>snugcode setup</code>).</p>', 400);
       const r = await pending(env, t.pc).fetch('https://p/claim', { method: 'POST' });
-      if (!r.ok) return page('Kode tidak valid', '<p>Kode login PC tidak ditemukan, sudah dipakai, atau kedaluwarsa. Jalankan ulang <code>snugcode setup</code>.</p>');
+      if (!r.ok) return page('Invalid code', '<p>The PC login code was not found, was already used, or has expired. Run <code>snugcode setup</code> again.</p>');
       const { name } = await r.json();
       const user = { id: t.sub, login: t.login };
       let result;
       try {
         result = await registerMachine(env, user, name);
       } catch (e) {
-        return page('PC tidak bisa ditambahkan', `<p>${esc(e.message)}</p>`, 409);
+        return page('PC could not be added', `<p>${esc(e.message)}</p>`, 409);
       }
       await pending(env, t.pc).fetch('https://p/result', { method: 'POST', body: JSON.stringify(result) });
-      return page('PC terhubung ✓', `<p>PC <b>${esc(name)}</b> sekarang terhubung ke akun <b>@${esc(user.login)}</b>.</p><p>Kembali ke terminal untuk menyelesaikan setup. Tab ini boleh ditutup.</p>`);
+      return page('PC connected ✓', `<p>PC <b>${esc(name)}</b> is now connected to the account <b>@${esc(user.login)}</b>.</p><p>Go back to the terminal to finish setup. You can close this tab.</p>`);
     }
 
-    // ---------- API untuk PWA ----------
+    // ---------- API for the PWA ----------
     if (path === '/api/me') {
       const u = await authUser(env, request);
       return u ? json({ login: u.login }) : json({ error: 'unauthorized' }, 401);
     }
-    // Perpanjang login yang masih aktif (PWA memanggilnya saat dibuka): tanpa ini HP dipaksa login ulang
-    // setiap 30 hari walau dipakai tiap hari. Token yang dicabut (logout-all) tidak bisa diperpanjang.
+    // Extend a login that's still active (the PWA calls this when opened): without it the phone would have to sign in
+    // again every 30 days even when used daily. Revoked tokens (logout-all) can't be extended.
     if (path === '/api/renew' && request.method === 'POST') {
       const u = await authUser(env, request);
       if (!u) return json({ error: 'unauthorized' }, 401);
@@ -302,8 +302,8 @@ export default {
       const r = await hub(env, u.sub).fetch('https://hub/machines');
       return new Response(r.body, r);
     }
-    // Runner cloud: daftarkan mesin tanpa login browser dari mesin itu sendiri. Token mesin dikembalikan
-    // ke PWA, yang menyimpannya sebagai Codespaces secret (terenkripsi di HP) untuk runner.
+    // Cloud runner: register a machine without a browser login from the machine itself. The machine token is returned
+    // to the PWA, which stores it as a Codespaces secret (encrypted on the phone) for the runner.
     if (path === '/api/machines/provision' && request.method === 'POST') {
       const u = await authUser(env, request);
       if (!u) return json({ error: 'unauthorized' }, 401);
@@ -311,22 +311,22 @@ export default {
       const provider = body.provider === 'container' ? 'container' : 'codespace';
       const name = String(body.name || 'Cloud').trim().slice(0, 60) || 'Cloud';
       const { machines } = await (await hub(env, u.sub).fetch('https://hub/machines')).json();
-      if (machines.filter((m) => m.kind === 'cloud').length >= MAX_CLOUD) return json({ error: `Maksimal ${MAX_CLOUD} runner cloud per akun. Hapus yang lama dulu.` }, 409);
+      if (machines.filter((m) => m.kind === 'cloud').length >= MAX_CLOUD) return json({ error: `At most ${MAX_CLOUD} cloud runners per account. Remove an old one first.` }, 409);
       try {
         return json(await registerMachine(env, { id: u.sub, login: u.login }, name, { kind: 'cloud', provider }));
       } catch (e) {
         return json({ error: e.message }, 409);
       }
     }
-    // Cabut semua token login akun ini (semua HP/browser harus login ulang). Pairing PC tidak berubah.
+    // Revoke every login token of this account (every phone/browser must sign in again). PC pairings don't change.
     if (path === '/api/logout-all' && request.method === 'POST') {
       const u = await authUser(env, request);
       if (!u) return json({ error: 'unauthorized' }, 401);
       const r = await hub(env, u.sub).fetch('https://hub/revoke', { method: 'POST' });
       return new Response(r.body, r);
     }
-    // Runner cloud yang sedang menyiapkan diri (codespace: pasang paket, menyalakan daemon) melaporkan
-    // tahapnya dengan token mesinnya sendiri; PWA menampilkannya selama runner belum tersambung.
+    // A cloud runner that's setting itself up (codespace: installing packages, starting the daemon) reports
+    // its stage with its own machine token; the PWA shows it while the runner isn't connected yet.
     if (path === '/api/runner/status' && request.method === 'POST') {
       const h = request.headers.get('authorization') || '';
       const p = await verifyToken(env, h.replace(/^Bearer\s+/i, ''));
@@ -377,9 +377,9 @@ export class Pending extends DurableObject {
       return json({ ok: true });
     }
     if (expired) return json({ status: 'expired' }, 404);
-    if (path === '/peek') return rec.claimed ? json({ error: 'sudah dipakai' }, 409) : json({ name: rec.name });
+    if (path === '/peek') return rec.claimed ? json({ error: 'already used' }, 409) : json({ name: rec.name });
     if (path === '/claim') {
-      if (rec.claimed) return json({ error: 'sudah dipakai' }, 409);
+      if (rec.claimed) return json({ error: 'already used' }, 409);
       await st.put('rec', { ...rec, claimed: true });
       return json({ name: rec.name });
     }
@@ -402,7 +402,7 @@ export class Pending extends DurableObject {
 export class Hub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // Keepalive tanpa membangunkan DO (hemat kuota).
+    // Keepalive without waking the DO (saves quota).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
@@ -414,13 +414,13 @@ export class Hub extends DurableObject {
     return +(/** @type {any} */ (this.env).MACHINE_STALE_MS) || STALE_MS;
   }
 
-  // Soket mesin yang masih hidup (ping terakhir belum lama). Soket yang mati ditutup; bila mesin jadi
-  // tidak punya soket hidup sama sekali, ia dicatat offline dan HP yang menunggu diberi tahu.
+  // Machine sockets that are still alive (last ping is recent). Dead sockets are closed; if a machine ends up
+  // with no live socket at all, it's recorded as offline and waiting phones are notified.
   async live(mid, now = Date.now()) {
     const alive = [];
     let last = 0;
     for (const ws of this.ctx.getWebSockets('m:' + mid)) {
-      if (ws.readyState !== 1) continue; // bukan OPEN: sudah ditutup, tinggal menunggu close
+      if (ws.readyState !== 1) continue; // not OPEN: already closed, just waiting for close
       const t = Math.max(this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0, ws.deserializeAttachment()?.at || 0);
       if (now - t <= this.staleMs) {
         alive.push(ws);
@@ -465,7 +465,7 @@ export class Hub extends DurableObject {
 
     if (url.pathname === '/register') {
       const { mid, name, kind, provider } = await request.json();
-      if (Object.keys(machines).length >= MAX_MACHINES) return json({ error: `Maksimal ${MAX_MACHINES} mesin per akun. Hapus mesin lama dari aplikasi dulu.` }, 409);
+      if (Object.keys(machines).length >= MAX_MACHINES) return json({ error: `At most ${MAX_MACHINES} machines per account. Remove old machines from the app first.` }, 409);
       machines[mid] = { name, createdAt: Date.now(), lastSeen: null, ...(kind === 'cloud' ? { kind, provider } : {}) };
       await this.ctx.storage.put('machines', machines);
       return json({ ok: true });
@@ -476,21 +476,21 @@ export class Hub extends DurableObject {
     }
     if (url.pathname === '/revoke') {
       await this.ctx.storage.put('revokedBefore', Date.now());
-      // HP yang sedang tersambung langsung diminta login ulang.
+      // Phones currently connected are asked to sign in again right away.
       for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment()?.role === 'p') ws.close(4005, 'logged-out');
       return json({ ok: true });
     }
     if (url.pathname === '/machines') {
       const online = {};
       for (const id of Object.keys(machines)) online[id] = await this.online(id);
-      // live() bisa mencatat lastSeen mesin yang baru ketahuan mati: baca ulang.
+      // live() may record lastSeen of a machine just found dead: read again.
       const now = await this.machines();
       const list = Object.entries(now).map(([id, m]) => ({ id, name: m.name, online: !!online[id], lastSeen: m.lastSeen, kind: m.kind || 'pc', provider: m.provider || null, createdAt: m.createdAt, boot: m.boot || null }));
       return json({ machines: list });
     }
     if (url.pathname === '/boot') {
       const { mid, boot } = await request.json();
-      if (!machines[mid]) return json({ error: 'PC tidak terdaftar' }, 404);
+      if (!machines[mid]) return json({ error: 'PC not registered' }, 404);
       machines[mid].boot = boot;
       await this.ctx.storage.put('machines', machines);
       return json({ ok: true });
@@ -505,15 +505,15 @@ export class Hub extends DurableObject {
     if (url.pathname === '/ws') {
       const role = url.searchParams.get('role');
       const mid = url.searchParams.get('mid');
-      if (!machines[mid]) return json({ error: 'PC tidak terdaftar' }, 404);
+      if (!machines[mid]) return json({ error: 'PC not registered' }, 404);
       const [client, server] = Object.values(new WebSocketPair());
       if (role === 'm') {
         for (const old of this.ctx.getWebSockets('m:' + mid)) old.close(4000, 'replaced');
         this.ctx.acceptWebSocket(server, ['m:' + mid]);
         server.serializeAttachment({ role: 'm', mid, at: Date.now() });
-        // Relay ini meneruskan frame biner (daemon lama mengabaikan pesan ini).
+        // This relay forwards binary frames (old daemons ignore this message).
         server.send(JSON.stringify({ t: 'hello', bin: 1 }));
-        // Beritahu PC tentang HP yang sudah menunggu, dan HP bahwa PC online.
+        // Tell the PC about phones already waiting, and the phones that the PC is online.
         for (const p of this.ctx.getWebSockets('p:' + mid)) {
           const { cid } = p.deserializeAttachment();
           server.send(JSON.stringify({ t: 'open', cid }));
@@ -582,7 +582,7 @@ export class Hub extends DurableObject {
       for (const m of this.ctx.getWebSockets('m:' + att.mid)) m.send(JSON.stringify({ t: 'close', cid: att.cid }));
       return;
     }
-    // Soket yang ditutup live() karena mati: offline-nya sudah dicatat di sana.
+    // Sockets closed by live() for being dead: their offline status was already recorded there.
     if (att.stale) return;
     if ((await this.live(att.mid)).some((s) => s !== ws)) return;
     await this.offline(att.mid);

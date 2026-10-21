@@ -1,6 +1,6 @@
-// Deteksi cara menyiapkan & menjalankan proyek di worktree, dan template .env per repo.
-// Worktree baru hanya berisi file yang ada di git: tanpa node_modules dan tanpa .env,
-// jadi dev server tidak akan jalan sebelum keduanya disiapkan.
+// Detects how to set up & run the project in a worktree, plus per-repo .env templates.
+// A new worktree only has the files tracked by git: no node_modules and no .env,
+// so the dev server won't run until both are prepared.
 import fs from 'node:fs';
 import path from 'node:path';
 import { HOME } from './config.js';
@@ -24,7 +24,7 @@ const readJson = (f) => {
   }
 };
 
-// `.snugcode.json` (atau `.pocketcode.json` lama) di root repo bisa menimpa deteksi: { "setup": "...", "dev": "..." }.
+// `.snugcode.json` (or legacy `.pocketcode.json`) at the repo root can override detection: { "setup": "...", "dev": "..." }.
 export function detectProject(cwd) {
   const own = readJson(path.join(cwd, '.snugcode.json')) || readJson(path.join(cwd, '.pocketcode.json')) || {};
   const has = (f) => fs.existsSync(path.join(cwd, f));
@@ -53,7 +53,7 @@ function walk(dir, base = dir, out = []) {
   return out;
 }
 
-// Salin template .env repo ke worktree baru (tidak menimpa file yang sudah ada).
+// Copy the repo's .env template into a new worktree (never overwrites existing files).
 export function restoreEnv(repo, cwd) {
   const dir = envDir(repo);
   if (!fs.existsSync(dir)) return [];
@@ -68,7 +68,7 @@ export function restoreEnv(repo, cwd) {
   return copied;
 }
 
-// Simpan file env yang di-ignore git (.env*, .dev.vars) dari worktree sebagai template repo.
+// Save git-ignored env files (.env*, .dev.vars) from the worktree as the repo template.
 export async function saveEnv(repo, cwd) {
   const out = await git(cwd, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', ':(glob)**/.env*', ':(glob)**/.dev.vars', ':(exclude,glob)**/node_modules/**']);
   const files = out.split('\0').filter(Boolean);

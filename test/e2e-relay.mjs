@@ -1,5 +1,5 @@
-// Uji relay (tanpa daemon): jenis token terpisah, pencabutan login, konfirmasi penautan PC, batas mesin,
-// dan security header PWA. Butuh relay dev: `npm run dev:relay` (CI: wrangler dev --var DEV_AUTH:1).
+// Relay tests (no daemon): separate token kinds, login revocation, PC link confirmation, machine limits,
+// and site security headers. Needs the dev relay: `npm run dev:relay` (CI: wrangler dev --var DEV_AUTH:1).
 import assert from 'node:assert/strict';
 import { RELAY, ok, linkMachine } from './e2e-harness.mjs';
 
@@ -13,22 +13,22 @@ const wsStatus = (token) =>
   new Promise((resolve) => {
     const ws = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/ws/phone?token=${encodeURIComponent(token)}&mid=x`);
     ws.onopen = () => (ws.close(), resolve('open'));
-    ws.onerror = () => resolve('ditolak');
+    ws.onerror = () => resolve('rejected');
   });
 
-// 1. Token state OAuth (terlihat di URL GitHub) tidak lolos sebagai token user.
+// 1. The OAuth state token (visible in the GitHub URL) doesn't pass as a user token.
 {
   const r = await fetch(RELAY + '/auth/login?kind=user', { redirect: 'manual' });
   const loc = r.headers.get('location') || '';
   if (/github\.com\/login\/oauth/.test(loc)) {
     const state = new URL(loc).searchParams.get('state');
     assert.equal((await me(state)).status, 401);
-    assert.equal(await wsStatus(state), 'ditolak');
-    ok('token state OAuth ditolak sebagai token user (API & WebSocket)');
-  } else console.log('… GITHUB_CLIENT_ID tidak di-set: uji token state dilewati');
+    assert.equal(await wsStatus(state), 'rejected');
+    ok('OAuth state token rejected as a user token (API & WebSocket)');
+  } else console.log('… GITHUB_CLIENT_ID not set: state token test skipped');
 }
 
-// 2. Keluar dari semua perangkat: semua token lama dicabut, login baru tetap jalan.
+// 2. Sign out of all devices: every old token is revoked, new logins still work.
 {
   const a = await login();
   const b = await login();
@@ -36,36 +36,36 @@ const wsStatus = (token) =>
   assert.equal((await fetch(RELAY + '/api/logout-all', { method: 'POST', headers: { authorization: 'Bearer ' + b } })).status, 200);
   assert.equal((await me(a)).status, 401);
   assert.equal((await me(b)).status, 401);
-  assert.equal(await wsStatus(a), 'ditolak');
+  assert.equal(await wsStatus(a), 'rejected');
   await new Promise((r) => setTimeout(r, 5));
   const c = await login();
   assert.equal((await me(c)).status, 200);
-  ok('logout-all mencabut token lama (API & WebSocket), login baru tetap berlaku');
+  ok('logout-all revokes old tokens (API & WebSocket), new logins stay valid');
 }
 
-// 3. Penautan PC butuh konfirmasi SETELAH login (POST + token bertanda tangan); parameter URL tidak bisa melewatinya.
+// 3. Linking a PC needs confirmation AFTER login (POST + signed token); URL parameters can't skip it.
 {
   const owner = user + '-link';
-  const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'PC <uji>' }) })).json();
-  assert.equal((await fetch(`${RELAY}/auth/login?kind=machine&pc=TIDAKADA`, { redirect: 'manual' })).status, 404);
-  // Link "confirm=1" lama tidak lagi langsung menautkan: tetap berhenti di halaman konfirmasi.
+  const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'PC <test>' }) })).json();
+  assert.equal((await fetch(`${RELAY}/auth/login?kind=machine&pc=NOTFOUND`, { redirect: 'manual' })).status, 404);
+  // The old "confirm=1" link no longer links directly: it still stops at the confirmation page.
   const r = await fetch(`${RELAY}/auth/dev/login?kind=machine&pc=${code}&login=${owner}&confirm=1`);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-security-policy') || '', /default-src 'none'/);
   const html = await r.text();
-  assert.match(html, /Hubungkan PC\?/);
-  assert.ok(html.includes(code) && html.includes('PC &lt;uji&gt;') && html.includes('@' + owner), 'nama di-escape, kode & akun tampil');
+  assert.match(html, /Connect this PC\?/);
+  assert.ok(html.includes(code) && html.includes('PC &lt;test&gt;') && html.includes('@' + owner), 'name escaped, code & account shown');
   assert.match(html, /method="post"/);
   assert.equal((await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json()).status, 'pending');
-  // Token palsu / jenis lain ditolak.
+  // Fake tokens / other kinds are rejected.
   assert.equal((await fetch(RELAY + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t: await login(owner) }) })).status, 400);
   const t = html.match(/name="t" value="([^"]+)"/)[1];
   assert.equal((await fetch(RELAY + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t }) })).status, 200);
   assert.equal((await (await fetch(`${RELAY}/auth/machine/poll?code=${code}`)).json()).status, 'ok');
-  ok('penautan PC: konfirmasi setelah login dengan POST bertoken (nama ter-escape, tanpa skrip, tidak bisa dilewati)');
+  ok('PC link: confirmation after login with a tokened POST (name escaped, no scripts, can\'t be skipped)');
 }
 
-// 3b. Token login bisa diperpanjang, dan WebSocket menerima token lewat subprotocol (bukan URL).
+// 3b. Login tokens can be renewed, and the WebSocket accepts the token via subprotocol (not the URL).
 {
   const owner = user + '-ws';
   const { code } = await (await fetch(RELAY + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'ws' }) })).json();
@@ -77,14 +77,14 @@ const wsStatus = (token) =>
     new Promise((resolve) => {
       const ws = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/ws/phone?mid=${mid}`, protos);
       ws.onopen = () => (ws.close(), resolve(ws.protocol));
-      ws.onerror = () => resolve('ditolak');
+      ws.onerror = () => resolve('rejected');
     });
   assert.equal(await open(['snugcode', 't.' + r.token]), 'snugcode');
-  assert.equal(await open(['snugcode', 't.salah']), 'ditolak');
-  ok('token login diperpanjang; token WebSocket lewat subprotocol');
+  assert.equal(await open(['snugcode', 't.wrong']), 'rejected');
+  ok('login token renewed; WebSocket token via subprotocol');
 }
 
-// 4. Batas mesin per akun.
+// 4. Machine limit per account.
 {
   const owner = user + '-m';
   let last;
@@ -93,53 +93,53 @@ const wsStatus = (token) =>
     last = await linkMachine(code, owner);
   }
   assert.equal(last.status, 409);
-  assert.match(await last.text(), /Maksimal 20 mesin/);
+  assert.match(await last.text(), /At most 20 machines/);
   const { machines } = await (await fetch(RELAY + '/api/machines', { headers: { authorization: 'Bearer ' + (await login(owner)) } })).json();
   assert.equal(machines.length, 20);
-  ok('mesin ke-21 ditolak (maks 20 per akun)');
+  ok('the 21st machine is rejected (max 20 per account)');
 }
 
-// 5. Tujuan setelah login: landing page atau snugcode agent saja (bukan host/path lain).
+// 5. Where to go after login: only the landing page or snugcode agent (no other host/path).
 {
   const loc = async (next) => (await fetch(`${RELAY}/auth/dev/login?kind=user&login=${user}&next=${encodeURIComponent(next)}`, { redirect: 'manual' })).headers.get('location') || '';
   assert.match(await loc('/'), /^http[^#]+\/#login=/);
   assert.match(await loc('/agent/'), /\/agent\/#login=/);
-  for (const bad of ['https://jahat.example/', '//jahat.example/', '/api/me']) assert.match(await loc(bad), new RegExp('^' + RELAY + '/agent/#login='));
-  ok('login: kembali ke landing atau agent, tanpa open redirect');
+  for (const bad of ['https://evil.example/', '//evil.example/', '/api/me']) assert.match(await loc(bad), new RegExp('^' + RELAY + '/agent/#login='));
+  ok('login: back to the landing page or agent, no open redirect');
 }
 
-// 6. Security header landing page & PWA (/agent/).
+// 6. Security headers of the landing page & PWA (/agent/).
 for (const p of ['/', '/agent/']) {
   const r = await fetch(RELAY + p);
   assert.equal(r.status, 200, p);
   const csp = r.headers.get('content-security-policy') || '';
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.match(csp, /frame-ancestors 'none'/);
-  assert.ok(!/wss:(\s|;|$)/.test(csp), 'connect-src tidak mengizinkan wss: ke host mana pun');
+  assert.ok(!/wss:(\s|;|$)/.test(csp), 'connect-src doesn\'t allow wss: to any host');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   const html = await r.text();
-  assert.ok(!/<script>/.test(html), 'tanpa skrip inline');
-  assert.ok(!/fonts\.googleapis/.test(html), 'font di-host sendiri');
-  ok(p + ': CSP ketat, tanpa skrip inline & font pihak ketiga');
+  assert.ok(!/<script>/.test(html), 'no inline scripts');
+  assert.ok(!/fonts\.googleapis/.test(html), 'self-hosted fonts');
+  ok(p + ': strict CSP, no inline scripts or third-party fonts');
 }
 {
   for (const f of ['/fonts/jetbrains-mono-400.woff2', '/sw.js', '/install.sh', '/agent/app.js', '/agent/manifest.webmanifest']) assert.equal((await fetch(RELAY + f)).status, 200, f);
-  ok('aset bersama di root: font, service worker, pemasang');
+  ok('shared assets at the root: fonts, service worker, installer');
 }
-// 6. Mesin yang mati tanpa menutup soket (codespace dihentikan, PC dicabut) tidak tampak online terus.
-// Butuh relay kedua dengan MACHINE_STALE_MS kecil (CI: RELAY_STALE), agar uji tidak menunggu 80 detik.
+// 7. Machines that die without closing their socket (codespace stopped, PC unplugged) don't stay online forever.
+// Needs a second relay with a small MACHINE_STALE_MS (CI: RELAY_STALE), so the test doesn't wait 80 seconds.
 if (process.env.RELAY_STALE) {
   const R = process.env.RELAY_STALE;
   const WS = R.replace(/^http/, 'ws');
   const owner = user + '-stale';
   const auth = { authorization: 'Bearer ' + (await (async () => decodeURIComponent((await fetch(`${R}/auth/dev/login?kind=user&login=${owner}`, { redirect: 'manual' })).headers.get('location').split('#login=')[1]))()) };
-  const { code } = await (await fetch(R + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'mati' }) })).json();
+  const { code } = await (await fetch(R + '/auth/machine/start', { method: 'POST', body: JSON.stringify({ name: 'dead' }) })).json();
   const page = await (await fetch(`${R}/auth/dev/login?kind=machine&pc=${code}&login=${owner}`)).text();
   await fetch(R + '/auth/machine/confirm', { method: 'POST', body: new URLSearchParams({ t: page.match(/name="t" value="([^"]+)"/)[1] }) });
   const { mid, token: mt } = await (await fetch(`${R}/auth/machine/poll?code=${code}`)).json();
   const online = async () => (await (await fetch(R + '/api/machines', { headers: auth })).json()).machines.find((m) => m.id === mid).online;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  // Mesin "hidup": ping tiap 1 detik seperti daemon (tiap 25 detik).
+  // A "live" machine: pings every second like the daemon (every 25 seconds).
   const machine = () =>
     new Promise((resolve) => {
       const ws = new WebSocket(WS + '/ws/machine', ['snugcode', 't.' + mt]);
@@ -147,22 +147,22 @@ if (process.env.RELAY_STALE) {
     });
   const m1 = await machine();
   await sleep(5000);
-  assert.equal(await online(), true, 'mesin yang terus ping tetap online melewati batas stale');
+  assert.equal(await online(), true, 'a machine that keeps pinging stays online past the stale limit');
   const statuses = [];
   const phone = new WebSocket(`${WS}/ws/phone?mid=${mid}`, ['snugcode', 't.' + auth.authorization.slice(7)]);
   phone.onmessage = (ev) => typeof ev.data === 'string' && ev.data !== 'pong' && JSON.parse(ev.data).t === 'status' && statuses.push(JSON.parse(ev.data).online);
   const phonePing = setInterval(() => phone.readyState === 1 && phone.send('ping'), 1000);
   await sleep(1500);
   assert.deepEqual(statuses, [true]);
-  // "Codespace dihentikan": soket tetap terbuka, tapi tidak ada ping lagi.
+  // "Codespace stopped": the socket stays open, but no more pings.
   clearInterval(m1.ping);
   const closed = new Promise((r) => (m1.ws.onclose = (ev) => r(ev.code)));
   const t0 = Date.now();
   while (statuses.length < 2 && Date.now() - t0 < 15000) await sleep(250);
-  assert.deepEqual(statuses, [true, false], 'HP yang sedang tersambung diberi tahu mesin offline (alarm)');
+  assert.deepEqual(statuses, [true, false], 'connected phones are told the machine went offline (alarm)');
   assert.equal(await online(), false);
-  assert.equal(await closed, 4006, 'soket mati ditutup relay');
-  // Mesin menyala lagi: online kembali dan HP diberi tahu.
+  assert.equal(await closed, 4006, 'the dead socket is closed by the relay');
+  // The machine starts again: back online and phones are told.
   const m2 = await machine();
   await sleep(500);
   assert.equal(await online(), true);
@@ -171,6 +171,6 @@ if (process.env.RELAY_STALE) {
   m2.ws.close();
   clearInterval(phonePing);
   phone.close();
-  ok('mesin yang mati tanpa menutup soket jadi offline; HP diberi tahu; menyala lagi → online');
+  ok('a machine that dies without closing its socket goes offline; phones are told; starting again → online');
 }
-console.log('\nSemua uji relay lulus.');
+console.log('\nAll relay tests passed.');

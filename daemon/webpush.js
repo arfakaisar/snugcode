@@ -1,7 +1,7 @@
-// Web Push (RFC 8291 aes128gcm + VAPID RFC 8292) dengan node:crypto saja.
-// Payload dienkripsi untuk kunci HP, jadi layanan push (FCM/Apple/Mozilla) tidak bisa membacanya.
-// Kunci VAPID dibuat oleh HP dan dikirim ke tiap PC lewat kanal E2EE: satu langganan push
-// browser hanya bisa memakai satu kunci, sedangkan satu HP bisa terhubung ke banyak PC.
+// Web Push (RFC 8291 aes128gcm + VAPID RFC 8292) using only node:crypto.
+// The payload is encrypted for the phone's key, so the push service (FCM/Apple/Mozilla) can't read it.
+// The VAPID key is created by the phone and sent to each PC over the E2EE channel: a browser push
+// subscription can only use one key, while one phone can connect to many PCs.
 import crypto from 'node:crypto';
 
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -34,15 +34,15 @@ export function encrypt(sub, payload) {
   return Buffer.concat([head, asPublic, body]);
 }
 
-// Validasi data langganan dari HP: { sub: PushSubscription JSON, vapid: JWK privat P-256 }.
+// Validate subscription data from the phone: { sub: PushSubscription JSON, vapid: private P-256 JWK }.
 export function checkPush(p) {
   const { sub, vapid } = p || {};
-  if (!/^https:\/\//.test(sub?.endpoint || '') || !sub.keys?.p256dh || !sub.keys?.auth) throw new Error('Langganan push tidak valid');
-  if (vapid?.kty !== 'EC' || vapid.crv !== 'P-256' || !vapid.d || !vapid.x || !vapid.y) throw new Error('Kunci VAPID tidak valid');
+  if (!/^https:\/\//.test(sub?.endpoint || '') || !sub.keys?.p256dh || !sub.keys?.auth) throw new Error('Invalid push subscription');
+  if (vapid?.kty !== 'EC' || vapid.crv !== 'P-256' || !vapid.d || !vapid.x || !vapid.y) throw new Error('Invalid VAPID key');
   return { sub: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } }, vapid: { kty: 'EC', crv: 'P-256', d: vapid.d, x: vapid.x, y: vapid.y } };
 }
 
-// true = terkirim; false = langganan sudah mati (404/410) dan harus dihapus.
+// true = delivered; false = the subscription is dead (404/410) and must be removed.
 export async function sendPush({ sub, vapid }, data) {
   const res = await fetch(sub.endpoint, {
     method: 'POST',
