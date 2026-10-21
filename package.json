@@ -31,7 +31,8 @@
     "deploy": "npm run build:web && cd relay && npx wrangler deploy && npx wrangler deploy -c wrangler.alias.jsonc",
     "docs:images": "node scripts/docs-images.mjs",
     "icons": "node scripts/icons.mjs",
-    "test:e2e:relay": "node test/e2e-relay.mjs"
+    "test:e2e:relay": "node test/e2e-relay.mjs",
+    "test:e2e:reserve": "node test/e2e-reserve.mjs"
   },
   "license": "MIT",
   "dependencies": {
