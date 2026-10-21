@@ -8,7 +8,7 @@ if ! { mkdir -p "$SNUGCODE_HOME" 2>/dev/null && [ -w "$SNUGCODE_HOME" ]; }; then
   if [ ! -w "$SNUGCODE_HOME" ]; then export SNUGCODE_HOME="$HOME/.snugcode"; mkdir -p "$SNUGCODE_HOME"; fi
 fi
 LOG="$SNUGCODE_HOME/cloud.log"
-RELAY="${SNUGCODE_RELAY:-https://snugcode.arfak.workers.dev}"
+RELAY="${SNUGCODE_RELAY:-https://snugcode.dev}"
 log() { echo "[$(date -u +%H:%M:%S)] $*" >> "$LOG"; echo "$*"; }
 # report <tahap> <pesan> [langkah]: tahap = installing | starting | error; langkah (untuk progress bar
 # di HP) = chromium | install | start

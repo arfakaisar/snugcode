@@ -36,15 +36,15 @@ Requires Node.js 22+, git, a GitHub account, and a ChatGPT account or a model AP
 
 ```bash
 # macOS / Linux
-curl -fsSL https://snugcode.arfak.workers.dev/install.sh | sh
+curl -fsSL https://snugcode.dev/install.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://snugcode.arfak.workers.dev/install.ps1 | iex
+irm https://snugcode.dev/install.ps1 | iex
 ```
 
-Then run `snugcode autostart on`, open **https://snugcode.arfak.workers.dev** on your phone, sign in with the same
+Then run `snugcode autostart on`, open **https://snugcode.dev** on your phone, sign in with the same
 GitHub account, pick your PC, and enter the PIN once. No PC? Choose **cloud runner** after signing in.
 
 The UI and full documentation are currently in Indonesian; see [README.md](README.md).
