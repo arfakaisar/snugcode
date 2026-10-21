@@ -645,4 +645,5 @@ export function busyButton(btn, label) {
 // ---------- Markdown (safe: all text is escaped) ----------
 export let copyIconHtml = null;
 export const md = (src) => mdRender(src, { copyIcon: (copyIconHtml ??= ic('copy').outerHTML) });
+// "Metode tidak dikenal" = the same error from daemons installed before the English release.
 export const isOldDaemon = (e) => /Metode tidak dikenal|Unknown method/.test(e?.message || '');

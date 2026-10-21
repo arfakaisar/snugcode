@@ -1,12 +1,12 @@
-// Benchmark engine per model: tugas coding kecil yang sama dijalankan di tiap engine (Claude Agent SDK,
-// Codex, Gemini CLI) untuk satu model, lalu dinilai dengan test otomatis. Hasilnya tabel tingkat lulus,
-// waktu & token, plus baris saran untuk shared/engine-table.js.
+// Per-model engine benchmark: the same small coding tasks run on each engine (Claude Agent SDK,
+// Codex, Gemini CLI) for one model, then are graded by automated tests. The output is a table of pass rate,
+// time & tokens, plus suggested lines for shared/engine-table.js.
 //
 //   npm run bench -- --models gemini:gemini-3.8-flash,openai:gpt-5.5 [--engines claude,gemini,codex]
-//                    [--tasks fix-bug,feature,rename] [--runs 2] [--timeout 600] [--out hasil.json]
+//                    [--tasks fix-bug,feature,rename] [--runs 2] [--timeout 600] [--out results.json]
 //
-// Memakai koneksi & API key di PC ini (biaya token ditagihkan ke key-mu). Berjalan di folder data
-// sementara: riwayat sesi asli tidak tersentuh, tool yang sudah terpasang (Codex/Gemini CLI) dipakai ulang.
+// Uses the connections & API keys on this PC (token costs are billed to your key). Runs in a temporary data
+// folder: real session history is untouched, already installed tools (Codex/Gemini CLI) are reused.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +22,7 @@ for (let i = 2; i < process.argv.length; i++) {
   args[k] = v ?? (process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[++i] : 'true');
 }
 
-// ---------- tugas: file awal + test yang harus lulus ----------
+// ---------- tasks: starting files + tests that must pass ----------
 const TASKS = {
   'fix-bug': {
     prompt: 'The test in test.js fails. Find and fix the bug in sum.js (do not change test.js). Run `node test.js` to verify.',
@@ -61,7 +61,7 @@ else await child();
 // ---------- proses induk: folder data sementara berisi salinan koneksi ----------
 async function parent() {
   if (!args.models || args.help) {
-    console.log('Pakai: npm run bench -- --models <koneksi:model,...> [--engines claude,codex,gemini] [--tasks ' + Object.keys(TASKS).join(',') + '] [--runs 1] [--timeout 600] [--out hasil.json]');
+    console.log('Pakai: npm run bench -- --models <koneksi:model,...> [--engines claude,codex,gemini] [--tasks ' + Object.keys(TASKS).join(',') + '] [--runs 1] [--timeout 600] [--out results.json]');
     process.exit(args.help ? 0 : 1);
   }
   const { loadConfig, loadSecrets, HOME } = await import('../daemon/config.js');
@@ -79,7 +79,7 @@ async function parent() {
   }
 }
 
-// ---------- proses anak: jalankan tugas lewat SessionManager asli ----------
+// ---------- child process: run a task through the real SessionManager ----------
 async function child() {
   const { loadConfig, loadSecrets } = await import('../daemon/config.js');
   const { SessionManager } = await import('../daemon/sessions.js');
@@ -105,7 +105,7 @@ async function child() {
         break;
       }
       if (route.engine !== engine) {
-        console.log(`… ${model} × ${engine}: endpoint tidak mendukung engine ini, dilewati`);
+        console.log(`… ${model} × ${engine}: the endpoint doesn't support this engine, skipped`);
         continue;
       }
       for (const task of tasks)
@@ -139,7 +139,7 @@ async function runTask(mgr, model, engine, task, timeout) {
     const timer = setTimeout(() => ((err = 'batas waktu'), s.interrupt().finally(resolve)), timeout);
     s.on('event', (e) => {
       if (process.env.DEBUG) console.error('[event]', JSON.stringify(e).slice(0, 300));
-      // Bench tanpa pengguna: setiap izin (mis. perintah shell Gemini CLI) disetujui.
+      // Unattended bench: every permission (e.g. Gemini CLI shell commands) is approved.
       if (e.k === 'perm') s.answerPermission(e.pid, 'allow');
       if (e.k === 'error') err ||= String(e.d).slice(0, 160);
       if (e.k === 'done') ((done = e), clearTimeout(timer), resolve());
@@ -149,8 +149,8 @@ async function runTask(mgr, model, engine, task, timeout) {
   const ms = Date.now() - t0;
   const check = spawnSync(T.check[0], T.check.slice(1), { cwd: dir, encoding: 'utf8', timeout: 60_000 });
   const pass = check.status === 0;
-  if (!pass && !err && done && !done.ok) err = String(done.err || 'agen gagal').slice(0, 160);
-  if (!pass && !err) err = (String(check.stderr || check.stdout).split('\n').find((l) => /Error|assert/i.test(l)) || 'test gagal').trim().slice(0, 160);
+  if (!pass && !err && done && !done.ok) err = String(done.err || 'agent failed').slice(0, 160);
+  if (!pass && !err) err = (String(check.stderr || check.stdout).split('\n').find((l) => /Error|assert/i.test(l)) || 'test failed').trim().slice(0, 160);
   await s.close?.();
   mgr.sessions.delete(s.meta.id);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -159,7 +159,7 @@ async function runTask(mgr, model, engine, task, timeout) {
 }
 
 function report(results) {
-  if (!results.length) return console.log('Tidak ada hasil.');
+  if (!results.length) return console.log('No results.');
   const med = (xs) => (xs.sort((a, b) => a - b), xs[Math.floor(xs.length / 2)]);
   const groups = new Map();
   for (const r of results) {
@@ -174,17 +174,17 @@ function report(results) {
     ms: med(rs.map((r) => r.ms)),
     tok: Math.round(rs.reduce((a, r) => a + r.in + r.out, 0) / rs.length),
   }));
-  console.log('\n| Model | Engine | Lulus | Median waktu | Token rata-rata |\n|---|---|---|---|---|');
+  console.log('\n| Model | Engine | Passed | Median time | Avg tokens |\n|---|---|---|---|---|');
   for (const r of rows) console.log(`| ${r.model} | ${r.engine} | ${r.pass}/${r.n} | ${(r.ms / 1000).toFixed(1)} s | ${r.tok} |`);
-  // Saran untuk shared/engine-table.js: lulus terbanyak, seri -> lebih cepat, lalu lebih hemat.
+  // Suggestion for shared/engine-table.js: most passes, ties -> faster, then cheaper.
   const better = (a, b) => a.pass / a.n - b.pass / b.n || b.ms - a.ms || b.tok - a.tok;
   const best = new Map();
   for (const r of rows) if (!best.has(r.model) || better(r, best.get(r.model)) > 0) best.set(r.model, r);
   const day = new Date().toISOString().slice(0, 10);
-  console.log('\nSaran baris shared/engine-table.js:');
+  console.log('\nSuggested shared/engine-table.js lines:');
   for (const r of best.values()) {
     const [conn, id] = r.model.includes(':') ? r.model.split(/:(.*)/s) : ['router', r.model];
     const kind = conn.replace(/\d+$/, '');
-    console.log(`  { kind: '${kind}', model: '^${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$', engine: '${r.engine}', why: 'bench ${day}: ${r.pass}/${r.n} lulus, median ${(r.ms / 1000).toFixed(0)} s' },`);
+    console.log(`  { kind: '${kind}', model: '^${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$', engine: '${r.engine}', why: 'bench ${day}: ${r.pass}/${r.n} passed, median ${(r.ms / 1000).toFixed(0)} s' },`);
   }
 }

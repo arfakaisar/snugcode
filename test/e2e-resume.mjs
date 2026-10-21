@@ -1,9 +1,9 @@
-// Uji ketahanan koneksi PWA saat HP kembali dari latar belakang: jaringan yang "menelan" paket (soket
-// lama setengah mati, koneksi baru tertahan tanpa jawaban) tidak boleh membuat layar macet di
-// "Menghubungi relay". PWA dibuka lewat proxy TCP lokal yang bisa diatur:
+// PWA connection resilience when the phone returns from the background: a network that "swallows" packets
+// (old socket half-dead, new connections stalled with no reply) must not leave the screen stuck on
+// "Contacting the relay". The PWA is opened through a controllable local TCP proxy:
 //   pass     : meneruskan apa adanya
-//   tarpit   : koneksi WebSocket BARU diterima tapi tidak pernah dijawab (tertahan di CONNECTING)
-//   blackhole: semua koneksi yang ADA berhenti meneruskan data tanpa menutup (soket setengah mati)
+//   tarpit   : NEW WebSocket connections are accepted but never answered (stuck in CONNECTING)
+//   blackhole: all EXISTING connections stop forwarding data without closing (half-dead sockets)
 //   Terminal 1: npm run build:web && npm run dev:relay
 //   Terminal 2: npm run test:e2e:resume
 import net from 'node:net';
@@ -21,7 +21,7 @@ const links = new Set();
 const proxy = net.createServer((c) => {
   c.on('error', () => {});
   c.once('data', (first) => {
-    // Tertahan hanya untuk WebSocket: halaman & API tetap termuat (seperti daftar PC yang tampil online).
+    // Stalls only WebSockets: the page & API still load (like a PC list that shows the PC online).
     if (mode === 'tarpit' && /^upgrade:\s*websocket/im.test(first.toString('latin1'))) return links.add({ c, u: null, dead: true });
     const u = net.connect(+target.port, target.hostname);
     const l = { c, u, dead: false };
@@ -39,7 +39,7 @@ const URL_ = `http://127.0.0.1:${proxy.address().port}`;
 const blackhole = () => links.forEach((l) => (l.dead = true));
 
 const exe = process.env.CHROME || findBrowser();
-if (!exe) throw new Error('Chrome/Chromium tidak ditemukan; set env CHROME ke path browsernya.');
+if (!exe) throw new Error('Chrome/Chromium not found; set env CHROME to the browser path.');
 const browser = await chromium.launch({ executablePath: exe, args: process.getuid?.() === 0 ? ['--no-sandbox'] : [] });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
 const page = await ctx.newPage();
@@ -52,61 +52,61 @@ const fail = async (m) => {
   cleanup?.();
   process.exit(1);
 };
-// Tersambung penuh = titik status hijau (kanal terenkripsi siap) dan daftar sesi tampil.
+// Fully connected = green status dot (encrypted channel ready) and the session list shows.
 const ready = (ms) =>
   page
     .waitForFunction((name) => document.querySelector('#dot')?.className === 'on' && document.body.innerText.includes(name), repo.split('/').pop(), { timeout: ms })
     .then(() => true)
     .catch(() => false);
-// Aplikasi kembali terlihat (di HP: visibilitychange setelah dibuka dari latar belakang).
+// The app becomes visible again (on a phone: visibilitychange after returning from the background).
 const resume = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 
 await page.goto(URL_ + '/agent/');
 await page.evaluate((kv) => { for (const [k, v] of kv) localStorage.setItem(k, v); }, [...mem.entries()]);
 await page.reload();
 await page.locator('text=' + PCNAME).first().click();
-if (!(await ready(20000))) await fail('PC tidak terbuka');
-ok('PWA tersambung lewat proxy');
+if (!(await ready(20000))) await fail('PC did not open');
+ok('PWA connected through the proxy');
 
-// 1) HP tidur: soket lama setengah mati, koneksi baru tertahan. Jaringan pulih lalu aplikasi dibuka lagi.
+// 1) Phone asleep: old socket half-dead, new connections stalled. The network recovers, then the app is reopened.
 blackhole();
 mode = 'tarpit';
 await sleep(3000);
 await resume();
-// Probe ping tidak dijawab → soket lama dilepas, soket baru tertahan.
-await page.waitForFunction(() => document.querySelector('#dot')?.className !== 'on', null, { timeout: 10000 }).catch(() => fail('soket setengah mati tidak terdeteksi'));
+// Unanswered ping probe → old socket dropped, new socket stalled.
+await page.waitForFunction(() => document.querySelector('#dot')?.className !== 'on', null, { timeout: 10000 }).catch(() => fail('half-dead socket not detected'));
 await sleep(6000);
 mode = 'pass';
 await resume();
 let t0 = Date.now();
-if (!(await ready(25000))) await fail('tidak pulih setelah soket setengah mati');
-ok(`soket setengah mati + koneksi tertahan: pulih ${((Date.now() - t0) / 1000).toFixed(1)} dtk setelah jaringan kembali`);
+if (!(await ready(25000))) await fail('did not recover after a half-dead socket');
+ok(`half-dead socket + stalled connection: recovered ${((Date.now() - t0) / 1000).toFixed(1)} s after the network came back`);
 
-// 2) Aplikasi dimuat ulang (dibuang OS / versi baru) saat koneksi baru masih tertahan: tidak boleh
-//    macet di "Menghubungi relay" setelah jaringan pulih.
+// 2) The app reloads (evicted by the OS / new version) while new connections are still stalled: it must not
+//    get stuck on "Contacting the relay" after the network recovers.
 mode = 'tarpit';
 await page.reload();
 await page.waitForSelector('text=Contacting the relay', { timeout: 15000 });
 await sleep(4000);
 mode = 'pass';
 t0 = Date.now();
-if (!(await ready(30000))) await fail('macet di "Menghubungi relay" walau jaringan sudah pulih');
-ok(`muat ulang saat koneksi tertahan: pulih ${((Date.now() - t0) / 1000).toFixed(1)} dtk setelah jaringan kembali`);
+if (!(await ready(30000))) await fail('stuck on "Contacting the relay" even though the network recovered');
+ok(`reload while the connection is stalled: recovered ${((Date.now() - t0) / 1000).toFixed(1)} s after the network came back`);
 
-// 3) Tombol "Coba lagi" muncul bila menyambung terlalu lama (bukan spinner tanpa akhir).
+// 3) A "Try now" button shows when connecting takes too long (not an endless spinner).
 mode = 'tarpit';
 await page.reload();
-await page.waitForSelector('text=Try now', { timeout: 30000 }).catch(() => fail('tidak ada tombol coba lagi'));
+await page.waitForSelector('text=Try now', { timeout: 30000 }).catch(() => fail('no try-again button'));
 mode = 'pass';
 t0 = Date.now();
 await page.locator('text=Try now').click();
-if (!(await ready(10000))) await fail('"Coba sekarang" tidak menyambung');
-ok(`menyambung lama: tombol "Coba sekarang" tampil dan langsung menyambung (${((Date.now() - t0) / 1000).toFixed(1)} dtk)`);
+if (!(await ready(10000))) await fail('"Try now" did not connect');
+ok(`slow connect: the "Try now" button shows and connects right away (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
 
 assert.deepEqual(errors, []);
 await browser.close();
 proxy.close();
 for (const l of links) (l.c.destroy(), l.u?.destroy());
 cleanup?.();
-console.log('SEMUA OK');
+console.log('ALL OK');
 process.exit(0);

@@ -1,15 +1,15 @@
-// Runner snugcode di GitHub Codespaces: daemon yang sama dengan di PC, dikendalikan dari HP.
-// Codespace ini dibuat otomatis oleh aplikasi (Pengaturan → Pakai cloud) dari fork repo ini; token mesin
-// & PIN datang dari Codespaces secrets (SNUGCODE_MACHINE_TOKEN, SNUGCODE_PAIR_PIN, SNUGCODE_RELAY).
-// Lihat daemon/runner.js dan docs/analisis-pwa-tanpa-pc.md.
+// snugcode runner in GitHub Codespaces: the same daemon as on a PC, controlled from a phone.
+// The app creates this codespace automatically (Settings → Use the cloud) from a fork of this repo; the machine
+// token & PIN come from Codespaces secrets (SNUGCODE_MACHINE_TOKEN, SNUGCODE_PAIR_PIN, SNUGCODE_RELAY).
+// See daemon/runner.js and docs/analisis-pwa-tanpa-pc.md.
 {
   "name": "snugcode runner",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
   "hostRequirements": { "cpus": 2 },
-  // /workspaces tetap ada saat codespace dihentikan & di-rebuild: worktree, riwayat sesi, transcript agen.
+  // /workspaces survives the codespace being stopped & rebuilt: worktrees, session history, agent transcripts.
   "containerEnv": { "SNUGCODE_HOME": "/workspaces/.snugcode" },
-  // onCreateCommand juga berjalan saat prebuild Codespaces (opsional, diatur di setelan repo fork): Chromium,
-  // bubblewrap & snugcode sudah terpasang di snapshot, jadi runner baru menyala dalam ±1 menit.
+  // onCreateCommand also runs during Codespaces prebuilds (optional, set in the fork's repo settings): Chromium,
+  // bubblewrap & snugcode are already installed in the snapshot, so a new runner starts in about 1 minute.
   "onCreateCommand": "bash .devcontainer/install.sh",
   "postStartCommand": "bash .devcontainer/start.sh",
   "customizations": {
