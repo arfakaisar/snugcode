@@ -5,8 +5,9 @@
 @font-face { font-family: 'Source Serif 4'; font-style: italic; font-weight: 200 900; font-display: swap; src: url(fonts/source-serif-4-italic.woff2) format('woff2-variations'), url(fonts/source-serif-4-italic.woff2) format('woff2'); }
 
 /* snugcode — UI mobile bergaya aplikasi chat: hangat, tenang, banyak gerak halus.
-   Prinsip: tidak pernah zoom sendiri (kontrol form >= 16px, touch-action manipulation,
-   text-size-adjust 100%), shell mengikuti visualViewport saat keyboard terbuka, target sentuh
+   Prinsip: zoom dikunci seperti aplikasi native (meta viewport user-scalable=no, touch-action pan-x
+   pan-y tanpa pinch-zoom, gestur cubit iOS dibatalkan di dom.js; terminal punya cubit ukuran huruf
+   sendiri), tidak pernah zoom sendiri (kontrol form >= 16px, text-size-adjust 100%), shell mengikuti visualViewport saat keyboard terbuka, target sentuh
    >= 36–44px, animasi hanya transform/opacity (murah di GPU), dan semua gerak dimatikan bila
    prefers-reduced-motion. Tema gelap bawaan; terang otomatis/manual lewat [data-theme].
    Kontras token teks memenuhi WCAG AA (≥ 4,5:1 terhadap --bg/--surface) di kedua tema. */
@@ -137,17 +138,20 @@
   }
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* pan-x pan-y: geser tetap jalan, cubit & ketuk-dua-kali tidak memperbesar halaman. Dipasang di semua
+   elemen karena touch-action dihitung per wadah gulir (nilai di <html> saja tidak sampai ke daftar). */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: pan-x pan-y; }
 [hidden] { display: none !important; }
 
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  touch-action: manipulation;
   overscroll-behavior: none;
   background: var(--bg);
 }
 html, body { margin: 0; height: 100%; overflow: hidden; }
+/* Ukuran teks pilihan pengguna (Akun & tampilan): isi layar, sheet & drawer ikut membesar. */
+#view, #sheetBody, #drawerPanel { zoom: var(--text-scale, 1); }
 body {
   color: var(--fg);
   font: 15px/1.5 var(--sans);
@@ -161,7 +165,8 @@ button, input, textarea, select { font: inherit; color: inherit; margin: 0; }
 svg { width: 18px; height: 18px; flex: none; }
 /* >= 16px: iOS Safari tidak akan zoom saat fokus. */
 input, textarea, select { font-size: 16px; }
-button { cursor: pointer; background: none; border: 0; padding: 0; touch-action: manipulation; }
+/* Tekan lama tombol tidak menyeleksi teks / memunculkan menu salin, seperti aplikasi native. */
+button { cursor: pointer; background: none; border: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 button:disabled { cursor: default; }
 a { color: var(--accent); text-decoration: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
