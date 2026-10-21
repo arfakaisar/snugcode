@@ -32,7 +32,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then echo go=1 >> "$GITHUB_OUTPUT"; exit 0; fi
           if git diff --quiet HEAD~1 HEAD -- relay web landing shared scripts/build-web.mjs package-lock.json .github/workflows/deploy.yml; then echo go=0 >> "$GITHUB_OUTPUT"; else echo go=1 >> "$GITHUB_OUTPUT"; fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
