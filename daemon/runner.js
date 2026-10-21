@@ -107,6 +107,10 @@ export async function bootstrapCloud(env, cfg, sec) {
 
 export const idleMinutes = (cfg) => (cfg.idleStopMinutes ?? IDLE_MINUTES_DEFAULT);
 
+// Supervisor runner Codespaces mengabaikan SIGTERM (lihat cli.js cloud): daemon yang mati selagi
+// codespace menyala tidak akan dinyalakan lagi oleh siapa pun. Container (Docker) tetap berhenti rapi.
+export const supervisorIgnoresTerm = (cfg) => cfg.runner?.provider === 'codespace';
+
 // Hentikan runner yang menganggur. Codespaces: lewat GitHub API dengan token ber-scope `codespace`
 // yang dikirim HP (RPC runnerConfig). Container: daemon keluar (exit 0) dan supervisor ikut berhenti.
 // @returns 'stopped' | 'exit' | null (tidak ada cara menghentikan runner ini)

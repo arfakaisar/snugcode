@@ -147,11 +147,15 @@ dan mengembalikan token mesinnya ke PWA. PWA lalu:
 
 Di codespace, `.devcontainer/start.sh` menjalankan `snugcode cloud`: `bootstrapCloud` membaca env (idempoten —
 perubahan dari HP seperti ganti PIN/key tidak ditimpa saat runner start ulang), menghapus env rahasia, lalu
-menjalankan daemon di bawah **supervisor** (exit 75 = restart/update dari HP, exit 0 = berhenti). Daemon dengan
+menjalankan daemon di bawah **supervisor** (exit 75 = restart/update dari HP, exit 0 = berhenti; crash dan sinyal
+yang mengenai daemon — daemon keluar dengan 128+sinyal — menyalakannya lagi; di Codespaces supervisor mengabaikan
+SIGTERM agar `pkill node` tidak mematikan runner selagi codespace menyala). Daemon dengan
 `runtime: 'cloud'` tidak menjalankan anti-sleep/autostart, boleh start tanpa koneksi model (diisi dari HP lewat RPC
 `connAdd`/`chatgptLogin`, atau env `SNUGCODE_API_KEY`), dan memeriksa tiap menit apakah ia menganggur (tidak ada agen/`!perintah`/dev server/tunnel, tidak
 ada HP yang membuka aplikasi). Setelah `idleStopMinutes` (bawaan 30) codespace dihentikan lewat GitHub API dengan
-token `codespace` yang dikirim HP (RPC `runnerConfig`). Saat runner tidur dibuka lagi, PWA menyalakannya (`/start`).
+token `codespace` yang dikirim HP (RPC `runnerConfig`). Saat runner tidur dibuka lagi, PWA menyalakannya (`/start`);
+codespace yang menyala 45 detik tanpa runner tersambung/melapor dinyalakan ulang sekali (stop → start) agar
+`postStartCommand` menjalankan runner lagi, dan setelah itu 6 menit tanpa laporan menjadi error dengan petunjuk log.
 
 Selama runner belum tersambung, skrip `.devcontainer/` (dan `snugcode cloud` bila konfigurasinya gagal) melaporkan
 tahapnya ke relay (`POST /api/runner/status` dengan token mesin: `stage` installing/starting/error, `step`
