@@ -176,6 +176,16 @@ export function applyTheme(t = store.get('theme') || 'system') {
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => applyTheme());
 
+// ---------- ukuran teks ----------
+// Zoom halaman dikunci (seperti aplikasi native), jadi pembaca yang butuh huruf lebih besar memakai skala
+// ini: CSS `zoom` pada isi layar, sheet & drawer (header dan terminal punya ukurannya sendiri).
+/** @type {[number, string][]} */
+export const TEXT_SCALES = [[0.9, 'Kecil'], [1, 'Normal'], [1.15, 'Besar'], [1.3, 'Sangat besar']];
+export function applyTextScale(z = Number(store.get('textScale')) || 1) {
+  if (z === 1) document.documentElement.style.removeProperty('--text-scale');
+  else document.documentElement.style.setProperty('--text-scale', String(z));
+}
+
 // ---------- viewport: shell mengikuti area yang benar-benar terlihat ----------
 // iOS tidak mengecilkan layout saat keyboard muncul; tanpa ini composer
 // tertutup keyboard dan halaman ikut bergeser.

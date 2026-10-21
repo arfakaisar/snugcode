@@ -7,7 +7,7 @@ import { app } from './state.js';
 import { anim, coarse, drawer, h, haptic, ic, isOldDaemon, menuItem, onLongPress, pop, mascot, toast, toggleItem, ui } from './dom.js';
 import { showGit } from './git.js';
 import { showFiles } from './files.js';
-import { showTerminal } from './terminal.js';
+import { prefetchTerminal, showTerminal } from './terminal.js';
 import { pickModel } from './model-picker.js';
 import { Renderer } from './renderer.js';
 import { onProc, showRun } from './run.js';
@@ -47,6 +47,7 @@ export function showSession(s) {
   app.current.cursor = new EventCursor();
   store.set('last', { mid: app.current.m.id, sid: s.id });
   drawer.close();
+  if (has('termOpen')) prefetchTerminal();
   const col = h('div', { class: 'col' });
   const term = h('div', { id: 'term' }, col);
   const wl = h('span', { class: 'wl shimmer' }, 'Berpikir…');

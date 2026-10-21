@@ -3,7 +3,7 @@
 // dan membukanya lagi memutar ulang output terakhir.
 import { app } from './state.js';
 import { store } from '../conn.js';
-import { coarse, h, haptic, ic, isOldDaemon, toast, ui } from './dom.js';
+import { coarse, copyText, h, haptic, ic, isOldDaemon, toast, ui } from './dom.js';
 import { ctrlKey, imeDelta } from '../termkeys.js';
 
 /** @type {Promise<typeof import('../xterm.js')> | null} */
@@ -16,6 +16,18 @@ function loadLib() {
     throw e;
   });
   return lib;
+}
+
+// Diunduh saat HP menganggur begitu sesi dengan terminal dibuka (service worker menyimpannya), agar membuka
+// terminal di sinyal lemah tidak gagal "Gagal memuat terminal". Hanya diunduh, belum dijalankan.
+let prefetched = false;
+export function prefetchTerminal() {
+  if (prefetched) return;
+  prefetched = true;
+  const go = () => {
+    for (const f of ['xterm.js', 'xterm.css']) fetch(new URL(f, document.baseURI), /** @type {RequestInit} */ ({ priority: 'low' })).catch(() => (prefetched = false));
+  };
+  'requestIdleCallback' in window ? requestIdleCallback(go, { timeout: 5000 }) : setTimeout(go, 2000);
 }
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -189,6 +201,22 @@ export async function showTerminal() {
       toast('Izinkan akses clipboard untuk menempel.', true);
     }
   };
+  // Seleksi di kanvas xterm sulit di layar sentuh: tanpa seleksi, seluruh isi layar disalin (baris yang
+  // terbungkus disambung kembali).
+  const copy = async () => {
+    let text = term.getSelection();
+    if (!text) {
+      const b = term.buffer.active;
+      for (let i = 0; i < term.rows; i++) {
+        const line = b.getLine(b.viewportY + i);
+        if (!line) break;
+        text += (i && !line.isWrapped ? '\n' : '') + line.translateToString(!b.getLine(b.viewportY + i + 1)?.isWrapped);
+      }
+      text = text.replace(/\s+$/, '');
+    }
+    if (text && (await copyText(text))) toast(term.hasSelection() ? 'Teks terpilih disalin' : 'Isi layar disalin');
+    term.focus();
+  };
   const KEYS = [
     ['Esc', () => '\x1b'],
     ['Tab', () => '\t'],
@@ -199,6 +227,7 @@ export async function showTerminal() {
     ['↑', () => arrow('A')],
     ['→', () => arrow('C')],
     ['Tempel', 'paste'],
+    ['Salin', 'copy'],
     ['^C', () => '\x03'],
     ['Home', () => arrow('H')],
     ['End', () => arrow('F')],
@@ -218,6 +247,7 @@ export async function showTerminal() {
           onclick: () => {
             haptic(5);
             if (act === 'paste') paste();
+            else if (act === 'copy') copy();
             else if (typeof act === 'string') (mods[act] = !mods[act]), renderKeys();
             else sendIn(applyMods(act()));
             term.focus();
