@@ -31,7 +31,7 @@ await build({
   logLevel: 'warning',
 });
 fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(out, 'xterm.css'));
-const shell = ['index.html', 'install.sh', 'install.ps1', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png'];
+const shell = ['index.html', 'install.sh', 'install.ps1', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
 // Security header untuk aset yang disajikan langsung (worker alias); relay menambahkannya sendiri.
 // Host WebSocket yang diizinkan CSP: alamat publik & lama dari relay/wrangler.jsonc (relay self-host
