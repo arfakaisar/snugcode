@@ -81,7 +81,7 @@ function textScalePicker() {
 }
 
 async function logoutAll() {
-  if (!(await ui.confirm({ title: 'Sign out everywhere?', text: 'Every phone & browser (including this one) will need to sign in with GitHub again. PCs and PIN pairings stay as they are.', ok: 'Sign out everywhere', danger: true, icon: 'logout', stay: true }))) return;
+  if (!(await ui.confirm({ title: 'Sign out everywhere?', text: 'Every phone & browser (including this one) will need to sign in with GitHub again. Machines and PIN pairings stay as they are.', ok: 'Sign out everywhere', danger: true, icon: 'logout', stay: true }))) return;
   try {
     await api('/api/logout-all', { method: 'POST' });
   } catch (e) {

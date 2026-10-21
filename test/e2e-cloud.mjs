@@ -120,7 +120,7 @@ if (exe) {
   await P.page.waitForSelector('text=/Key rejected/');
   await P.page.locator('#sheet:not([hidden]) [aria-label="Close"]').first().click();
   await P.page.waitForSelector('#sheet', { state: 'hidden' });
-  await P.page.click('[aria-label="PC settings"]');
+  await P.page.click('[aria-label="Machine settings"]');
   await P.page.waitForSelector('text=Cloud runner');
   for (const t of ['Cloud · container', 'Models & API keys (required)', 'Paired devices', 'PIN for another phone', 'Auto-stop']) assert.ok(await P.page.locator('#sheet').getByText(t).count(), t);
   await P.shot('2-menu');

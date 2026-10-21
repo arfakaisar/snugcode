@@ -21,7 +21,7 @@ export function showRun() {
     try {
       await fn();
     } catch (e) {
-      toast(isOldDaemon(e) ? 'Update snugcode on the PC to use Run & Preview.' : e.message, true);
+      toast(isOldDaemon(e) ? 'Update snugcode on the machine to use Run & Preview.' : e.message, true);
     }
     if (b.isConnected) done();
   };
@@ -76,7 +76,7 @@ export function showRun() {
   const render = () => {
     const ps = [...app.current.procs.values()].sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.startedAt - a.startedAt);
     body.replaceChildren(
-      ps.length ? h('div', {}, ...ps.map(procCard)) : h('div', { class: 'empty', style: 'padding:18px 8px 6px' }, h('div', { class: 'emptyart' }, ic('play')), h('b', {}, 'No processes yet'), 'Dev servers run on the PC, and you can open them on your phone through an encrypted tunnel made just for you.'),
+      ps.length ? h('div', {}, ...ps.map(procCard)) : h('div', { class: 'empty', style: 'padding:18px 8px 6px' }, h('div', { class: 'emptyart' }, ic('play')), h('b', {}, 'No processes yet'), 'Dev servers run on the machine, and you can open them on your phone through an encrypted tunnel made just for you.'),
       h('div', { class: 'label' }, 'Run'),
       cmdIn,
       detected ? h('div', { class: 'dim small', style: 'margin:8px 2px 0' }, detected.dev ? `Auto: ${detected.setup ? detected.setup + ' → ' : ''}${detected.dev}` : 'No dev command detected — enter one manually.') : null,

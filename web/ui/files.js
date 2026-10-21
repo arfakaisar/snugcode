@@ -8,7 +8,7 @@ const join = (dir, name) => (dir ? dir + '/' + name : name);
 const parentOf = (p) => p.split('/').slice(0, -1).join('/');
 export const fmtSize = (n) => (n < 1024 ? n + ' B' : n < 1024 * 1024 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB');
 
-const oldDaemon = (e) => (isOldDaemon(e) ? new Error('Update snugcode on the PC to open files from your phone.') : e);
+const oldDaemon = (e) => (isOldDaemon(e) ? new Error('Update snugcode on the machine to open files from your phone.') : e);
 
 // Git status per path (changed files, folders with changes); empty if not a repo.
 async function gitMarks(id) {

@@ -11,7 +11,7 @@ import { cloudPin } from './cloud.js';
 const has = (m) => !!app.current?.info?.caps?.includes(m);
 export const canConfigure = () => has('configure');
 export const canConnect = () => has('connAdd');
-const oldMsg = 'Update snugcode on the PC first to manage this from your phone.';
+const oldMsg = 'Update snugcode on the machine first to manage this from your phone.';
 
 // ---------- Models & API keys (connections) ----------
 const KIND_ICON = { chatgpt: 'spark', router: 'globe', custom: 'globe' };

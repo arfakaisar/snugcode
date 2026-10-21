@@ -88,7 +88,7 @@ export function machineActions(m) {
   ui.sheet(
     ui.head(m.name, { sub: (cloud ? (isCodespace(m) ? 'Codespaces runner' : 'Server runner') : 'PC') + (m.online ? ' · online' : ' · offline') }),
     h('div', { class: 'group' },
-      menuItem({ icon: cloud ? 'cloud' : 'monitor', t1: 'Open', t2: m.online ? 'sessions & settings' : cloud ? 'start & open' : 'waiting for the PC to come online', onclick: () => (ui.closeSheet(), openMachine(m)) }),
+      menuItem({ icon: cloud ? 'cloud' : 'monitor', t1: 'Open', t2: m.online ? 'sessions & settings' : cloud ? 'start & open' : 'waiting for it to come online', onclick: () => (ui.closeSheet(), openMachine(m)) }),
       menuItem({ icon: 'trash', t1: `Remove ${what}`, t2: cloud ? (isCodespace(m) ? 'the codespace & its account entry' : 'from your snugcode account') : 'from your snugcode account', danger: true, chev: false, onclick: remove }),
     ),
   );
@@ -119,7 +119,7 @@ export async function showMachines({ resume = false } = {}) {
   setHeader();
   const hello = h('div', { class: 'greet' }, mascot('draw tap'), h('h1', { class: 'serif' }, greeting() + (app.me?.login ? ', ' + app.me.login : '')));
   const list = h('div', {}, skeletons(2));
-  const sc = scrollCol(hello, h('p', { class: 'muted greet-sub' }, 'Pick a computer to get started.'), list);
+  const sc = scrollCol(hello, h('p', { class: 'muted greet-sub' }, 'Pick a machine to get started.'), list);
   ui.view(sc);
   pullToRefresh(sc, () => showMachines());
   if (!app.me)
@@ -156,7 +156,7 @@ export async function showMachines({ resume = false } = {}) {
   if (lastM) return openMachine(lastM, { sid: last.sid });
   const online = machines.filter((m) => m.online).length;
   list.replaceChildren(
-    h('div', { class: 'label' }, 'Computers', h('span', { class: 'count' }, machines.length), online ? h('span', { class: 'tag on' }, online + ' online') : null),
+    h('div', { class: 'label' }, 'Machines', h('span', { class: 'count' }, machines.length), online ? h('span', { class: 'tag on' }, online + ' online') : null),
     h('div', { class: 'list' },
       ...machines.map((m, i) => {
         const card = h('button', { class: 'card pc' + (m.online ? ' online' : ''), style: `--i:${i}`, onclick: () => (haptic(), openMachine(m)) },

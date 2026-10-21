@@ -31,7 +31,7 @@ export async function loadModels(fresh = false) {
 export function probeModel(id, retest = false) {
   if (retest) modelCache.probes.delete(id);
   if (!modelCache.probes.has(id)) {
-    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Update snugcode on the PC to test models.' : e.message }));
+    const p = app.conn.call('probeModel', { model: id }).catch((e) => ({ ok: null, err: isOldDaemon(e) ? 'Update snugcode on the machine to test models.' : e.message }));
     modelCache.probes.set(id, p);
     // Connection failures aren't cached; model results are cached for 5 minutes.
     p.then((r) => (r.ok === null ? modelCache.probes.delete(id) : setTimeout(() => modelCache.probes.delete(id), 5 * 60 * 1000)));

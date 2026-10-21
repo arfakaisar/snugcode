@@ -46,10 +46,10 @@ export function openMachine(m, { sid } = {}) {
       ui.sub('offline');
       if (!app.current.ready && isCodespace(m)) return wakeScreen(m, msg, showStatus);
       if (!app.current.ready) {
-        msg.textContent = 'The PC is offline.';
+        msg.textContent = m.kind === 'cloud' ? 'The runner is offline.' : 'The PC is offline.';
         if (m.kind === 'cloud') showStatus('Waiting for the runner', 'Make sure the snugcode container is running on the server (docker ps / docker start snugcode). This page connects automatically once the runner is online.', true);
         else showStatus('Waiting for the PC', 'Make sure snugcode is running on the PC (snugcode autostart on) and the PC isn’t asleep. This page connects automatically once the PC is online.', true);
-      } else toast('PC offline — waiting to reconnect…', true);
+      } else toast((m.kind === 'cloud' ? 'Runner' : 'PC') + ' offline — waiting to reconnect…', true);
     } else if (s === 'online' || s === 'reconnecting') {
       ui.dot('busy');
       if (app.current.ready) ui.sub('reconnecting…');
@@ -63,9 +63,9 @@ export function openMachine(m, { sid } = {}) {
         app.conn.pair(pin).then((r) => r.ok || showPin(m));
       } else showPin(m);
     }
-    else if (s === 'revoked') (toast('This phone’s access to the PC was revoked.', true), showPin(m));
-    else if (s === 'removed') (toast('This PC was removed from your account.', true), goMachines());
-    else if (s === 'authfail') toast('PC verification failed.', true);
+    else if (s === 'revoked') (toast('This phone’s access to this machine was revoked.', true), showPin(m));
+    else if (s === 'removed') (toast('This machine was removed from your account.', true), goMachines());
+    else if (s === 'authfail') toast('Machine verification failed.', true);
   });
   app.conn.on('ready', (info) => {
     ui.dot('on');
@@ -187,9 +187,9 @@ export function showPin(m) {
     haptic(60);
     err.textContent =
       r.reason === 'pin' ? `Wrong PIN.${r.left != null ? ` ${r.left} attempt${r.left === 1 ? '' : 's'} left.` : ''}`
-      : r.reason === 'locked' ? `Too many wrong PINs. Try again ${r.until ? 'at ' + new Date(r.until).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'later'}, or run \`snugcode pin\` on the PC to unlock it now.`
+      : r.reason === 'locked' ? `Too many wrong PINs. Try again ${r.until ? 'at ' + new Date(r.until).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'later'}, or run \`snugcode pin\` on the machine to unlock it now.`
       : r.reason === 'slow' ? 'Too fast — wait a few seconds.'
-      : r.reason === 'nopin' ? 'The PC has no PIN yet. Run `snugcode setup`.'
+      : r.reason === 'nopin' ? 'The machine has no PIN yet. Run `snugcode setup`.'
       : 'Failed: ' + r.reason;
   };
   btn.onclick = go;
@@ -202,7 +202,7 @@ export function showPin(m) {
         lock,
         h('h1', { class: 'serif' }, 'Pair this phone'),
         h('div', { class: 'muted' }, `Enter the PIN you created during setup on `, h('b', {}, m.name), '.'),
-        h('div', { class: 'dim small', style: 'margin-top:6px' }, 'Just once per phone. The PIN is verified directly by the PC — it’s never sent to the server.'),
+        h('div', { class: 'dim small', style: 'margin-top:6px' }, 'Just once per phone. The PIN is verified directly by the machine — it’s never sent to the server.'),
         wrap, err, btn,
       ),
     ),
@@ -383,7 +383,7 @@ export function onGithubStatus(st) {
   renderGhBanner();
   showSessionsMeta();
   app.current.ghSheet?.(st);
-  if (st.state === 'invalid' && was !== 'invalid' && !app.current.ghSheet) toast('The GitHub login on the PC is no longer valid — tap the banner to sign in again', true, 5000);
+  if (st.state === 'invalid' && was !== 'invalid' && !app.current.ghSheet) toast('The GitHub login on the machine is no longer valid — tap the banner to sign in again', true, 5000);
 }
 
 const doneState = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'emptyart ok' }, ic('check')), h('b', {}, title), text);
@@ -430,7 +430,7 @@ export async function githubLoginSheet() {
     render(await app.conn.call('githubLogin'));
   } catch (e) {
     close();
-    body.replaceChildren(h('div', { class: 'err' }, isOldDaemon(e) ? 'Update snugcode on the PC to sign in to GitHub from your phone (run `snugcode login` on the PC).' : e.message));
+    body.replaceChildren(h('div', { class: 'err' }, isOldDaemon(e) ? 'Update snugcode on the machine to sign in to GitHub from your phone (run `snugcode login` on the machine).' : e.message));
   }
 }
 
@@ -458,7 +458,7 @@ export function showMachineMenu() {
       },
     });
   ui.sheet(
-    ui.head(cloud ? 'Runner settings' : 'PC settings', { sub: app.current.m.name }),
+    ui.head(cloud ? 'Runner settings' : 'Machine settings', { sub: app.current.m.name }),
     h('div', { class: 'pchero' },
       h('span', { class: 'avatar' }, ic(cloud ? 'cloud' : 'monitor'), h('i', { class: 'live' })),
       h('div', { class: 'grow' }, h('b', {}, app.current.m.name), h('div', { class: 'dim small' }, [cloud ? (info.runner?.provider === 'codespace' ? 'Cloud · Codespaces' : 'Cloud · container') : { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[info.platform] || info.platform, info.commit ? 'v' + info.commit : null, info.github && !ghBad() ? '@' + info.github : 'GitHub not signed in'].filter(Boolean).join(' · '))),
@@ -492,21 +492,21 @@ export function showMachineMenu() {
     h('div', { class: 'group' },
       menuItem({
         icon: 'spark',
-        t1: 'Update snugcode on the PC',
+        t1: 'Update snugcode on the machine',
         t2: info.commit ? `Version: ${info.commit}${info.version ? ' (' + info.version + ')' : ''}` : 'Check for & install remote updates',
         onclick: () => updateMachineSheet(),
       }),
       menuItem({
         icon: 'trash',
         t1: 'Clean up unused folders',
-        t2: 'Remove orphaned worktrees & repos on the PC',
+        t2: 'Remove orphaned worktrees & repos on the machine',
         onclick: async () => {
           try {
             toast('Scanning folders…');
             const r = await app.conn.call('cleanup');
             const wtCount = r.removedWorktrees?.length || 0;
             const repoCount = r.removedRepos?.length || 0;
-            toast(wtCount || repoCount ? `Cleaned up: ${wtCount} worktree${wtCount === 1 ? '' : 's'}, ${repoCount} repo${repoCount === 1 ? '' : 's'}` : 'The PC workspace is already clean.');
+            toast(wtCount || repoCount ? `Cleaned up: ${wtCount} worktree${wtCount === 1 ? '' : 's'}, ${repoCount} repo${repoCount === 1 ? '' : 's'}` : 'The machine’s workspace is already clean.');
           } catch (e) {
             toast(e.message, true);
           }
@@ -514,10 +514,10 @@ export function showMachineMenu() {
       }),
       menuItem({
         icon: 'refresh',
-        t1: 'Restart the PC daemon',
+        t1: 'Restart the snugcode daemon',
         t2: info.preventSleep ? 'Prevent PC sleep: on' : 'Restart the daemon connection',
         onclick: async () => {
-          if (!(await ui.confirm({ title: 'Restart the daemon?', text: 'The snugcode daemon on the PC restarts. Sessions reconnect automatically after a few seconds.', ok: 'Restart', icon: 'refresh' }))) return;
+          if (!(await ui.confirm({ title: 'Restart the daemon?', text: 'The snugcode daemon on the machine restarts. Sessions reconnect automatically after a few seconds.', ok: 'Restart', icon: 'refresh' }))) return;
           try {
             const r = await app.conn.call('restart');
             toast(r.message || 'Daemon restarting…');
@@ -530,7 +530,7 @@ export function showMachineMenu() {
     h('div', { class: 'label' }, 'Device'),
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Allow notifications', t2: 'Updates when the agent finishes / needs permission', onclick: enableNotifications }),
-      menuItem({ icon: 'monitor', t1: 'Switch PC', t2: 'back to the computer list', onclick: () => (ui.closeSheet(), goMachines()) }),
+      menuItem({ icon: 'monitor', t1: 'Switch machine', t2: 'back to the machine list', onclick: () => (ui.closeSheet(), goMachines()) }),
       menuItem({ icon: 'unlink', t1: 'Forget this phone’s pairing', t2: 'You’ll need the PIN again to connect', danger: true, chev: false, onclick: () => (store.set('dev.' + app.current.m.id, null), ui.closeSheet(), openMachine(app.current.m)) }),
     ),
   );
@@ -567,8 +567,8 @@ async function runnerAction(kind) {
 }
 
 export async function updateMachineSheet() {
-  const body = h('div', {}, loading('Checking for updates on the PC…'));
-  ui.sheet(ui.head('PC update', { sub: app.current.m.name }), body);
+  const body = h('div', {}, loading('Checking for updates on the machine…'));
+  ui.sheet(ui.head('snugcode update', { sub: app.current.m.name }), body);
   try {
     const st = await app.conn.call('updateStatus');
     const hasUpdate = st.updateAvailable;
@@ -586,7 +586,7 @@ export async function updateMachineSheet() {
       btn,
       // New version misbehaving: go back to the version before the last update (supported daemons only).
       st.canRollback && app.current.info?.caps?.includes('rollback')
-        ? h('button', { class: 'btn', style: 'margin-top:8px', onclick: async (e) => (await ui.confirm({ title: 'Go back to the previous version?', text: 'snugcode on the PC is reinstalled at the version before the last update, then the daemon restarts.', ok: 'Roll back', icon: 'refresh' })) && runUpdate(e.currentTarget, () => ui.closeSheet(), 'rollback') }, 'Go back to the previous version')
+        ? h('button', { class: 'btn', style: 'margin-top:8px', onclick: async (e) => (await ui.confirm({ title: 'Go back to the previous version?', text: 'snugcode on the machine is reinstalled at the version before the last update, then the daemon restarts.', ok: 'Roll back', icon: 'refresh' })) && runUpdate(e.currentTarget, () => ui.closeSheet(), 'rollback') }, 'Go back to the previous version')
         : null,
     );
   } catch (e) {

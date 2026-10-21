@@ -120,7 +120,7 @@ export function showSession(s) {
     modes.hidden = !list.length;
     modes.replaceChildren(...list);
     if (!was && list.length) anim(modes, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 240);
-    input.placeholder = ss.plan ? 'What should we plan?' : shellMode ? (ss.computer ? 'Shell command on the PC…' : 'Shell command in the worktree…') : (ss.computer ? 'Ask anything on your computer…' : 'Ask the agent…');
+    input.placeholder = ss.plan ? 'What should we plan?' : shellMode ? (ss.computer ? 'Shell command on the machine…' : 'Shell command in the worktree…') : (ss.computer ? 'Ask anything on your computer…' : 'Ask the agent…');
     plusBtn.classList.toggle('on', list.length > 0);
   };
   app.current.setPlan = (on) => {
@@ -132,7 +132,7 @@ export function showSession(s) {
       app.current.setPlan((await app.conn.call('plan', { id: s.id, on })).plan);
       toast(app.current.session.plan ? 'Plan mode: the agent drafts a plan first, without changing files' : 'Plan mode off');
     } catch (e) {
-      throw isOldDaemon(e) ? new Error('Update snugcode on the PC for plan mode.') : e;
+      throw isOldDaemon(e) ? new Error('Update snugcode on the machine for plan mode.') : e;
     }
     return app.current.session.plan;
   };
@@ -245,7 +245,7 @@ export function showSession(s) {
                   try {
                     Object.assign(app.current.session, await app.conn.call('edits', { id: s.id, on }));
                   } catch (e) {
-                    throw isOldDaemon(e) ? new Error('Update snugcode on the PC for this feature') : e;
+                    throw isOldDaemon(e) ? new Error('Update snugcode on the machine for this feature') : e;
                   }
                   return app.current.session.askEdits;
                 },
@@ -276,7 +276,7 @@ export function showSession(s) {
         try {
           sum = await app.conn.call('setSessionModel', { id: s.id, model: id });
         } catch (e) {
-          throw isOldDaemon(e) ? new Error('Update snugcode on the PC to change models mid-session.') : e;
+          throw isOldDaemon(e) ? new Error('Update snugcode on the machine to change models mid-session.') : e;
         }
         app.current.session.model = sum.model;
         setModelChip();
@@ -492,7 +492,7 @@ export function sessionMenu() {
       menuItem({ icon: 'branch', t1: 'Git', t2: 'status, diff, commit, push, PR', onclick: () => showGit() }),
       menuItem({ icon: 'play', t1: 'Run & Preview', t2: 'dev server, logs, preview on your phone', onclick: () => showRun() }),
       has('files') ? menuItem({ icon: 'folder', t1: 'Files', t2: 'browse, view & edit files', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
-      has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'interactive shell in the ' + (isComp ? 'PC' : 'worktree'), onclick: () => showTerminal() }) : null,
+      has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'interactive shell in the ' + (isComp ? 'machine' : 'worktree'), onclick: () => showTerminal() }) : null,
       menuItem({ icon: 'cpu', t1: 'Change model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
       has('budget') ? menuItem({ icon: 'clock', t1: 'Cost & limit', t2: `${usd(s.spent)} this session · ${s.budget ? 'limit ' + usd(s.budget) : 'no limit'}`, onclick: () => budgetSheet(s) }) : null,
       (s.local || isComp) ? null : menuItem({
@@ -509,7 +509,7 @@ export function sessionMenu() {
     ),
     h('div', { class: 'group' },
       menuItem({ icon: 'home', t1: 'Back to home', chev: false, onclick: () => (ui.closeSheet(), (ui.dir = -1), showSessions()) }),
-      menuItem({ icon: 'trash', t1: 'Delete session', t2: isComp ? 'removes the session history on the PC' : 'also removes its worktree on the PC', danger: true, chev: false, onclick: () => deleteSession(s) }),
+      menuItem({ icon: 'trash', t1: 'Delete session', t2: isComp ? 'removes the session history on the machine' : 'also removes its worktree on the machine', danger: true, chev: false, onclick: () => deleteSession(s) }),
     ),
   );
 }
