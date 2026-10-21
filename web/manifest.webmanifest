@@ -1,10 +1,10 @@
 {
-  "name": "snugcode",
+  "name": "snugcode agent",
   "short_name": "snugcode",
   "description": "Coding agent (Claude, GPT, Gemini, dan lainnya) di PC-mu atau di cloud, dikendalikan dari HP.",
   "id": "/",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/agent/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#262624",
   "theme_color": "#262624",

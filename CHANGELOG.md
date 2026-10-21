@@ -4,6 +4,15 @@ Riwayat perubahan penting snugcode (sebelumnya pocketcode). Arsitektur & fitur l
 
 ## Belum dirilis
 
+### Baru
+- **Landing page snugcode Cloud di `snugcode.dev`; aplikasi (kini *snugcode agent*) pindah ke `snugcode.dev/agent/`.**
+  Landing page (`landing/`) berisi fitur, cara kerja, demo deploy, harga + konfigurator server, dan FAQ. Tombol
+  **Buka snugcode agent** langsung membuka agent bila sudah login; bila belum, muncul pilihan **Masuk dengan GitHub**
+  atau **Daftar akun baru** (`/auth/login?signup=1`), lalu kembali ke tujuan semula (`next=/` atau `/agent/`, hanya dua
+  path itu). Login dipakai bersama (`pc.token`, satu origin). Tidak ada yang perlu dipasang ulang: service worker tetap
+  di `/sw.js` (scope `/`) sehingga notifikasi push tetap jalan, dan aplikasi di layar utama, link notifikasi, serta
+  `#gh=`/`#import=` yang masih menuju `/` diteruskan ke `/agent/`. `install.sh`/`install.ps1` tetap di root.
+
 ### Perbaikan
 - **Runner/PC yang mati mendadak tidak lagi tampak online.** Codespace yang dihentikan langsung (atau PC yang
   dicabut listriknya / kehilangan jaringan) tidak sempat menutup soketnya ke relay, dan Cloudflare menahan soket itu,

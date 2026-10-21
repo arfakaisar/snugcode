@@ -235,7 +235,7 @@ async function setup() {
   saveConfig(cfg);
   saveSecrets(sec);
   rl?.close();
-  console.log(c.g('\n✓ Setup selesai.') + ` Jalankan ${c.b('snugcode start')} (atau ${c.b('snugcode autostart on')}), lalu buka ${c.b(cfg.relayUrl)} di HP.\n`);
+  console.log(c.g('\n✓ Setup selesai.') + ` Jalankan ${c.b('snugcode start')} (atau ${c.b('snugcode autostart on')}), lalu buka ${c.b(cfg.relayUrl + '/agent/')} di HP.\n`);
 }
 
 async function resetPin() {
