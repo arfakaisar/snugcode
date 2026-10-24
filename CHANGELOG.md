@@ -4,7 +4,7 @@ Notable changes to snugcode (formerly pocketcode). Features are described in the
 for releases up to v0.4.0 are kept in their original language (Indonesian). Older entries may mention the relay,
 landing page, or internal docs, which are no longer part of this repo.
 
-## Unreleased
+## 2026-10-24 — v0.5.0: open client (AGPL-3.0), supply-chain & sandbox hardening, app lock, prompt queue
 
 ### Security
 - **Installers only install from the official GitHub repo** (latest release tag). They used to install whatever
