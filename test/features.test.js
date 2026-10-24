@@ -77,6 +77,9 @@ test('diff review: revert a single hunk, a new file, and a stale hunk', async ()
   fs.writeFileSync(path.join(cwd, 'a.txt'), changed.join('\n') + '\n');
   fs.writeFileSync(path.join(cwd, 'new.txt'), 'new\n');
   const { diff } = await gitDiff(cwd);
+  // The diff includes the new file but never touches the user's index (no intent-to-add entries).
+  assert.match(diff, /new file mode[\s\S]*\+new/);
+  assert.match(git(cwd, 'status', '--porcelain'), /^\?\? new\.txt$/m);
   const filePatch = diff.slice(diff.indexOf('diff --git a/a.txt'), diff.indexOf('diff --git a/new.txt'));
   const { hunks } = splitPatch(filePatch);
   assert.equal(hunks.length, 2);

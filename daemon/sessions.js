@@ -21,7 +21,7 @@ import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
 import { openTunnel } from './tunnel.js';
-import { snapshot, rewind } from './checkpoint.js';
+import { snapshot, rewind, keepCheckpoint, dropCheckpoints } from './checkpoint.js';
 import { restoreEnv, detectProject } from './project.js';
 import { SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtools.js';
 import { closeBrowser } from './browser.js';
@@ -702,7 +702,13 @@ export class Session extends EventEmitter {
     // this checkpoint to finish (askPermission), so rewind still gets the state before the prompt.
     if (userSeq && !this.meta.computer)
       this.cpReady = snapshot(this.meta.cwd).then(
-        (tree) => tree && this.emitEvent({ k: 'cp', of: userSeq, tree }),
+        (tree) => {
+          if (!tree) return;
+          this.emitEvent({ k: 'cp', of: userSeq, tree });
+          // snugcode's own worktrees: keep the checkpoint reachable so `git gc` doesn't delete it (see checkpoint.js).
+          // Local sessions are the user's own repo: no extra refs there.
+          if (!this.meta.local) keepCheckpoint(this.meta.cwd, this.id, userSeq, tree).catch((e) => this.mgr.log('! checkpoint ref failed: ' + e.message));
+        },
         (e) => this.mgr.log('! checkpoint failed: ' + e.message),
       );
     if (this.meta.note) {
@@ -937,7 +943,7 @@ export class SessionManager {
       console.error(`! sessions/index.json is corrupted (kept as index.json.broken-*); ${index.length} session(s) recovered from worktrees.`);
     }
     for (const meta of index) if (meta?.id && meta.cwd && fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
-    if (!idx.ok) this.saveIndex();
+    if (!idx.ok) this.saveIndex({ now: true });
     // Scan and clean up orphaned folders automatically in the background
     setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500).unref?.();
     this.cleanupTimer = setInterval(() => {
@@ -952,6 +958,7 @@ export class SessionManager {
   close() {
     this.proxy?.close();
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.saveTimer) this.saveIndex({ now: true });
     return Promise.all([...this.sessions.values()].map((s) => s.close()).concat(closeBrowser()));
   }
 
@@ -1036,7 +1043,16 @@ export class SessionManager {
   }
 
   // Atomic: a failed write (e.g. full disk) leaves the old index intact and doesn't break the agent flow.
-  saveIndex() {
+  // Status, cost, and setting changes happen many times per prompt: they're coalesced into one write (~200 ms later).
+  // Structural changes (session created/removed) and daemon shutdown write right away (`now`).
+  saveIndex({ now = false } = {}) {
+    if (!now) {
+      this.saveTimer ??= setTimeout(() => this.saveIndex({ now: true }), 200);
+      this.saveTimer.unref?.();
+      return;
+    }
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     try {
       writeJson(SESSION_INDEX, [...this.sessions.values()].map((s) => s.meta), 0o644);
     } catch (e) {
@@ -1073,7 +1089,7 @@ export class SessionManager {
       };
       const s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
       return s;
     }
     if (local) {
@@ -1085,7 +1101,7 @@ export class SessionManager {
       const meta = { id, repo: info.repo, cwd: info.cwd, branch: info.branch, base: info.base, local: true, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
       const s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
       return s;
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('The repo must be in owner/name format');
@@ -1100,7 +1116,7 @@ export class SessionManager {
       const meta = { id, repo, ...wt, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
       s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
     } finally {
       const n = this.busyRepos.get(busyKey) - 1;
       if (n > 0) this.busyRepos.set(busyKey, n);
@@ -1118,12 +1134,13 @@ export class SessionManager {
     for (const [t, x] of this.bridges) if (x === s) this.bridges.delete(t);
     await new Promise((r) => setTimeout(r, 150)); // claude.exe releases the worktree files
     this.sessions.delete(id);
-    this.saveIndex();
+    this.saveIndex({ now: true });
     try {
       safeRm(s.logFile);
     } catch {}
     // The user's own local folders are never deleted; only their session history.
     if (!s.meta.local && !s.meta.computer) {
+      await dropCheckpoints(s.meta.cwd, s.id).catch(() => {});
       await removeWorktree(s.meta.cwd).catch(() => {});
     }
     // Clean up orphan worktrees / logs (repo base clones are kept for a few days for the next session)

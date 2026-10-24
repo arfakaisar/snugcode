@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { isInside, isSensitivePath } from './permissions.js';
-import { git } from './github.js';
+import { git, worktreeDiff } from './github.js';
 
 export const MAX_TEXT = 1024 * 1024; // text files that can be opened & edited
 const MAX_IMAGE = 2 * 1024 * 1024;
@@ -140,8 +140,8 @@ function applyReverse(cwd, patch) {
 export async function revertChange(cwd, rel, hunk) {
   const { root, rel: r } = resolveIn(cwd, rel);
   if (!r) throw new Error('Invalid path');
-  await git(root, ['add', '-N', '--', r]).catch(() => {});
-  const patch = await git(root, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--', r]);
+  // The same diff the phone showed (worktreeDiff: snapshot through a temporary index, the user's index untouched).
+  const patch = await worktreeDiff(root, [r]);
   if (!patch.trim()) throw new Error('This file has no changes');
   const { header, hunks } = splitPatch(patch);
   const isNew = header.some((l) => l.startsWith('new file mode'));

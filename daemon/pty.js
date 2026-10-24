@@ -10,7 +10,11 @@ const require = createRequire(import.meta.url);
 const MAX_PER_SESSION = 4;
 const SCROLLBACK = 256 * 1024;
 const MAX_QUEUE = 512 * 1024;
+// Output is batched: 16 ms keeps typing echo instant. During output floods (npm install, build logs) terminals
+// watched only through the relay are batched every 50 ms instead: ~3× fewer relay messages, same bytes.
 const FLUSH_MS = 16;
+const FLOOD_MS = 50;
+const FLOOD_BYTES = 8 * 1024;
 
 /** @type {any} */
 let ptyMod;
@@ -74,12 +78,15 @@ export class Terminals {
       const next = q + d;
       t.subs.set(c, next.length > MAX_QUEUE ? next.slice(-MAX_QUEUE) : next);
     }
-    t.flushT ??= setTimeout(() => this.flush(t), FLUSH_MS);
+    t.flushT ??= setTimeout(() => this.flush(t), t.flood && ![...t.subs.keys()].some((c) => c.local) ? FLOOD_MS : FLUSH_MS);
   }
 
   flush(t) {
     clearTimeout(t.flushT);
     t.flushT = null;
+    let max = 0;
+    for (const q of t.subs.values()) max = Math.max(max, q.length);
+    t.flood = max >= FLOOD_BYTES;
     for (const [c, q] of t.subs) {
       if (!q) continue;
       t.subs.set(c, '');
