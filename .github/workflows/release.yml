@@ -44,3 +44,12 @@ jobs:
           if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN is not set: skipping npm publish (installers use GitHub releases)."; exit 0; fi
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           npm publish --provenance --access public
+      # Asks the hosted service to test & deploy this release (snugcode.dev serves the PWA built from it). Only releases
+      # are deployed, never every push to main: the served PWA holds the phones' device secrets. Needs the
+      # HOSTED_DISPATCH_TOKEN secret; skipped without it (e.g. in forks).
+      - name: Deploy to the hosted service
+        env:
+          TOKEN: ${{ secrets.HOSTED_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "HOSTED_DISPATCH_TOKEN is not set: skipping"; exit 0; fi
+          curl -sf -X POST -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" https://api.github.com/repos/arfakaisar/snugcode-cloud/dispatches -d "{\"event_type\":\"upstream-updated\",\"client_payload\":{\"sha\":\"$GITHUB_SHA\",\"ref\":\"$GITHUB_REF_NAME\"}}"
