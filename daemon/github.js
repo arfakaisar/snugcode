@@ -121,8 +121,10 @@ export function git(cwd, args, token, opts = {}) {
       else if (err) reject(new Error(msg));
       else resolve(stdout);
     });
-    // stdin for commands like `update-ref --stdin`; otherwise closed so git never waits for input.
-    child.stdin?.end(opts.input ?? '');
+    // stdin for commands like `update-ref --stdin`; otherwise closed so git never waits for input. git often exits
+    // before reading it (EPIPE on Linux): ignored, the exit code and stderr above say what happened.
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(opts.input);
   });
 }
 
