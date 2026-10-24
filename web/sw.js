@@ -10,7 +10,9 @@ self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) 
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || /^\/(api|auth|ws)\//.test(url.pathname)) return;
+  // Only the app (/agent/) and its fonts are cached: the website's pages and assets (landing, account, admin) aren't
+  // part of the app and would otherwise pile up in this cache until the next app version.
+  if (e.request.method !== 'GET' || url.origin !== location.origin || !/^\/(agent|fonts)\//.test(url.pathname)) return;
   // Stale-while-revalidate: cached assets are used right away (the PWA opens instantly even on a weak
   // signal), and the latest version downloads in the background for next time.
   e.respondWith(

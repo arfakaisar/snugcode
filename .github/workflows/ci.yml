@@ -89,6 +89,8 @@ jobs:
           SHOTS: ${{ runner.temp }}/shots
       # The phone returns from the background on a network that stalls connections: never stuck on "Contacting the relay".
       - run: npm run test:e2e:resume
+      # App lock: WebAuthn platform authenticator (virtual, through CDP) before the PWA shows any PC.
+      - run: npm run test:e2e:lock
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -96,18 +98,3 @@ jobs:
           path: |
             dev-relay.log
             ${{ runner.temp }}/shots
-
-  # Asks the hosted service to test & deploy this commit (snugcode.dev serves the PWA built from it). Needs the
-  # HOSTED_DISPATCH_TOKEN secret; skipped without it (e.g. in forks).
-  notify-hosted:
-    needs: [test, e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - env:
-          TOKEN: ${{ secrets.HOSTED_DISPATCH_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then echo "HOSTED_DISPATCH_TOKEN is not set: skipping"; exit 0; fi
-          curl -sf -X POST -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" \
-            https://api.github.com/repos/arfakaisar/snugcode-cloud/dispatches \
-            -d "{\"event_type\":\"upstream-updated\",\"client_payload\":{\"sha\":\"$GITHUB_SHA\"}}"

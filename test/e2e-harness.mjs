@@ -207,9 +207,10 @@ export async function setup({ name = 'e2e-' + Date.now().toString(36), reply, se
   ok('local session created & attached (' + att.events.length + ' events)');
   const cleanup = async () => {
     conn.close();
-    if (daemon.exitCode === null) {
+    // Already gone (exit code or signal), or never answering: don't wait forever for an `exit` that already fired.
+    if (daemon.exitCode === null && daemon.signalCode === null) {
       daemon.kill('SIGTERM');
-      await new Promise((r) => daemon.on('exit', r));
+      await Promise.race([new Promise((r) => daemon.on('exit', r)), sleep(5000)]);
     }
     router.close();
     fs.rmSync(HOME, { recursive: true, force: true });

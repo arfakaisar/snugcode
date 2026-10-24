@@ -77,6 +77,9 @@ test('diff review: revert a single hunk, a new file, and a stale hunk', async ()
   fs.writeFileSync(path.join(cwd, 'a.txt'), changed.join('\n') + '\n');
   fs.writeFileSync(path.join(cwd, 'new.txt'), 'new\n');
   const { diff } = await gitDiff(cwd);
+  // The diff includes the new file but never touches the user's index (no intent-to-add entries).
+  assert.match(diff, /new file mode[\s\S]*\+new/);
+  assert.match(git(cwd, 'status', '--porcelain'), /^\?\? new\.txt$/m);
   const filePatch = diff.slice(diff.indexOf('diff --git a/a.txt'), diff.indexOf('diff --git a/new.txt'));
   const { hunks } = splitPatch(filePatch);
   assert.equal(hunks.length, 2);
@@ -346,4 +349,35 @@ test('session cost: the Agent SDK running total becomes per-turn cost, the budge
   assert.equal(s.emitEvent({ k: 'done', ok: true }, { persist: false }).spent, undefined);
   s.setBudget(0);
   assert.equal(s.summary().budget, 0);
+});
+
+test('prompt queue: prompts sent while the agent works wait, can be removed, Stop clears them, the next one starts when idle', async () => {
+  const { Session } = await import('../daemon/sessions.js');
+  const { WORKSPACES } = await import('../daemon/config.js');
+  const cwd = repo(path.join(WORKSPACES, 'o__queue'), { 'a.txt': 'a\n' });
+  const mgr = { config: {}, secrets: {}, log() {}, notify() {}, saveIndex() {}, trimAgents() {} };
+  const s = new Session({ id: 'tqueue', cwd, repo: 'o/queue', model: 'm' }, mgr);
+  const live = [];
+  s.on('event', (e) => e.k === 'queue' && live.push(e.items.length));
+  s.status = 'running';
+  assert.deepEqual(await s.send('first', []), { queued: 1 });
+  assert.deepEqual(await s.send('second', [{ mime: 'image/png', data: 'AA==' }]), { queued: 2 });
+  assert.deepEqual(s.queueInfo(), [{ text: 'first' }, { text: 'second', img: 1 }]);
+  await assert.rejects(s.send('!ls', []), /still running/, '!commands are never queued');
+  assert.deepEqual(s.unqueue(0), [{ text: 'second', img: 1 }]);
+  assert.throws(() => s.unqueue(5), /not found/);
+  for (let i = s.queue.length; i < 10; i++) await s.send('p' + i, []);
+  await assert.rejects(s.send('one too many', []), /At most 10/);
+  await s.interrupt();
+  assert.equal(s.queue.length, 0, 'Stop clears the queue');
+  assert.deepEqual(live.slice(0, 3), [1, 2, 1]);
+  assert.equal(live.at(-1), 0);
+  // Idle again: the next queued prompt is sent.
+  await s.send('next', []);
+  const sent = [];
+  s.send = async (text) => (sent.push(text), true);
+  s.setStatus('idle');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.deepEqual(sent, ['next']);
+  assert.equal(s.queue.length, 0);
 });

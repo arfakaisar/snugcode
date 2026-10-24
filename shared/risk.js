@@ -41,7 +41,7 @@ export function permRisk(tool, input = {}, ctx = {}) {
   if (ctx.push) return { level: 'high', why: 'writes to GitHub (visible to others, can\'t be rewound)' };
   if (ctx.secret) return { level: 'high', why: 'mentions snugcode credential files' };
   if (ctx.escapes) return { level: 'high', why: 'asks to run outside the OS sandbox' };
-  if (ctx.protectedEdit) return { level: 'high', why: 'changes the repo\'s tool/hook config (.git, .claude, .mcp.json, …)' };
+  if (ctx.protectedEdit) return { level: 'high', why: 'changes the repo\'s tool/hook/CI config (.git, .claude, .github/workflows, .devcontainer, …)' };
   if (tool === 'Bash' || /dev_start$/.test(tool)) return commandRisk(input.command);
   if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool)) return ctx.outside && !ctx.computer ? { level: 'high', why: 'changes files outside the session folder' } : { level: 'low', why: 'changes files in the session folder' };
   if (/^(Read|Glob|Grep|LS|NotebookRead)$/.test(tool)) return { level: 'medium', why: 'reads files outside the session folder' };

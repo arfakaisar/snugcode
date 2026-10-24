@@ -227,21 +227,24 @@ export const RPC = {
     for (let size = 0; i > 0 && size < limit; i--) size += JSON.stringify(all[i - 1]).length;
     const events = i ? all.slice(i) : all;
     s.warm();
-    return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo() };
+    return { session: s.summary(), events, truncated: events.length < all.length || s.missingSince(since), perms: s.pendingPerms(), procs: s.procs.list(), preview: s.previewInfo(), queue: s.queueInfo() };
   },
   detach(c) {
     c.unsubscribe();
     return true;
   },
+  // Returns true, or { queued: n } when the agent is still working (the prompt waits in the session's queue).
   async send(c, p) {
-    await c.d.sessions.get(p.id).send(String(p.text || ''), p.images);
-    return true;
+    const r = await c.d.sessions.get(p.id).send(opt(p.text, 'text', { max: 200_000 }) || '', p.images);
+    return r?.queued ? r : true;
   },
+  // Remove one prompt from the queue (`i`), or every queued prompt (no `i`).
+  unqueue: (c, p) => c.d.sessions.get(p.id).unqueue(p.i == null ? undefined : need(p.i, 'index', { type: 'number' })),
   async interrupt(c, p) {
     await c.d.sessions.get(p.id).interrupt();
     return true;
   },
-  perm: (c, p) => c.d.sessions.get(p.id).answerPermission(p.pid, p.decision, { answers: p.answers, message: p.message }),
+  perm: (c, p) => c.d.sessions.get(p.id).answerPermission(need(p.pid, 'pid', { max: 64 }), need(p.decision, 'decision', { max: 16 }), { answers: p.answers && typeof p.answers === 'object' ? p.answers : undefined, message: opt(p.message, 'message', { max: 4000 }) }),
   plan(c, p) {
     const s = c.d.sessions.get(p.id);
     s.setPlan(p.on);
@@ -256,11 +259,11 @@ export const RPC = {
   runDev: (c, p) => c.d.sessions.get(p.id).runDev(opt(p.cmd, 'cmd')),
   procStart: (c, p) => c.d.sessions.get(p.id).procs.start(need(p.cmd, 'cmd'), opt(p.name, 'name', { max: 64 })),
   procStop(c, p) {
-    c.d.sessions.get(p.id).procs.stop(p.name);
+    c.d.sessions.get(p.id).procs.stop(need(p.name, 'name', { max: 64 }));
     return true;
   },
-  procLogs: (c, p) => c.d.sessions.get(p.id).procs.logs(p.name, 64 * 1024),
-  preview: (c, p) => c.d.sessions.get(p.id).preview(p.name),
+  procLogs: (c, p) => c.d.sessions.get(p.id).procs.logs(need(p.name, 'name', { max: 64 }), 64 * 1024),
+  preview: (c, p) => c.d.sessions.get(p.id).preview(need(p.name, 'name', { max: 64 })),
   previewClose(c, p) {
     c.d.sessions.get(p.id).closeTunnel();
     return true;
@@ -390,10 +393,11 @@ export const RPC = {
     return r;
   },
   commit(c, p) {
-    if (!p.message?.trim()) throw new Error('Empty commit message');
+    const message = opt(p.message, 'commit message', { max: 20_000 })?.trim();
+    if (!message) throw new Error('Empty commit message');
     const cfg = c.d.config;
     const identity = cfg.githubLogin ? { login: cfg.githubLogin, id: cfg.githubId } : null;
-    return gitCommit(c.d.sessions.get(p.id).meta.cwd, String(p.message).trim(), identity);
+    return gitCommit(c.d.sessions.get(p.id).meta.cwd, message, identity);
   },
   async push(c, p) {
     if (!c.d.secrets.githubToken) throw new Error('This PC isn\'t signed in to GitHub.');
@@ -406,7 +410,8 @@ export const RPC = {
     const s = c.d.sessions.get(p.id);
     // Local sessions may switch branches from the terminal: use the current branch (read without git).
     const head = currentBranch(s.meta.cwd) || (await gitStatus(s.meta.cwd)).branch;
-    const pr = await createPR(c.d.secrets.githubToken, s.meta.repo, { head, base: p.base || s.meta.base, title: p.title, body: p.body || '' });
+    const title = need(String(p.title || '').trim(), 'PR title', { max: 256 });
+    const pr = await createPR(c.d.secrets.githubToken, s.meta.repo, { head, base: opt(p.base, 'base branch', { max: 255 }) || s.meta.base, title, body: opt(p.body, 'PR description', { max: 60_000 }) || '' });
     s.emitEvent({ k: 'note', d: `PR #${pr.number} created: ${pr.url}` });
     return pr;
   },

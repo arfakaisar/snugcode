@@ -15,7 +15,7 @@ import { GithubAuth } from './ghauth.js';
 import { getInstallInfo, checkUpdate } from './updater.js';
 import { startKeepAwake } from './keepawake.js';
 import { sendPush } from './webpush.js';
-import { idleMinutes, stopRunner, tickUsage, usageSummary } from './runner.js';
+import { idleMinutes, stopRunner, tickUsage, usageSummary, decodeMachineToken } from './runner.js';
 import { Terminals } from './pty.js';
 import { RPC, defaultModel } from './rpc.js';
 
@@ -27,6 +27,8 @@ const PROTO = 2;
 // Relay heartbeat: ping every PING_MS; with no message at all for DEAD_MS the connection is considered dead.
 export const PING_MS = 25_000;
 export const DEAD_MS = 70_000;
+// Machine tokens older than this are renewed by the relay (signing-key rotation, see renewMachineToken).
+const RENEW_MS = 7 * 24 * 3600 * 1000;
 const PKG_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 export class Daemon {
@@ -231,14 +233,16 @@ export class Daemon {
     });
   }
 
-  // Newer relays accept the token via subprotocol (not recorded in URL logs); old relays only `?token=`.
+  // Relays accept the token via subprotocol (not recorded in URL logs). Only a relay that answers its health check
+  // without `wsProto` (a very old self-hosted one) gets `?token=`: an unreachable health check must never downgrade
+  // to putting the machine token in the URL.
   async relaySupportsProto() {
     if (this.wsProto !== undefined) return this.wsProto;
     try {
       const r = await fetch(this.config.relayUrl.replace(/\/+$/, '') + '/api/health', { signal: AbortSignal.timeout(5000) });
       this.wsProto = !!(await r.json()).wsProto;
     } catch {
-      return false; // retried on the next reconnect
+      return true; // checked again on the next reconnect
     }
     return this.wsProto;
   }
@@ -255,6 +259,7 @@ export class Daemon {
       this.backoff = 1000;
       this.lastRx = Date.now();
       this.log(`✓ Connected to the relay as "${this.config.machineName}". Open the app on your phone to start.`);
+      this.renewMachineToken();
       clearInterval(this.ping);
       // Heartbeat: the relay answers every `ping`. With no answer for DEAD_MS (Wi-Fi change, PC waking from
       // sleep, NAT dropping the connection), the socket is considered dead even without `close`, and reconnected.
@@ -303,6 +308,31 @@ export class Daemon {
       setTimeout(() => this.connect().catch((e) => this.log('! failed to reach the relay: ' + e.message)), wait);
     };
     ws.onerror = () => {};
+  }
+
+  // Machine tokens don't expire, so the relay's signing key could never be rotated without re-linking every PC.
+  // A connected daemon swaps a token older than RENEW_MS (or from before tokens had `iat`) for a freshly signed one;
+  // the new token is used from the next connection. Relays without the endpoint (404/405) are left alone.
+  async renewMachineToken() {
+    if (this.renewing || this.renewUnsupported) return;
+    const cur = this.secrets.machineToken;
+    const p = decodeMachineToken(cur);
+    if (!p || (p.iat && Date.now() - p.iat < RENEW_MS)) return;
+    this.renewing = true;
+    try {
+      const r = await fetch(this.config.relayUrl.replace(/\/+$/, '') + '/api/machine/renew', { method: 'POST', headers: { authorization: 'Bearer ' + cur }, signal: AbortSignal.timeout(10_000) });
+      if (r.status === 404 || r.status === 405) return void (this.renewUnsupported = true);
+      if (!r.ok) return;
+      const { token } = await r.json();
+      const q = decodeMachineToken(token);
+      if (q?.mid !== p.mid || this.secrets.machineToken !== cur) return;
+      this.secrets.machineToken = token;
+      this.saveSecrets();
+    } catch {
+      // retried on the next connection
+    } finally {
+      this.renewing = false;
+    }
   }
 
   // Half-dead socket: let it go (its close may hang for a long time) and reconnect now.
