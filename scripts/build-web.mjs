@@ -1,10 +1,10 @@
 // Bundles the site into relay/public, deployed together with the relay:
-//   /         landing page (landing/), disalin apa adanya
+//   /         landing page (landing/): index.html + minified, content-hashed /assets/ (cached for a year)
 //   /agent/   PWA snugcode agent (web/ + shared/crypto.js)
 //   /sw.js    PWA service worker at the root (scope `/`): registrations & push subscriptions of phones that
 //             installed the PWA while it lived at `/` stay the same, so notifications needn't be re-allowed.
 //   /fonts/   font bersama, /install.sh & /install.ps1 (pemasang satu baris), build.json, _headers
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +43,34 @@ for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(agen
 // Root: installers (their URLs are used in the README & on PCs: snugcode.dev/install.sh), the landing page, and icons
 // browsers/iOS look up at the root.
 for (const f of ['install.sh', 'install.ps1', 'icon.svg', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png']) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
-for (const f of fs.readdirSync(path.join(root, 'landing'))) fs.copyFileSync(path.join(root, 'landing', f), path.join(out, f));
+// Landing page: CSS/JS minified, and every asset under /assets/ named after a hash of its content, so browsers
+// cache it for a year (_headers below) and each deploy that changes a file gives it a new URL. index.html itself
+// is revalidated on every visit. Other files in landing/ are copied as they are.
+{
+  const src = path.join(root, 'landing');
+  fs.mkdirSync(path.join(out, 'assets'));
+  const urls = {};
+  const emit = (name, data) => {
+    const file = name.replace(/(\.\w+)$/, `.${crypto.createHash('sha256').update(data).digest('hex').slice(0, 10)}$1`);
+    fs.writeFileSync(path.join(out, 'assets', file), data);
+    return file;
+  };
+  const min = async (f, loader) => (await transform(fs.readFileSync(path.join(src, f), 'utf8'), { loader, minify: true })).code;
+  for (const f of fs.readdirSync(path.join(src, 'fonts'))) urls[`fonts/${f}`] = emit(f, fs.readFileSync(path.join(src, 'fonts', f)));
+  // The fonts sit next to the stylesheet in /assets/.
+  const css = (await min('landing.css', 'css')).replace(/url\(["']?(fonts\/[^"')]+)["']?\)/g, (m, u) => {
+    if (!urls[u]) throw new Error(`landing.css: ${u} not found in landing/`);
+    return `url(${urls[u]})`;
+  });
+  urls['landing.css'] = emit('landing.css', css);
+  for (const f of ['boot.js', 'landing.js']) urls[f] = emit(f, await min(f, 'js'));
+  const html = fs.readFileSync(path.join(src, 'index.html'), 'utf8').replace(/(href|src)="([^"]+)"/g, (m, a, u) => (urls[u] ? `${a}="assets/${urls[u]}"` : m));
+  for (const f of ['landing.css', 'boot.js', 'landing.js']) if (!html.includes(`assets/${urls[f]}`)) throw new Error(`index.html: no reference to ${f}`);
+  fs.writeFileSync(path.join(out, 'index.html'), html);
+  for (const f of fs.readdirSync(src, { withFileTypes: true })) {
+    if (f.isFile() && !['index.html', 'landing.css', 'boot.js', 'landing.js'].includes(f.name)) fs.copyFileSync(path.join(src, f.name), path.join(out, f.name));
+  }
+}
 // iOS 27: the "Add to Home Screen" sheet uses its own image loader that fails to fetch icons from network URLs
 // (resulting in a letter "S" icon), while data: URIs work since Safari 27. The PNG is still served for older iOS.
 const indexHtml = fs.readFileSync(path.join(agent, 'index.html'), 'utf8');
@@ -58,7 +85,9 @@ const wrangler = JSON.parse(fs.readFileSync(path.join(root, 'relay', 'wrangler.j
 const wsHosts = process.env.SNUGCODE_WS_HOSTS
   ? process.env.SNUGCODE_WS_HOSTS.split(',')
   : [wrangler.vars?.PUBLIC_URL ? new URL(wrangler.vars.PUBLIC_URL).host : '', ...String(wrangler.vars?.LEGACY_HOSTS || '').split(',')];
-fs.writeFileSync(path.join(out, '_headers'), '/*\n' + Object.entries(securityHeaders(wsHosts.map((s) => s.trim()))).map(([k, v]) => `  ${k}: ${v}`).join('\n') + '\n');
+fs.writeFileSync(path.join(out, '_headers'), '/*\n' + Object.entries(securityHeaders(wsHosts.map((s) => s.trim()))).map(([k, v]) => `  ${k}: ${v}`).join('\n') + '\n' +
+  // Content-hashed landing assets (see above): a changed file always gets a new name.
+  '/assets/*\n  cache-control: public, max-age=31536000, immutable\n');
 // Self-hosted fonts (see @font-face in style.css).
 const FONTS = {
   'jetbrains-mono-400.woff2': '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2',
