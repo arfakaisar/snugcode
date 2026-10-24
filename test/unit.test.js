@@ -442,6 +442,15 @@ test('checkpoint: rewind restores contents, deleted files, and removes new files
     assert.equal(fs.existsSync(p('new.txt')), false);
     assert.equal(fs.readFileSync(p('node_modules/x/i.js'), 'utf8'), 'v2', 'node_modules is not snapshotted');
     assert.equal(await rewind(dir, tree), 0);
+    // Kept reachable (git gc can't delete it) under refs/snugcode/cp/, dropped with the session.
+    const { keepCheckpoint, dropCheckpoints } = await import('../daemon/checkpoint.js');
+    await keepCheckpoint(dir, 'sid1', 3, tree);
+    await keepCheckpoint(dir, 'sid1', 7, tree);
+    await keepCheckpoint(dir, 'sid2', 1, tree);
+    assert.equal((await git(dir, ['rev-parse', 'refs/snugcode/cp/sid1/7'])).trim(), tree);
+    assert.equal(await dropCheckpoints(dir, 'sid1'), 2);
+    assert.equal((await git(dir, ['for-each-ref', '--format=%(refname)', 'refs/snugcode/'])).trim(), 'refs/snugcode/cp/sid2/1');
+    assert.equal(await dropCheckpoints(dir, 'nothing'), 0);
   });
 });
 

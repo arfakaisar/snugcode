@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSPACES } from './config.js';
 import { safeRm } from './cleaner.js';
+import { snapshot, DIFF_INDEX } from './checkpoint.js';
 
 const API = 'https://api.github.com';
 export const TOKEN_INVALID = 'The GitHub login on this PC is no longer valid (token revoked). Sign in again: the "Sign in to GitHub" button in the phone app, /login in the terminal, or `snugcode login`.';
@@ -114,12 +115,14 @@ export function gitEnv(token) {
 
 export function git(cwd, args, token, opts = {}) {
   return new Promise((resolve, reject) => {
-    execFile('git', ['-c', 'core.quotepath=off', ...args], { cwd, env: { ...gitEnv(token), ...opts.env }, maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 10 * 60 * 1000 }, (err, stdout, stderr) => {
+    const child = execFile('git', ['-c', 'core.quotepath=off', ...args], { cwd, env: { ...gitEnv(token), ...opts.env }, maxBuffer: 64 * 1024 * 1024, timeout: opts.timeout || 10 * 60 * 1000 }, (err, stdout, stderr) => {
       const msg = (stderr || err?.message || '').trim();
       if (err && token && /Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]/i.test(msg)) reject(new Error(TOKEN_INVALID));
       else if (err) reject(new Error(msg));
       else resolve(stdout);
     });
+    // stdin for commands like `update-ref --stdin`; otherwise closed so git never waits for input.
+    child.stdin?.end(opts.input ?? '');
   });
 }
 
@@ -282,10 +285,18 @@ export async function gitStatus(cwd) {
   return { branch: st.branch, files: st.files, ahead, behind, log: log.split('\n').filter(Boolean), hasUpstream: behind !== null };
 }
 
+// Every uncommitted change (new files included) as one diff against HEAD. The working tree is snapshotted through a
+// separate temporary index (checkpoint.js) instead of `git add -N`: the user's own index is never modified, which
+// matters in local sessions where the repo is the user's own folder.
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+export async function worktreeDiff(cwd, paths = []) {
+  const tree = await snapshot(cwd, { index: DIFF_INDEX });
+  const head = await git(cwd, ['rev-parse', '--verify', '-q', 'HEAD^{tree}']).then((s) => s.trim(), () => EMPTY_TREE);
+  return git(cwd, ['diff', head, tree, '--no-color', '--no-ext-diff', ...(paths.length ? ['--', ...paths] : [])]);
+}
+
 export async function gitDiff(cwd, { limit = 400 * 1024 } = {}) {
-  // intent-to-add so new files show up in the diff.
-  await git(cwd, ['add', '-A', '-N']).catch(() => {});
-  let diff = await git(cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff']);
+  let diff = await worktreeDiff(cwd);
   const LIMIT = limit;
   let truncated = false;
   if (diff.length > LIMIT) {
