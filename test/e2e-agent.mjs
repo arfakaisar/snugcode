@@ -13,9 +13,14 @@ import { setup, ok, sleep, routerLog } from './e2e-harness.mjs';
 const { HOME, repo, ref, reg, daemon, conn, Conn, events, waitFor, s, cleanup } = await setup();
 
 // Prompt 1: the agent writes a file -> permission from the phone -> checkpoint -> done
+// The daemon's claude child processes (Linux, macOS, Windows), so this test also runs on a developer's PC.
 const claudePids = () => {
   try {
-    return execFileSync('pgrep', ['-P', String(daemon.pid), '-f', 'claude-agent-sdk-linux'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+    if (process.platform === 'win32') {
+      const ps = `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${daemon.pid} AND Name='claude.exe'").ProcessId`;
+      return execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8', windowsHide: true }).trim().split(/\s+/).filter(Boolean);
+    }
+    return execFileSync('pgrep', ['-P', String(daemon.pid), '-f', 'claude-agent-sdk-' + process.platform], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
   } catch {
     return [];
   }
@@ -158,6 +163,12 @@ ok(`rewind: ${nRw} file(s) restored, result.txt gone`);
 const idx = JSON.parse(fs.readFileSync(path.join(HOME, 'sessions', 'index.json'), 'utf8'));
 assert.equal(idx[0].id, s.id);
 ok('index.json valid');
+
+// The machine token from before `iat` was renewed by the relay once connected (signing-key rotation).
+const tok = JSON.parse(fs.readFileSync(path.join(HOME, 'secrets.json'), 'utf8')).machineToken;
+const tokBody = JSON.parse(Buffer.from(tok.split('.')[0], 'base64url').toString());
+assert.ok(tokBody.iat > 0 && tokBody.kind === 'machine', 'machine token renewed');
+ok('machine token renewed by the relay');
 
 // The terminal (local IPC, like the TUI) uses the same RPC table; shutdown only from the terminal
 await assert.rejects(conn.call('shutdown'), /Only from the PC terminal/);
