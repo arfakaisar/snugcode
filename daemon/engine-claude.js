@@ -131,7 +131,7 @@ export async function startClaudeAgent(s, route) {
   const sandboxed = support.ok && (mode === 'always' || !!s.meta.auto);
   if (s.meta.auto && mode !== 'off' && !support.ok && !s.mgr.warnedClaudeSandbox) {
     s.mgr.warnedClaudeSandbox = true;
-    s.emitEvent({ k: 'note', d: `◆ OS sandbox unavailable (${support.reason}): auto-approved commands run without a sandbox, so credentials in the snugcode data folder aren't protected at the OS level.` });
+    s.emitEvent({ k: 'note', d: `◆ OS sandbox unavailable (${support.reason}): under auto-approve only routine commands (test/lint/build) run without asking; other commands still ask, so the agent can't quietly read credentials. To auto-approve every command anyway, set "sandbox": "off" in config.json.` });
   }
   const key = ['claude', claudeExe, lightId, baseUrl, authToken, sandboxed].join('|');
   if (sandboxed && !s.meta.local && !s.meta.computer) excludeSandboxStubs(s.meta.cwd);
@@ -215,8 +215,10 @@ export async function startClaudeAgent(s, route) {
     kind: 'claude',
     key,
     q,
-    // Auto-approve was turned on while this process runs without a sandbox: Bash keeps asking until the next prompt.
-    unsandboxedAuto: support.ok && !sandboxed,
+    // Bash runs without an OS sandbox (none on this platform, e.g. Windows, or auto-approve was turned on after this
+    // process started): auto-approve then only lets routine commands through (sessions.js askPermission).
+    // "sandbox": "off" in config.json is the user's explicit opt-out.
+    unsandboxedAuto: mode !== 'off' && !sandboxed,
     input,
     model: actualModel,
     effort,

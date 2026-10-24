@@ -43,12 +43,19 @@ export const SECRET_CMD_RE = /secrets\.(?:json|key)|\.(?:snugcode|pocketcode)[\\
 // (.claude/), Codex (.codex/) & Gemini CLI (.gemini/) config, project MCP servers (.mcp.json), and .git contents (hooks, config
 // core.fsmonitor/hooksPath that run when the daemon calls git). Changing them always asks,
 // even under auto-approve: a README/issue with a prompt injection must not silently install hooks.
-const PROTECTED_DIRS = new Set(['.git', '.claude', '.codex', '.gemini']);
+// Also files that run code somewhere else without the user starting it: CI workflows & composite actions (run with the
+// repo's secrets once pushed; the GitHub token has the `workflow` scope), dev containers (Codespaces), editor tasks
+// (VS Code `runOn: folderOpen`), git hook managers (.husky), and direnv (.envrc).
+const PROTECTED_DIRS = new Set(['.git', '.claude', '.codex', '.gemini', '.devcontainer', '.vscode', '.husky']);
+const PROTECTED_SUBDIRS = [['.github', 'workflows'], ['.github', 'actions']];
+const PROTECTED_ROOT_FILES = new Set(['.mcp.json', '.envrc', '.devcontainer.json']);
 export function isProtectedRepoPath(p, cwd) {
   const rel = path.relative(cwd, p);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
-  const parts = rel.split(/[\\/]+/);
-  return parts.some((x) => PROTECTED_DIRS.has(x.toLowerCase())) || (parts.length === 1 && parts[0].toLowerCase() === '.mcp.json');
+  const parts = rel.split(/[\\/]+/).map((x) => x.toLowerCase());
+  if (parts.some((x) => PROTECTED_DIRS.has(x))) return true;
+  if (PROTECTED_SUBDIRS.some(([a, b]) => parts.some((x, i) => x === a && parts[i + 1] === b))) return true;
+  return parts.length === 1 && PROTECTED_ROOT_FILES.has(parts[0]);
 }
 
 // Paths touched by file tools (Glob with an absolute pattern: the part before the first glob character).

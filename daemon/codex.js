@@ -152,18 +152,30 @@ export function deniedPaths() {
   return ['secrets.json', 'secrets.key', 'config.json', 'codex', 'claude', 'env', 'sessions', 'daemon.log'].map((p) => path.join(HOME, p));
 }
 
-// Codex's OS sandbox (bubblewrap/Landlock on Linux, Seatbelt on macOS) may be unavailable, e.g. in
-// containers without user namespaces. Tested once per daemon process with a tiny command.
+// Codex's OS sandbox (bubblewrap/Landlock on Linux, Seatbelt on macOS, restricted token on Windows) may be unavailable,
+// e.g. in containers without user namespaces, or may not enforce snugcode's deny rules on every platform. Tested once
+// per daemon process with snugcode's real permission profile: the command must run AND must fail to read a canary file
+// in a denied folder. Anything else counts as "no sandbox" (every command then asks, see codexArgs).
 let sandboxProbe = null;
 /** @param {string[]} cmd */
 export function sandboxWorks(cmd) {
-  if (process.platform === 'win32') return Promise.resolve(true);
   // CODEX_HOME must exist: without it Codex fails before testing the sandbox (formerly read as "unavailable").
   fs.mkdirSync(CODEX_HOME, { recursive: true });
   sandboxProbe ??= new Promise((resolve) => {
-    execFile(cmd[0], [...cmd.slice(1), 'sandbox', '-c', 'default_permissions=":workspace"', '--', 'echo', 'snug-sandbox-ok'], { env: codexEnv(), timeout: 30_000 }, (err, out, errOut) => {
-      const ok = !err && String(out).includes('snug-sandbox-ok');
-      if (!ok) console.error('! Codex sandbox unavailable: ' + String(errOut || err?.message || '').split('\n').filter((l) => /error|denied|permission|namespace/i.test(l)).slice(0, 2).join(' ').slice(0, 300));
+    let canary;
+    try {
+      canary = path.join(HOME, 'sessions', '.sandbox-canary');
+      fs.mkdirSync(path.dirname(canary), { recursive: true });
+      fs.writeFileSync(canary, 'x');
+    } catch {
+      return resolve(false);
+    }
+    const script = `try{require('fs').readFileSync(${JSON.stringify(canary)});console.log('snug-read-leak')}catch{console.log('snug-sandbox-ok')}`;
+    const profile = codexArgs({ sandbox: true }).slice(0, 4);
+    execFile(cmd[0], [...cmd.slice(1), 'sandbox', ...profile, '--', process.execPath, '-e', script], { env: codexEnv(), timeout: 30_000, windowsHide: true }, (err, out, errOut) => {
+      const text = String(out);
+      const ok = !err && text.includes('snug-sandbox-ok') && !text.includes('snug-read-leak');
+      if (!ok) console.error('! Codex sandbox unavailable' + (text.includes('snug-read-leak') ? ': it does not deny the snugcode data folder on this platform' : ': ' + String(errOut || err?.message || '').split('\n').filter((l) => /error|denied|permission|namespace/i.test(l)).slice(0, 2).join(' ').slice(0, 300)));
       resolve(ok);
     });
   });
