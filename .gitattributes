@@ -1,0 +1,7 @@
+# LF everywhere: the PWA build (build.json) must be byte-identical on every OS, so anyone can verify
+# the served app against a build from source (docs/security.md).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.woff2 binary
