@@ -742,11 +742,13 @@ export class Session extends EventEmitter {
     const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && (this.meta.computer || paths.every((p) => isInside(p, cwd))) && !this.meta.askEdits && !this.meta.plan;
     // File-changing tools only run once this prompt's checkpoint is saved.
     if (!safe && this.cpReady) await this.cpReady;
-    // Auto-approve for Bash only if this agent process really runs with a sandbox (or sandboxing isn't supported).
-    const auto = this.meta.auto && !(tool === 'Bash' && this.agent?.unsandboxedAuto);
+    // Auto-approve for Bash only if this agent process really runs in an OS sandbox (or the user turned the sandbox off);
+    // without one (e.g. Windows), auto-approve falls back to the routine-commands rule below.
+    const unsandboxed = tool === 'Bash' && this.agent?.unsandboxedAuto;
+    const auto = this.meta.auto && !unsandboxed;
     if (!needsUser && (planFile || safe || editInside || auto || this.alwaysAllow.has(tool))) return allow;
     // The "Routine commands automatic" preset: test/lint/build without command chains pass without asking.
-    if (!needsUser && this.meta.autoLow && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
+    if (!needsUser && (this.meta.autoLow || this.meta.auto) && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
     return this.requestUser(tool, input, opts);
   }
 
