@@ -26,15 +26,12 @@
     "bench": "node scripts/bench.mjs",
     "test:ui": "node test/e2e-ui.mjs",
     "test:e2e:resume": "node test/e2e-resume.mjs",
-    "typecheck": "tsc -p . && npm --prefix relay run typecheck",
-    "dev:relay": "npm run build:web && cd relay && npx wrangler dev --var DEV_AUTH:1",
-    "deploy": "npm run build:web && cd relay && npx wrangler deploy && npx wrangler deploy -c wrangler.alias.jsonc",
+    "typecheck": "tsc -p .",
+    "dev:relay": "node test/dev-relay.mjs",
     "docs:images": "node scripts/docs-images.mjs",
-    "icons": "node scripts/icons.mjs",
-    "test:e2e:relay": "node test/e2e-relay.mjs",
-    "test:e2e:reserve": "node test/e2e-reserve.mjs"
+    "icons": "node scripts/icons.mjs"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.304",
     "@noble/ciphers": "^2.4.0",
@@ -51,9 +48,15 @@
     "esbuild": "^0.28.2",
     "gifenc": "^1.0.3",
     "playwright-core": "^1.64.1",
-    "typescript": "~6.0.2"
+    "typescript": "~6.0.2",
+    "ws": "^8.22.0"
   },
   "optionalDependencies": {
     "@lydell/node-pty": "^1.2.0-beta.15"
+  },
+  "homepage": "https://snugcode.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arfakaisar/snugcode.git"
   }
 }

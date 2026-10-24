@@ -1,4 +1,4 @@
-// End-to-end UI test: the built PWA (relay/public) in a real Chromium + the TUI in a
+// End-to-end UI test: the built PWA (dist/web) in a real Chromium + the TUI in a
 // pseudo-terminal, against the real daemon and a mock 9router (see e2e-harness.mjs). Checks the
 // login/PC list/session screens, permission dock, plan card, streaming markdown, git/model/run/menu sheets,
 // history replay without duplicates, and no JavaScript errors.

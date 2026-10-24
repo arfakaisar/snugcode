@@ -1,7 +1,2 @@
 node_modules/
-relay/node_modules/
-relay/.dev.vars
-relay/.wrangler/
-relay/public/
-relay/worker-configuration.d.ts
-.wrangler-stale/
+dist/

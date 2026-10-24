@@ -30,12 +30,12 @@ jobs:
           if [ "$v" != "$GITHUB_REF_NAME" ]; then echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $v"; exit 1; fi
       - run: npm ci
       - run: npm test
-      # PWA hashes built from the tagged code: compare with https://<relay>/build.json (docs/security.md).
+      # PWA hashes built from the tagged code: compare with https://snugcode.dev/build.json (docs/security.md).
       - run: npm run build:web
-      - name: Buat rilis GitHub
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" relay/public/build.json --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" dist/web/build.json --title "snugcode $GITHUB_REF_NAME" --generate-notes --verify-tag
       # Publish to npm (`npm i -g snugcode`, used by the install.sh/ps1 installers) when the NPM_TOKEN secret is set.
       - name: Publish to npm
         env:

@@ -1,7 +1,7 @@
 // snugcode runner in GitHub Codespaces: the same daemon as on a PC, controlled from a phone.
 // The app creates this codespace automatically (Settings → Use the cloud) from a fork of this repo; the machine
 // token & PIN come from Codespaces secrets (SNUGCODE_MACHINE_TOKEN, SNUGCODE_PAIR_PIN, SNUGCODE_RELAY).
-// See daemon/runner.js and docs/analisis-pwa-tanpa-pc.md.
+// See daemon/runner.js.
 {
   "name": "snugcode runner",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
