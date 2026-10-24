@@ -53,7 +53,9 @@ A summary of the security features is in [README → Security](../README.md#secu
    boundary. A script that calls `git push` from inside a file isn't detected as a push.
 4. **Model providers** see everything the agent reads and writes, including file contents in the repo.
 5. **Computer mode & the PTY terminal** deliberately give access to the whole PC (the terminal has no sandbox).
-6. **A lost phone**: anyone who opens the PWA on that phone can use your PC. Revoke it from the app
+6. **A lost phone**: anyone who opens the PWA on that phone can use your PC, unless **App lock** is on (Account &
+   appearance: the phone's fingerprint/face/PIN through WebAuthn, at start and after 5 minutes in the background; a
+   local gate, not protection against someone who can read the browser's storage). Revoke a lost phone from the app
    (PC settings → Devices), with `snugcode revoke all` on the PC, and with *Sign out of all devices*.
 
 ## Verifying the PWA you use
