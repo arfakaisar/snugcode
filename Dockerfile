@@ -13,7 +13,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates chromium procps curl openssh-client python3 bubblewrap socat \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp/src
-COPY package.json package-lock.json ./
+COPY package.json npm-shrinkwrap.json ./
 COPY daemon ./daemon
 COPY shared ./shared
 # Installed as a global package (not a symlink): `snugcode update` from the phone overwrites the same folder.

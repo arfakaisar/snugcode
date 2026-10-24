@@ -6,6 +6,7 @@
 //   /fonts/   shared fonts, /install.sh & /install.ps1 (one-line installers), build.json, _headers
 import { build } from 'esbuild';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { securityHeaders } from '../shared/headers.js';
@@ -87,5 +88,13 @@ const walk = (dir) => {
 walk(out);
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const digest = crypto.createHash('sha256').update(JSON.stringify(files)).digest('hex');
-fs.writeFileSync(path.join(out, 'build.json'), JSON.stringify({ version, digest, files }, null, 2) + '\n');
+// The source commit (outside the digest, so it never changes the hashes): tells anyone verifying the served PWA exactly
+// which commit to check out and rebuild. SNUGCODE_COMMIT overrides it; null when built outside a git checkout.
+let commit = process.env.SNUGCODE_COMMIT || null;
+if (!commit) {
+  try {
+    commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch {}
+}
+fs.writeFileSync(path.join(out, 'build.json'), JSON.stringify({ version, commit, digest, files }, null, 2) + '\n');
 console.log(`PWA (/agent/) → ${path.relative(root, out) || out} (build ${digest.slice(0, 16)})`);

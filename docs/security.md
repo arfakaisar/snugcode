@@ -19,10 +19,18 @@ A summary of the security features is in [README → Security](../README.md#secu
   message is end-to-end encrypted (XChaCha20-Poly1305). A relay that only *eavesdrops* learns nothing, and can't
   guess the PIN offline.
 - **Credentials don't reach the agent**: agent processes only hold a local token; the `~/.snugcode` data folder is denied
-  for every file tool and (under auto-approve / Codex) by the OS sandbox.
+  for every file tool and (under auto-approve / Codex) by the OS sandbox. Where there is no OS sandbox (Windows today,
+  or a Linux box without bubblewrap), auto-approve only lets routine commands (test/lint/build without chaining)
+  through and every other command asks, so the agent can't quietly read credentials. Setting `"sandbox": "off"` in
+  `config.json` is an explicit opt-out of that.
 - **Linking a PC to an account** requires an explicit confirmation *after* the GitHub sign-in (a POST with a signed token).
   A link from someone else can't quietly link their PC to your account.
 - **Remote actions** (`git push`, `gh pr create`, …) always ask, at every autonomy level.
+- **Files that run code elsewhere** (`.github/workflows/`, `.github/actions/`, `.devcontainer/`, `.vscode/`, `.husky/`,
+  `.envrc`, plus `.git/`, `.claude/`, `.codex/`, `.gemini/`, `.mcp.json`) always ask before the agent changes them:
+  a prompt injection must not be able to plant a CI workflow that leaks your repo secrets once you push.
+- **Keys go only where you point them**: a key snugcode doesn't recognize is never sent to a default router; you give
+  the URL.
 
 ## What is NOT protected (limits you should know)
 
@@ -33,8 +41,10 @@ A summary of the security features is in [README → Security](../README.md#secu
    - A strict CSP: no inline/third-party scripts, `connect-src` only to its own relay (XSS can't send data to
      another server).
    - **Verifiable builds** (see below): the served PWA must be byte-for-byte a build of this repo, and anyone can check.
-   - The daemon on your PC is installed from this repo (or npm with provenance), never from the relay, and it only
-     accepts phones that completed the PIN pairing.
+   - The daemon on your PC is installed from this repo (the installers use the latest GitHub release tag and never
+     guess a package name on npm), never from the relay, and it only accepts phones that completed the PIN pairing.
+     Its dependencies are pinned by `npm-shrinkwrap.json`.
+   - The hosted PWA is only deployed from release tags, not from every push to `main`.
 2. **Prompt injection.** The agent reads READMEs, issues, and command output that may contain malicious instructions.
    The permission policy, the risk levels on permission cards, and the OS sandbox limit the impact, but **commands you
    allow run as your user** (outside auto-approve, without a sandbox). Read high-risk commands before
@@ -48,15 +58,15 @@ A summary of the security features is in [README → Security](../README.md#secu
 
 ## Verifying the PWA you use
 
-Every build writes `build.json` with the SHA-256 of every served file. GitHub releases attach the `build.json`
-built from the tagged code, and the hosted site is deployed from a pinned commit of this repo: the deploy fails if the
-live digest doesn't match that build.
+Every build writes `build.json` with the SHA-256 of every served file and the source `commit` it was built from.
+GitHub releases attach the `build.json` built from the tagged code, and the hosted site is deployed from a pinned
+release of this repo: the deploy fails if the live digest doesn't match that build.
 
 ```bash
-# The PWA currently served by the relay
-curl -s https://snugcode.dev/build.json | jq -r .digest
-# A build of the source code (same tag)
-git checkout vX.Y.Z && npm ci && npm run build:web && jq -r .digest dist/web/build.json
+# The PWA currently served by the relay, and the commit it says it was built from
+curl -s https://snugcode.dev/build.json | jq -r '.digest, .commit'
+# A build of that exact commit
+git checkout <commit> && npm ci && npm run build:web && jq -r .digest dist/web/build.json
 # or download build.json from the GitHub release page and compare
 ```
 
