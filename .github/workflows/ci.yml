@@ -23,10 +23,10 @@ jobs:
       - run: npm ci
       - name: Syntax-check every module
         shell: bash
-        run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js landing/*.js relay/src/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done && bash -n .devcontainer/*.sh
-      - name: Type check (tsc --checkJs, termasuk relay)
+        run: for f in daemon/*.js shared/*.js web/*.js web/ui/*.js scripts/*.mjs test/*.mjs; do node --check "$f"; done && bash -n .devcontainer/*.sh
+      - name: Type check (tsc --checkJs)
         if: runner.os == 'Linux'
-        run: npm ci --prefix relay && npm run typecheck
+        run: npm run typecheck
       # Failing tests are also written as annotations: readable on the run page (and through the public API)
       # without opening the job log.
       - name: npm test
@@ -42,7 +42,7 @@ jobs:
       - name: Bundle PWA
         run: npm run build:web
 
-  # End to end: dev relay (wrangler) + real daemon + Claude Agent SDK + mock 9router,
+  # End to end: local dev relay (test/dev-relay.mjs) + real daemon + Claude Agent SDK + mock 9router,
   # phone client (web/conn.js), the PWA in Chrome, and the TUI in a pseudo-terminal. No real keys/accounts.
   e2e:
     runs-on: ubuntu-latest
@@ -52,7 +52,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci && npm ci --prefix relay
+      - run: npm ci
       - run: npm run build:web
       # OS sandbox (bubblewrap + socat) for the Claude engine's auto-allowed Bash and the Codex sandbox: needs
       # user namespaces without AppArmor restrictions.
@@ -61,18 +61,10 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Start the dev relay
-        env:
-          WRANGLER_SEND_METRICS: 'false'
         run: |
-          (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &)
-          # A second relay with a 3-second dead-socket limit: tests machines that die without closing the socket (e2e-relay).
-          (cd relay && npx wrangler dev --var DEV_AUTH:1 --var TOKEN_SECRET:ci-secret --var MACHINE_STALE_MS:3000 --port 8788 --ip 127.0.0.1 --inspector-port 9230 --persist-to ../.wrangler-stale > ../wrangler-stale.log 2>&1 &)
-          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/api/health && curl -sf http://127.0.0.1:8788/api/health && exit 0; sleep 1; done
-          cat wrangler.log wrangler-stale.log; exit 1
-      - run: npm run test:e2e:relay
-        env:
-          RELAY_STALE: http://127.0.0.1:8788
-      - run: npm run test:e2e:reserve
+          (node test/dev-relay.mjs --port 8787 > dev-relay.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8787/api/health && exit 0; sleep 1; done
+          cat dev-relay.log; exit 1
       - run: npm run test:e2e
       - run: npm run test:e2e:cloud
       # Multi-provider connections: OpenAI-only endpoints through the translator (Claude Agent SDK) and GPT models
@@ -102,6 +94,20 @@ jobs:
         with:
           name: e2e-diagnostik
           path: |
-            wrangler.log
-            wrangler-stale.log
+            dev-relay.log
             ${{ runner.temp }}/shots
+
+  # Asks the hosted service to test & deploy this commit (snugcode.dev serves the PWA built from it). Needs the
+  # HOSTED_DISPATCH_TOKEN secret; skipped without it (e.g. in forks).
+  notify-hosted:
+    needs: [test, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TOKEN: ${{ secrets.HOSTED_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "HOSTED_DISPATCH_TOKEN is not set: skipping"; exit 0; fi
+          curl -sf -X POST -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" \
+            https://api.github.com/repos/arfakaisar/snugcode-cloud/dispatches \
+            -d "{\"event_type\":\"upstream-updated\",\"client_payload\":{\"sha\":\"$GITHUB_SHA\"}}"

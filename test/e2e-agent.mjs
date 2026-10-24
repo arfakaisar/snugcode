@@ -1,7 +1,7 @@
 // Agent end-to-end test: phone (web/conn.js) -> local relay -> real daemon -> Claude Agent SDK -> mock 9router.
 // Checks the binary channel, permissions from the phone, checkpoint/rewind, the claude process reused across prompts,
 // model switching, Stop, old clients (text frames), denied access to ~/.snugcode, and terminal IPC.
-//   Terminal 1: npm run dev:relay        (dev relay at http://127.0.0.1:8787; TOKEN_SECRET in relay/.dev.vars)
+//   Terminal 1: npm run build:web && npm run dev:relay   (dev relay at http://127.0.0.1:8787)
 //   Terminal 2: npm run test:e2e         (Linux/macOS; needs the native Claude binary from npm install)
 import fs from 'node:fs';
 import path from 'node:path';

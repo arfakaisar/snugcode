@@ -1,4 +1,4 @@
-# The Agent SDK, Codex, and wrangler change fast: weekly update PRs, grouped to avoid a flood.
+# The Agent SDK and Codex change fast: weekly update PRs, grouped to avoid a flood.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -8,16 +8,9 @@ updates:
     groups:
       agent:
         patterns: ['@anthropic-ai/*']
-      lainnya:
+      other:
         patterns: ['*']
         exclude-patterns: ['@anthropic-ai/*']
-  - package-ecosystem: npm
-    directory: /relay
-    schedule:
-      interval: weekly
-    groups:
-      relay:
-        patterns: ['*']
   - package-ecosystem: github-actions
     directory: /
     schedule:

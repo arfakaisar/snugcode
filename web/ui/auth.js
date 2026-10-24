@@ -47,7 +47,7 @@ export function showLogin() {
         h('div', { class: 'feats' }, ...feats.map(([icon, t1, t2], i) => h('div', { class: 'feat', style: `--i:${i}` }, h('span', { class: 'fi' }, ic(icon)), h('span', {}, h('b', {}, t1), h('span', {}, t2))))),
         h('a', { class: 'btn primary big', href: '/auth/login?kind=user', onclick: () => haptic() }, ic('github'), 'Sign in with GitHub'),
         h('div', { class: 'fine' }, 'Have a PC? Use the same GitHub account you used for setup on it. No PC? Pick a cloud runner after signing in.'),
-        // New tab: in the installed app, `/` redirects back to /agent/ (landing/boot.js).
+        // New tab: in the installed app, `/` redirects back to /agent/ (the landing page's boot script).
         h('a', { class: 'fine link', href: '/', target: '_blank', rel: 'noopener' }, 'About snugcode & cloud servers →'),
       ),
     ),

@@ -1,20 +1,19 @@
-// Bundles the site into relay/public, deployed together with the relay:
-//   /         landing page (landing/): index.html + minified, content-hashed /assets/ (cached for a year)
-//   /agent/   PWA snugcode agent (web/ + shared/crypto.js)
+// Bundles the PWA into dist/web (or SNUGCODE_WEB_OUT). The hosted relay serves exactly these files, so
+// anyone can rebuild them from a release tag and compare build.json (docs/security.md):
+//   /agent/   PWA snugcode agent (web/ + shared/)
 //   /sw.js    PWA service worker at the root (scope `/`): registrations & push subscriptions of phones that
 //             installed the PWA while it lived at `/` stay the same, so notifications needn't be re-allowed.
-//   /fonts/   font bersama, /install.sh & /install.ps1 (pemasang satu baris), build.json, _headers
-import { build, transform } from 'esbuild';
+//   /fonts/   shared fonts, /install.sh & /install.ps1 (one-line installers), build.json, _headers
+import { build } from 'esbuild';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { securityHeaders } from '../relay/src/headers.js';
+import { securityHeaders } from '../shared/headers.js';
 
 const root = path.resolve(import.meta.dirname, '..');
-const out = path.join(root, 'relay', 'public');
+const out = path.resolve(process.env.SNUGCODE_WEB_OUT || path.join(root, 'dist', 'web'));
 const agent = path.join(out, 'agent');
-// Empty the folder without deleting it (on Windows a folder watched by
-// `wrangler dev` can't be deleted).
+// Empty the folder without deleting it (on Windows a folder watched by a dev server can't be deleted).
 fs.mkdirSync(out, { recursive: true });
 for (const f of fs.readdirSync(out)) fs.rmSync(path.join(out, f), { recursive: true, force: true });
 fs.mkdirSync(agent);
@@ -40,37 +39,9 @@ await build({
 fs.copyFileSync(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), path.join(agent, 'xterm.css'));
 const shell = ['index.html', 'theme.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'];
 for (const f of shell) fs.copyFileSync(path.join(root, 'web', f), path.join(agent, f));
-// Root: installers (their URLs are used in the README & on PCs: snugcode.dev/install.sh), the landing page, and icons
+// Root: installers (their URLs are used in the README & on PCs: snugcode.dev/install.sh) and icons
 // browsers/iOS look up at the root.
 for (const f of ['install.sh', 'install.ps1', 'icon.svg', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png']) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));
-// Landing page: CSS/JS minified, and every asset under /assets/ named after a hash of its content, so browsers
-// cache it for a year (_headers below) and each deploy that changes a file gives it a new URL. index.html itself
-// is revalidated on every visit. Other files in landing/ are copied as they are.
-{
-  const src = path.join(root, 'landing');
-  fs.mkdirSync(path.join(out, 'assets'));
-  const urls = {};
-  const emit = (name, data) => {
-    const file = name.replace(/(\.\w+)$/, `.${crypto.createHash('sha256').update(data).digest('hex').slice(0, 10)}$1`);
-    fs.writeFileSync(path.join(out, 'assets', file), data);
-    return file;
-  };
-  const min = async (f, loader) => (await transform(fs.readFileSync(path.join(src, f), 'utf8'), { loader, minify: true })).code;
-  for (const f of fs.readdirSync(path.join(src, 'fonts'))) urls[`fonts/${f}`] = emit(f, fs.readFileSync(path.join(src, 'fonts', f)));
-  // The fonts sit next to the stylesheet in /assets/.
-  const css = (await min('landing.css', 'css')).replace(/url\(["']?(fonts\/[^"')]+)["']?\)/g, (m, u) => {
-    if (!urls[u]) throw new Error(`landing.css: ${u} not found in landing/`);
-    return `url(${urls[u]})`;
-  });
-  urls['landing.css'] = emit('landing.css', css);
-  for (const f of ['boot.js', 'landing.js']) urls[f] = emit(f, await min(f, 'js'));
-  const html = fs.readFileSync(path.join(src, 'index.html'), 'utf8').replace(/(href|src)="([^"]+)"/g, (m, a, u) => (urls[u] ? `${a}="assets/${urls[u]}"` : m));
-  for (const f of ['landing.css', 'boot.js', 'landing.js']) if (!html.includes(`assets/${urls[f]}`)) throw new Error(`index.html: no reference to ${f}`);
-  fs.writeFileSync(path.join(out, 'index.html'), html);
-  for (const f of fs.readdirSync(src, { withFileTypes: true })) {
-    if (f.isFile() && !['index.html', 'landing.css', 'boot.js', 'landing.js'].includes(f.name)) fs.copyFileSync(path.join(src, f.name), path.join(out, f.name));
-  }
-}
 // iOS 27: the "Add to Home Screen" sheet uses its own image loader that fails to fetch icons from network URLs
 // (resulting in a letter "S" icon), while data: URIs work since Safari 27. The PNG is still served for older iOS.
 const indexHtml = fs.readFileSync(path.join(agent, 'index.html'), 'utf8');
@@ -78,15 +49,13 @@ const touchIcon = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'we
 const inlined = indexHtml.replace('rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png"', `rel="apple-touch-icon" sizes="180x180" href="${touchIcon}"`);
 if (inlined === indexHtml) throw new Error('index.html: <link rel="apple-touch-icon"> not found');
 fs.writeFileSync(path.join(agent, 'index.html'), inlined);
-// Security headers for assets served directly (alias worker); the relay adds them itself.
-// WebSocket hosts allowed by the CSP: the public & legacy addresses from relay/wrangler.jsonc (a self-hosted
-// relay uses its own vars), or SNUGCODE_WS_HOSTS="a.example,b.example".
-const wrangler = JSON.parse(fs.readFileSync(path.join(root, 'relay', 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
-const wsHosts = process.env.SNUGCODE_WS_HOSTS
-  ? process.env.SNUGCODE_WS_HOSTS.split(',')
-  : [wrangler.vars?.PUBLIC_URL ? new URL(wrangler.vars.PUBLIC_URL).host : '', ...String(wrangler.vars?.LEGACY_HOSTS || '').split(',')];
+// Security headers for assets served directly by the hosted site; the relay adds them itself.
+// WebSocket hosts allowed by the CSP: the public & legacy addresses of the hosted relay, or
+// SNUGCODE_WS_HOSTS="a.example,b.example" for another relay.
+const WS_HOSTS = ['snugcode.dev', 'snugcode.arfak.workers.dev', 'pocketcode-relay.arfak.workers.dev'];
+const wsHosts = process.env.SNUGCODE_WS_HOSTS ? process.env.SNUGCODE_WS_HOSTS.split(',') : WS_HOSTS;
 fs.writeFileSync(path.join(out, '_headers'), '/*\n' + Object.entries(securityHeaders(wsHosts.map((s) => s.trim()))).map(([k, v]) => `  ${k}: ${v}`).join('\n') + '\n' +
-  // Content-hashed landing assets (see above): a changed file always gets a new name.
+  // Content-hashed site assets: a changed file always gets a new name.
   '/assets/*\n  cache-control: public, max-age=31536000, immutable\n');
 // Self-hosted fonts (see @font-face in style.css).
 const FONTS = {
@@ -119,4 +88,4 @@ walk(out);
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const digest = crypto.createHash('sha256').update(JSON.stringify(files)).digest('hex');
 fs.writeFileSync(path.join(out, 'build.json'), JSON.stringify({ version, digest, files }, null, 2) + '\n');
-console.log(`landing + PWA (/agent/) → relay/public (build ${digest.slice(0, 16)})`);
+console.log(`PWA (/agent/) → ${path.relative(root, out) || out} (build ${digest.slice(0, 16)})`);

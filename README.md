@@ -1,30 +1,27 @@
 <div align="center">
 
-<img src="docs/images/hero.jpg" alt="snugcode — a coding agent on your PC, controlled from your phone" width="100%">
+<img src="docs/images/hero.jpg" alt="snugcode: a coding agent on your PC, controlled from your phone" width="100%">
 
 <br>
 
-**A coding agent that runs on your PC — or in the cloud with no PC at all — fully controlled from your phone.**<br>
-Sign in with ChatGPT or paste any API key (Claude, OpenAI, Gemini, OpenRouter, DeepSeek, routers…): snugcode detects it and runs each model in its best harness.<br>
-Analyze repos, edit code, run tests, preview web apps, commit, push, and open Pull Requests from anywhere.
+### Your coding agent, in your pocket.
+
+snugcode runs a real coding agent on **your own PC** (or a free cloud runner) and lets you drive it from **your phone**.<br>
+Ask for a change, approve it with one tap, then commit, push, and open a PR. You don't have to be at your desk.
 
 <br>
 
-[![Node.js](https://img.shields.io/badge/node-%E2%89%A522-d97757?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-3a3936?style=flat-square)](#license)
-[![E2EE](https://img.shields.io/badge/relay-end--to--end%20encrypted-3a3936?style=flat-square)](#security)
-[![Platform](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3936?style=flat-square)](#install-on-your-pc)
-[![PWA](https://img.shields.io/badge/phone-PWA%20Android%20%C2%B7%20iOS-3a3936?style=flat-square)](#use-it-from-your-phone)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-d97757?style=flat-square)](LICENSE)
+[![Free](https://img.shields.io/badge/price-free-3a3936?style=flat-square)](#is-it-really-free)
+[![E2EE](https://img.shields.io/badge/end--to--end-encrypted-3a3936?style=flat-square)](docs/security.md)
+[![Platform](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3936?style=flat-square)](#get-started-in-2-minutes)
+[![PWA](https://img.shields.io/badge/phone-Android%20%C2%B7%20iOS-3a3936?style=flat-square)](#get-started-in-2-minutes)
 
-**[Install](#install-on-your-pc)** &nbsp;·&nbsp; **[No PC](#no-pc-cloud-runner)** &nbsp;·&nbsp; **[Models & API keys](#models--api-keys)** &nbsp;·&nbsp; [Demo](#see-it-in-action) &nbsp;·&nbsp; [Features](#features) &nbsp;·&nbsp; [Architecture](#architecture) &nbsp;·&nbsp; [Terminal](#terminal-snugcode) &nbsp;·&nbsp; [Security](#security) &nbsp;·&nbsp; [FAQ](#faq)
-
-<sub>Website: <a href="https://snugcode.dev">snugcode.dev</a> · App (snugcode agent): <a href="https://snugcode.dev/agent/">snugcode.dev/agent</a> · Formerly <b>pocketcode</b> — see <a href="#migrating-from-pocketcode">Migrating from pocketcode</a>.</sub>
+**[Get started](#get-started-in-2-minutes)** · **[Open the app](https://snugcode.dev/agent/)** · [How it works](#how-it-works) · [Security](#private-by-design) · [User guide](docs/guide.md) · [FAQ](#faq)
 
 </div>
 
 <br>
-
-## See it in action
 
 <table>
 <tr>
@@ -37,13 +34,88 @@ Analyze repos, edit code, run tests, preview web apps, commit, push, and open Pu
 
 ### From prompt to passing tests
 
-Type a request on your phone. The agent on your PC drafts a plan, reads the code, then asks for permission before changing files — diff included.
+1. Type a request on your phone.
+2. The agent on your PC reads the code and plans the change.
+3. Before it edits a file, it shows you the diff and waits for your OK.
+4. Tests run on **your** machine, with your toolchain.
+5. Then you get a summary: steps, time, tokens, and cost.
 
-Every approval is **one tap**. Shell commands like `npm test` run on your own PC, with the `node_modules`, toolchain, and environment you already have.
+<sub>A real screen recording: the app in Chromium, the snugcode daemon, and a mock model.</sub>
 
-At the end, a summary shows the number of steps, duration, tokens, cache share, and cost.
+</td>
+</tr>
+</table>
 
-<sub>Screen recording of the real app: the PWA in Chromium against the snugcode daemon and a mock model.</sub>
+---
+
+## Get started in 2 minutes
+
+**You need:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), a GitHub account, and a ChatGPT account **or** any model API key.
+
+**1. Install on your PC**
+
+```bash
+curl -fsSL https://snugcode.dev/install.sh | sh        # macOS / Linux
+```
+```powershell
+irm https://snugcode.dev/install.ps1 | iex             # Windows (PowerShell)
+```
+
+Setup asks for a model key, a PC name, and a short PIN, then shows you one link that connects the PC to your GitHub account.
+
+**2. Open the app on your phone**
+
+Go to **[snugcode.dev/agent](https://snugcode.dev/agent/)**, sign in with GitHub, pick your PC, and enter the PIN (only the first time).
+Tip: choose *Add to Home screen* so it opens like a normal app and can send notifications.
+
+**3. Start a session**
+
+Pick a repo and a branch, then type what you want done. That's it.
+
+> **No PC that stays on?** The app can create a **cloud runner** in your own GitHub Codespaces, which is free within GitHub's monthly quota. Nothing has to be installed on a computer. See [No PC: cloud runner](docs/guide.md#no-pc-cloud-runner).
+
+---
+
+## What you can do
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**🧠 Use any model**<br>
+<sub>Sign in with ChatGPT, or paste a key from Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, or a router. snugcode detects the key type and runs each model in the harness built for it.</sub>
+
+</td>
+<td width="33%" valign="top">
+
+**👆 Approve with one tap**<br>
+<sub>Every edit comes with a colored diff, and risky commands are flagged. Choose *Allow*, *Always*, or *Deny*. You can even answer from the notification.</sub>
+
+</td>
+<td width="33%" valign="top">
+
+**🌿 Safe for your repo**<br>
+<sub>Each session works in its own git worktree and branch, and you can rewind to the state before any prompt. Your main branch stays untouched.</sub>
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**▶️ Run & preview**<br>
+<sub>Start your dev server from the phone, open a private preview link, and take screenshots. Console errors can go straight back to the agent.</sub>
+
+</td>
+<td valign="top">
+
+**🔀 Git from anywhere**<br>
+<sub>See status and per-file diffs, comment on lines, then commit, push, and open a Pull Request.</sub>
+
+</td>
+<td valign="top">
+
+**💻 Same session in the terminal**<br>
+<sub>Run `snugcode` at your desk and keep going on your phone later. It's the same session on both screens.</sub>
 
 </td>
 </tr>
@@ -53,685 +125,109 @@ At the end, a summary shows the number of steps, duration, tokens, cache share, 
 <tr>
 <td width="50%" align="center" valign="top">
 <img src="docs/images/demo-run.gif" alt="Run & Preview demo" width="100%"><br>
-<b>Run & Preview</b><br>
-<sub>The dev server runs on your PC, screenshots are taken by Chrome on your PC, and console errors can be handed straight to the agent.</sub>
+<b>Run & Preview</b>
 </td>
 <td width="50%" align="center" valign="top">
 <img src="docs/images/demo-git.gif" alt="Git demo: diff and commit" width="100%"><br>
-<b>Git from your phone</b><br>
-<sub>Status, colored per-file diffs, commit, push, and Pull Requests without opening your laptop.</sub>
+<b>Git from your phone</b>
 </td>
 </tr>
 </table>
 
-<p align="center">
-<img src="docs/images/demo-tui.gif" alt="snugcode terminal UI" width="88%"><br>
-<b>Terminal UI</b> &nbsp;<code>snugcode</code><br>
-<sub>Feels like <code>claude</code> in the terminal. It is the same session as on your phone: start at your desk, continue on the go.</sub>
-</p>
-
----
-
-## Why snugcode?
-
-Coding agents like Claude Code are a huge help, but you have to sit in front of your PC. **snugcode** moves the controls to your phone while all the heavy lifting stays on your PC.
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-**Compute stays on your PC**<br>
-<sub>Code, `node_modules`, Docker, compilers, and builds run on your computer. The phone is just a remote control.</sub>
-
-</td>
-<td width="33%" valign="top">
-
-**No network setup**<br>
-<sub>No VPS, public IP, port forwarding, VPN, or ngrok. Both the PC and the phone open *outbound* connections to the relay.</sub>
-
-</td>
-<td width="33%" valign="top">
-
-**End-to-end encrypted**<br>
-<sub>PIN pairing with a PAKE (CPace / ristretto255), then every message is encrypted with XChaCha20-Poly1305. The relay only forwards ciphertext — its limits are documented openly in <a href="docs/security.md">docs/security.md</a>.</sub>
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Credentials never leave your PC**<br>
-<sub>API keys, ChatGPT login, and GitHub tokens are stored only in `~/.snugcode` (on your PC or cloud runner), are never sent back to the phone, can't be read by the relay, and are invisible to the agent.</sub>
-
-</td>
-<td valign="top">
-
-**Safe for your repo**<br>
-<sub>Every session works in its own `git worktree` and branch. Your main branch stays clean until you decide to merge.</sub>
-
-</td>
-<td valign="top">
-
-**One session, two screens**<br>
-<sub>Start in your PC terminal and continue on your phone, or the other way around. Both stay in sync in real time.</sub>
-
-</td>
-</tr>
-</table>
-
----
-
-## Screenshots
-
-Screenshots follow your GitHub theme: dark or light.
-
+<details>
+<summary><b>More screenshots</b></summary>
+<br>
 <table>
 <tr>
 <td align="center" width="33%" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/sessions-light.jpg"><img src="docs/images/sessions.jpg" alt="Home screen with the session list"></picture><br>
-<b>Home</b><br><sub>Sessions from phone & terminal, status, branch, model</sub>
+<b>Home</b>
 </td>
 <td align="center" width="33%" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/session-light.jpg"><img src="docs/images/session.jpg" alt="Edit permission with diff"></picture><br>
-<b>Permissions with diffs</b><br><sub>Plan, running tools, and 1-tap approvals</sub>
+<b>Permissions with diffs</b>
 </td>
 <td align="center" width="33%" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/summary-light.jpg"><img src="docs/images/summary.jpg" alt="Agent result summary"></picture><br>
-<b>Summary</b><br><sub>Completed plan, answer, tokens, cache & cost</sub>
+<b>Summary</b>
 </td>
 </tr>
 <tr>
 <td align="center" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/diff-light.jpg"><img src="docs/images/diff.jpg" alt="Per-file diff"></picture><br>
-<b>Diff</b><br><sub>Changes per file, collapsible</sub>
+<b>Diff</b>
 </td>
 <td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/run-light.jpg"><img src="docs/images/run.jpg" alt="Run & Preview"></picture><br>
-<b>Run & Preview</b><br><sub>Dev server, logs, preview over a token-protected tunnel</sub>
+<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/model-light.jpg"><img src="docs/images/model.jpg" alt="Model picker"></picture><br>
+<b>Model & effort</b>
 </td>
 <td align="center" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/preview-light.jpg"><img src="docs/images/preview.jpg" alt="Page screenshot from the PC"></picture><br>
-<b>Screenshot</b><br><sub>Rendered by Chrome on your PC, plus console errors</sub>
-</td>
-</tr>
-<tr>
-<td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/model-light.jpg"><img src="docs/images/model.jpg" alt="Model picker"></picture><br>
-<b>Model & effort</b><br><sub>Switch models mid-session, effort slider</sub>
-</td>
-<td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/drawer-light.jpg"><img src="docs/images/drawer.jpg" alt="Navigation drawer"></picture><br>
-<b>Navigation</b><br><sub>Recent sessions, switch PC, account & theme</sub>
-</td>
-<td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/login-light.jpg"><img src="docs/images/login.jpg" alt="Sign-in page"></picture><br>
-<b>Sign in</b><br><sub>Sign in with GitHub, pair with a PIN once</sub>
+<b>Screenshot</b>
 </td>
 </tr>
 </table>
-
-<sub>All images are regenerated with `npm run docs:images` (see [`scripts/docs-images.mjs`](scripts/docs-images.mjs)) from the real UI with a sample repo. The hero and terminal images are rendered from [`docs/mockups/`](docs/mockups).</sub>
-
----
-
-## Features
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-#### Agent & collaboration
-
-- **Best harness per model** — Claude models and Anthropic/OpenAI-format endpoints run on the **Claude Agent SDK**, GPT models (ChatGPT login / OpenAI) on the official **Codex**, and Gemini models (Google AI API key) on the official **Gemini CLI**. The defaults can be re-measured with `npm run bench`. See [Models & API keys](#models--api-keys).
-- **Paste any API key** — Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, or a router (9router, OmniRoute, LiteLLM, local); the type and format are detected automatically. The agent configuration is trimmed down: every request is ±55% smaller.
-- **Frugal subagents** — Explore, Plan, and others automatically use a light model from the same connection (**Claude Haiku**, **Gemini Flash**, …) at low effort.
-- **1-tap permissions** — *Allow / Always / Deny*. *Always* applies per command pattern (e.g. `npm test *`), not to all of Bash.
-- **Edits apply immediately** in the session worktree and can be rewound. Turn on *Review edits* (`/edits`) to approve every diff.
-- **Auto-approve** for autonomous work; `git push` and `gh pr create` always ask.
-- **Plan mode** — the agent reads, then proposes a plan for you to approve or revise.
-- **The agent can ask questions** — multiple-choice questions are answered with a single tap.
-- **Send images** from the camera or gallery (up to 4 per message).
-- **Checkpoints & rewind** to the state before any prompt.
-- **Per-hunk diff review** — comment on lines or hunks and send them as one message to the agent, or revert a single hunk/file.
-- **Direct shell** — `!npm test`, `!git status`, with output streamed to the phone.
-- **Computer mode** — a session with no repo/worktree that can read, edit, and run commands across the whole PC, like plain `claude`. See [Computer mode](#computer-mode).
-
-</td>
-<td width="50%" valign="top">
-
-#### Run & Preview
-
-- **Background dev servers** — setup/dev commands are detected automatically (npm / pnpm / yarn / …), with live logs and port detection.
-- **Preview on your phone** through a private token-protected tunnel; Vite/Next HMR keeps working.
-- **Screenshots + console errors** from headless Chrome/Edge on your PC, then *Ask the agent to fix it*.
-- **Interactive terminal** (PTY) on the phone — `vim`, `htop`, REPLs, login prompts; an Esc/Tab/Ctrl/arrow key row and up to 4 tabs per session. The shell stays alive when the screen is closed.
-- **File explorer** — browse the worktree, read & edit files (with conflict detection), create new files, *Ask the agent* about a file.
-- The agent can **see the UI it built** (`dev_start`, `preview_screenshot`) to verify its work.
-
-#### Git & GitHub
-
-- Clone your GitHub repos to your PC, one worktree and branch per session.
-- Status, diff, commit, push, and **Pull Requests** from your phone.
-
-#### System
-
-- **Web Push** when the agent finishes, needs permission, or asks a question — even when the PWA is closed.
-- **Anti-sleep** while the daemon runs on your PC (Away Mode / `caffeinate` / `systemd-inhibit`).
-- **1-tap remote updates** from the phone, with a banner when a new version is available.
-- **PC settings from the phone** — models & API keys, ChatGPT login, paired devices, PIN, and GitHub login, no terminal needed.
-- **Clear progress** for long operations (creating a runner, updating, cloning, pushing): stage, elapsed time, and estimated time left.
-- **Model picker** with an effort slider (`low → max`) and automatic model health checks.
-- **Dark & light themes**, following the system or chosen manually.
-
-</td>
-</tr>
-</table>
-
----
-
-## Architecture
-
-```mermaid
-flowchart LR
-    subgraph HP["Phone — PWA"]
-        UI["Mobile UI<br/>permissions · diff · git · preview"]
-    end
-
-    subgraph CF["Cloudflare — Relay"]
-        R["Worker + Durable Objects<br/><i>only forwards encrypted bytes</i>"]
-    end
-
-    subgraph PC["Your PC — snugcode daemon"]
-        D["daemon/server.js"]
-        A["Agent harness<br/>Claude Agent SDK · Codex"]
-        P["Loopback proxy<br/>127.0.0.1"]
-        W["git worktree<br/>per session"]
-        T["Terminal UI<br/><code>snugcode</code>"]
-        D --> A --> P
-        A --> W
-        T <-- local IPC --> D
-    end
-
-    AI["Model providers<br/>Anthropic · OpenAI · Gemini · routers · …"]
-    GH["GitHub<br/>clone · push · PR"]
-
-    UI <-- "wss · E2EE" --> R
-    R <-- "wss · E2EE<br/>(outbound connection)" --> D
-    P -- HTTPS --> AI
-    W -- git / REST --> GH
-```
-
-1. The **daemon** runs in the background on your PC (automatically at login) and opens an *outbound* WebSocket to the relay.
-2. The **phone** opens the PWA, signs in with GitHub, and pairs with the PC using a **PIN** (once).
-3. Every prompt from the phone is sent encrypted to the PC, where the right harness for the model (**Claude Agent SDK** or **Codex**) works on it in the session worktree.
-4. Agent events (text, tools, permission requests) are streamed back to the phone **and** the terminal in real time.
-
-<details>
-<summary><b>The flow of one prompt</b></summary>
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant HP as Phone
-    participant Relay as Relay
-    participant PC as Daemon
-    participant AI as Model
-
-    HP->>Relay: prompt (encrypted)
-    Relay->>PC: forwarded as is
-    PC->>PC: checkpoint worktree
-    PC->>AI: Agent SDK → loopback proxy
-    AI-->>PC: tool_use: Edit Settings.jsx
-    PC-->>HP: "Allow Edit?" + diff
-    HP->>PC: Allow
-    PC->>PC: write file in worktree
-    AI-->>PC: final answer
-    PC-->>HP: done · 9 steps · 17s
-```
+<p align="center"><img src="docs/images/demo-tui.gif" alt="snugcode terminal UI" width="88%"><br><b>Terminal UI</b> · <code>snugcode</code></p>
 </details>
 
-<details>
-<summary><b>Session isolation with git worktrees</b></summary>
-
-```mermaid
-gitGraph
-    commit id: "main"
-    commit id: "old feature"
-    branch snug/k3x9
-    checkout snug/k3x9
-    commit id: "agent: useTheme"
-    commit id: "agent: theme toggle"
-    checkout main
-    branch snug/a81c
-    checkout snug/a81c
-    commit id: "agent: fix test"
-    checkout main
-    merge snug/k3x9 id: "PR #12 merged"
-```
-
-Every session gets the folder `~/.snugcode/workspaces/<owner>__<repo>/s-<id>` with its own branch (default `snug/<id>`). Several sessions can run in parallel on the same repo without getting in each other's way.
-</details>
+The full feature list is in the **[user guide](docs/guide.md#features)**.
 
 ---
 
-## No PC: cloud runner
-
-Don't have a PC that can stay on? Everything works from your phone: the **same** snugcode daemon runs in
-**your own GitHub Codespaces**, and the app treats it like a regular PC. Nothing needs to be installed or typed
-on any computer.
+## How it works
 
 ```mermaid
 flowchart LR
-    A["Sign in with GitHub<br/>in the app"] --> B["Use the cloud<br/>— no PC"]
-    B --> C["Allow<br/>Codespaces"]
-    C --> D["Fork the repo<br/><i>(once)</i>"]
-    D --> E["Create runner<br/><i>±3–5 min the first time</i>"]
-    E --> F["ChatGPT login / paste API key<br/>& GitHub login"]
+    P["📱 Phone<br/>snugcode app"] <-- "encrypted" --> R["☁️ snugcode relay<br/><i>passes sealed messages</i>"]
+    R <-- "encrypted" --> D["🖥️ Your PC<br/>snugcode daemon + agent"]
+    D -- "your API key" --> M["🤖 Model provider"]
+    D -- "git" --> G["GitHub"]
 ```
 
-1. Sign in to the app → the empty screen shows **Use the cloud — no PC** (or *Add another PC* → *Create cloud runner*).
-2. **Connect GitHub Codespaces** (`codespace` scope; the token is stored only on your phone, not on snugcode's servers).
-3. Fork this repo once. The runner codespace is created from that fork.
-4. **Create runner**: the app registers the machine, stores the machine token & a random PIN as *Codespaces secrets*
-   **encrypted on the phone** (sealed box), then creates the codespace. The phone is paired right away without typing a PIN.
-5. **Sign in with ChatGPT** or paste an **API key** (detected & tested before it is saved), then sign in to GitHub for clone/push — all from the phone.
+- The **daemon** on your PC connects *out* to the relay, so you don't need port forwarding, a VPN, or a public IP.
+- The **phone** pairs with your PC once using a PIN. After that, every message is end-to-end encrypted.
+- The **agent** works on your PC, and model traffic goes straight from your PC to the provider you chose.
 
-While the runner is being prepared, the app shows the real stages from the codespace (preparing the machine → Chromium →
-installing snugcode → starting) with an estimate of the time left. If the runner script fails, the error message and its
-last log lines are sent to the phone, so you don't need to open the codespace terminal.
+## Private by design
 
-| | |
+- **Your code stays on your PC.** It never goes through snugcode's servers in readable form.
+- **Your keys stay on your PC.** API keys, ChatGPT sign-in, and GitHub tokens are stored only in `~/.snugcode`. They are never sent back to the phone, and the agent itself can't read them.
+- **The relay only sees sealed boxes.** Pairing uses a PAKE (CPace), and messages use XChaCha20-Poly1305.
+- **You can check it.** The app the relay serves is a byte-for-byte build of this repo. [Here's how to verify it](docs/security.md#verifying-the-pwa-you-use).
+
+Read the full, honest threat model in **[docs/security.md](docs/security.md)**, including what the relay *can* see.
+
+---
+
+## Open source, hosted service
+
+snugcode is built in the open. The parts that touch your code, keys, and devices are all here for anyone to read and audit. The hosted service at snugcode.dev, which connects your phone to your PC, is run by us.
+
+| In this repo (AGPL-3.0) | Run by snugcode.dev |
 |---|---|
-| **Cost** | GitHub's free quota: 120 core-hours/month for Free accounts (±60 hours of a 2-core runner), 180 for Pro. This month's estimated usage is shown in the runner menu (tracked by the runner itself; GitHub billing can't be read with the `codespace` scope). |
-| **Faster** | Optional: set up a **prebuild** in your fork's Codespaces settings — new runners start in ±1 minute instead of 3–5. See [`.devcontainer/README.md`](.devcontainer/README.md#prebuild-opsional-runner-baru-lebih-cepat). |
-| **Stops by itself** | After 30 minutes idle (configurable from 15 minutes to 2 hours, or off) — no agent/command/dev server running and the app is not open. |
-| **Wakes up again** | Automatically when you open the runner in the app (±30–60 seconds). Sessions, worktrees, and history stay in `/workspaces/.snugcode`. |
-| **Features** | Same as a PC: agent, permissions, Run & Preview (Chromium installed), git/PRs, Web Push, remote updates. |
-| **Limits** | One Codespaces runner from the wizard (can be *Recreated*), at most 3 cloud machines per account. |
-| **Delete** | The ⋯ button in the machine list (also when offline/stuck): the codespace, secrets, and machine are all removed. |
+| The PC daemon, agent harnesses & terminal UI (`daemon/`) | Accounts & GitHub sign-in |
+| The phone app (`web/`) | Linking PCs and routing encrypted messages |
+| Encryption & protocol (`shared/`) | Cloud runner management, website |
+| Cloud runner image (`.devcontainer/`, `Dockerfile`) | |
+| A local dev relay for tests (`test/dev-relay.mjs`) | |
 
-Codespaces permission on the phone revoked or expired? The app offers **Reconnect GitHub Codespaces**; the runner
-and its contents don't change.
+### Is it really free?
 
-**Your own server (Docker / VPS):** in the same wizard, *Your own server* generates a `docker build … && docker run …`
-command complete with the machine token & PIN (see [`Dockerfile`](Dockerfile)). For other providers, run `snugcode cloud`
-with the env vars from [`daemon/runner.js`](daemon/runner.js).
-
-> [!NOTE]
-> In cloud mode, your code and API keys live on the runner provider's machine (GitHub, or your server). Messages stay E2EE,
-> and neither the PIN nor keys ever pass through the relay in readable form.
+Yes. The app, the daemon, and the relay are free to use. You bring your own model (ChatGPT sign-in or an API key), and model usage is billed by your provider, not by us. Cloud runners use your own GitHub Codespaces quota. We're planning an optional paid tier, **snugcode Cloud**, with managed runners. Everything listed above stays free.
 
 ---
 
-## Models & API keys
-
-Open **PC settings → Models & API keys** in the app (or `snugcode connect` in the terminal), then pick one:
-
-- **Sign in with ChatGPT** — a Plus/Pro subscription is used through the official **Codex** (OpenAI allows this for third-party harnesses). The sign-in code is shown on the phone; finish it in the browser.
-- **Paste an API key** — its type is recognized from its shape and verified with the provider; unrecognized keys are treated as router keys and you are asked for the URL.
-
-| Key / endpoint | Example | Harness used |
-|---|---|---|
-| Anthropic (Claude API) | `sk-ant-api03-…` | Claude Agent SDK, straight to `api.anthropic.com` (native prompt cache) |
-| OpenAI | `sk-proj-…` | Codex (Responses API) |
-| Google Gemini API | `AIza…` | Official **Gemini CLI** (ACP, native API format; installed automatically once). If Gemini CLI can't be installed: Claude Agent SDK + format translator in the proxy |
-| OpenRouter | `sk-or-v1-…` | Claude Agent SDK through its Anthropic-format endpoint (or the translator) |
-| DeepSeek · Kimi · GLM | `sk-…` · `….…` | Claude Agent SDK through their official Anthropic-format endpoints |
-| xAI · Groq | `xai-…` · `gsk_…` | Claude Agent SDK + format translator |
-| Router / your own endpoint (9router, OmniRoute, LiteLLM, Ollama, …) | key + URL | detected: Anthropic format → Claude Agent SDK; GPT models + Responses API → Codex; OpenAI Chat only → translator |
-
-All connections show up together in the model picker (grouped per connection, with an effort slider when the model supports it). The same model can be used through several connections; the harness is chosen per model ([`shared/engine-table.js`](shared/engine-table.js), then the endpoint format), and can be forced with the env var `SNUGCODE_ENGINE=claude|codex|gemini` (if the endpoint supports it).
-
-**Measuring the best harness:** `npm run bench -- --models gemini:gemini-3.8-flash,openai:gpt-5.5` runs the same small coding tasks (fix a bug, add a feature, rename across files) on each engine for each model, grades them with tests, then prints a table of pass rate, time, and tokens along with a suggested `engine-table.js` row. It uses the connections & keys on this PC (tokens are billed to your key), in a temporary data folder.
-
-> [!IMPORTANT]
-> **Claude Pro/Max subscriptions** and **Gemini CLI / Antigravity sign-ins** may not be used by third-party apps (Anthropic & Google terms, 2026 — accounts can be blocked/suspended). snugcode rejects Claude subscription tokens and uses API keys. Routers that forward such subscriptions (e.g. the `cc/` or `ag/` providers in 9router) can still be connected, but the risk is on your account.
-
-```bash
-snugcode connect sk-ant-api03-…              # any API key, type detected
-snugcode connect rk-… --url https://router.example.com/v1   # router / your own endpoint
-snugcode connect chatgpt                     # ChatGPT sign-in (Codex), the code can be opened on your phone
-snugcode connect                             # list connections;  snugcode disconnect <id>
-```
-
-Cloud/Docker runners: `SNUGCODE_API_KEY` (+ `SNUGCODE_API_URL` for routers) connects a model at startup.
-
----
-
-## Install on your PC
-
-**Requirements:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), a GitHub account, and **a ChatGPT account or a model API key** (see [Models & API keys](#models--api-keys)).
-
-Fastest way — the one-line installer checks Node.js & git, installs snugcode, then runs setup:
-
-```bash
-# macOS / Linux
-curl -fsSL https://snugcode.dev/install.sh | sh
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://snugcode.dev/install.ps1 | iex
-```
-
-The same commands are in the phone app (*Add PC* → copy), and the phone opens the new PC automatically as soon as setup finishes.
-Or manually:
-
-```bash
-npm i -g github:arfakaisar/snugcode
-snugcode setup
-snugcode autostart on
-```
-
-`snugcode setup` asks for:
-
-1. **Any API key** — its type is detected automatically; router keys (9router, OmniRoute, …) together with their URL — then the main model (the light subagent model is picked automatically). ChatGPT sign-in: `snugcode connect chatgpt` or from the phone.
-2. **How to sign in to GitHub** for clone, push, and PRs. *Sign in via browser/phone* is recommended.
-3. **PC name** and **PIN** (6–12 letters/digits, case-insensitive, e.g. `moon42`).
-4. Then it shows **one link** (links the PC to your GitHub account) and **one code** (GitHub sign-in for the PC). Both can be opened from your phone.
-
-`snugcode autostart on` starts the daemon in the background right away, and automatically every time you log in to Windows, macOS, or Linux.
-
-> [!TIP]
-> Without a global install: `npx github:arfakaisar/snugcode setup`, then `npx github:arfakaisar/snugcode start`.
-
-> [!NOTE]
-> The PC has to stay on while you use it from your phone. snugcode asks the OS not to sleep while the daemon runs, but if the PC still goes to sleep when idle, change the sleep settings: on Windows, Settings → System → Power → Sleep: *Never* (when plugged in).
-
----
-
-## Use it from your phone
-
-```mermaid
-flowchart LR
-    A["Open<br/>snugcode.dev/agent"] --> B["Sign in<br/>with GitHub"]
-    B --> C["Pick a PC"]
-    C --> D["Enter PIN<br/><i>(just once)</i>"]
-    D --> E["New session<br/>pick repo & branch"]
-    E --> F["Type a request"]
-```
-
-1. Open **https://snugcode.dev/agent/** in your phone's browser (or the **Open snugcode agent** button on the snugcode.dev landing page), then **Sign in with GitHub** (the same account you used for the PC setup).
-2. Pick your PC, then enter the PIN.
-3. Browser menu → **Add to Home screen**, so it opens full screen like an app and push notifications work (required on iOS).
-4. Account → **Allow notifications**. Low/medium-risk permissions can be answered straight from the *Allow / Deny* buttons in the notification (Android & desktop); choose *Updates to send → Important only* if you only want to hear about permissions, questions, and finished tasks.
-
-### Session screen controls
-
-| Control | What it does |
-|---|---|
-| Menu button (top left) or swipe from the left edge | Drawer: new session, home, recent sessions, switch PC, account & theme |
-| **Session title** | Session menu: branch/model details, git, run, **Files**, **Terminal**, switch model, save `.env`, delete session |
-| *Play* icon (top right) | Run & Preview: dev server, logs, screenshot, preview link |
-| *Branch* icon (top right) | Git: status, diff (comment per line/hunk → *Send to agent*, revert hunk/file), commit, push, Pull Request (badge = number of changed files) |
-| **+** in the composer | Attachments & tools: camera, gallery, plan mode, shell mode, **agent autonomy**, quick actions & saved prompts |
-| **Model name** in the composer | Switch model & effort mid-session (applies from the next message) |
-| Mode pill above the input | The active mode (Plan / Shell / Auto-approve); tap to turn it off |
-| `!` at the start of a message | Run it as a shell command |
-| **rewind** under your message | Restore all files to before that prompt |
-| Chips under the completion summary | One-tap next steps: run tests, review, commit |
-| Session menu → **Cost & limit** | Session cost (estimated) and a cost limit: prompts are held once the limit is reached |
-| Stop button | Stop the agent |
-| Long-press a session (home) | Open / delete the session |
-| Pull down (lists) | Refresh |
-
-### Models & effort
-
-- Effort variants that a router exposes as separate IDs (e.g. `ag/gemini-3.8-flash-low` / `-medium` / `-high`) are merged into **one model with an effort slider**.
-- Claude models (`cc/claude-opus-5-5`, `cc/claude-sonnet-5-5`) get a virtual *auto · low · medium · high · max* slider.
-- Switching model/effort mid-session takes effect in the same agent process (no restart).
-- The **light model (subagents)** is picked automatically: a Claude main model (`cc/`) → Claude Haiku 5.5, then Gemini 3.8 Flash; other models (`ag/`, …) → Gemini 3.8 Flash, then Claude Haiku 5.5. If neither is on the router, subagents use the main model.
-- The completion summary shows **cache %**: the share of input read from the prompt cache. A constant 0% means the provider/router doesn't cache, so every step is billed in full.
-- Every selected model is **tested automatically** with one small message, to catch models that were discontinued but still reply "success".
-- Only models that support tool calling are shown.
-
-### Run & Preview
-
-Tap the *play* icon at the top right → **Run**. Setup commands (`npm ci`, `pnpm install`, …) and dev commands (`npm run dev`, …) are detected automatically, or can be set per repo in `.snugcode.json`:
-
-```json
-{ "setup": "pnpm install", "dev": "pnpm dev --port {port}" }
-```
-
-The `PORT` env var is set to a free port, and `{port}` is replaced with the same port. **Preview on your phone** opens a Cloudflare quick tunnel to a local gate protected by a secret token (sent only over the E2EE channel). Without the token, the link is rejected. The tunnel closes automatically when the process stops.
-
-> [!TIP]
-> `.env` files aren't carried into new worktrees. Open the session menu → **Save .env as template**, and that file is restored automatically in every new session of the same repo.
-
-### Computer mode
-
-**New session** has two tabs: **Repository** (clone + isolated worktree, as above) and **Computer**. A Computer
-session runs in any folder you choose (default: home `~`) with no clone, no worktree, and no new branch.
-The agent may read and edit files anywhere on the PC, like plain `claude` in a terminal.
-
-- Reading and editing files anywhere applies immediately; non-read-only Bash commands still ask for permission (unless auto-approve is on).
-- **No checkpoints & rewind**, and `.env` templates aren't available. Git only shows status/diff when the working folder is a git repo.
-- The `~/.snugcode` data folder stays closed to the agent, and `git push` / `gh pr create` always ask.
-- Deleting a Computer session only deletes its history; files on the PC are not touched.
-- From the terminal: `snugcode --computer` (or `-c`), or `/computer` inside the TUI.
-
-> [!WARNING]
-> Computer mode is deliberately not isolated. Use it for system tasks (tidying files, configuration, scripts across
-> folders); for changing repo code, a Repository session is safer because it can be rewound.
-
----
-
-## Terminal: `snugcode`
+## Terminal
 
 ```bash
 cd your-project
-snugcode                     # or for short: snug
-snugcode "explain this repo" # send a prompt right away
-snugcode --pick              # pick another session (including sessions from the phone)
-snugcode --computer          # Computer mode session in this folder (access to the whole PC)
+snugcode                       # open the terminal UI (or just: snug)
+snugcode "explain this repo"   # start with a prompt
+snugcode connect <api-key>     # add a model (type detected automatically)
+snugcode autostart on          # keep the daemon running in the background
 ```
 
-- The git repo folder where you run `snugcode` becomes the session directly, without cloning. The last session in that folder is resumed automatically.
-- **Terminal and phone sessions are the same sessions.** Sessions from the terminal are marked "terminal" in the phone app.
-- The daemon is started automatically if it isn't running.
-
-| Key | What it does |
-|---|---|
-| `enter` | send; while the agent is working, the message is queued |
-| `\` + `enter` / `alt+enter` | new line |
-| `!` | shell mode (commands run directly in the session folder) |
-| `/` | commands: `/model` `/default` `/sessions` `/new` `/computer` `/run` `/preview` `/logs` `/plan` `/rewind` `/git` `/diff` `/commit` `/push` `/pr` `/auto` `/edits` `/login` `/update` `/clean` `/help` … |
-| `esc` | stop the agent |
-| `ctrl+o` | full output of the last tool |
-| `ctrl+c` ×2 | quit (the session keeps running on the PC) |
-
-In `/model`, use ↑↓ to pick a model and ←→ to set the effort.
-
-### CLI commands
-
-| Command | What it does |
-|---|---|
-| `snugcode` / `snug` | Terminal UI |
-| `snugcode --computer` / `-c` | Terminal UI with a Computer mode session |
-| `snugcode setup` | Set up / change configuration |
-| `snugcode login` | Sign in to GitHub again (only) |
-| `snugcode connect <key> [--url URL]` | Connect a model API key (type detected automatically) |
-| `snugcode connect chatgpt` | Sign in with ChatGPT for GPT models (Codex) |
-| `snugcode connect` / `disconnect <id>` | List / remove model connections |
-| `snugcode start` | Run the daemon in this terminal |
-| `snugcode stop` / `restart` | Stop / restart the background daemon |
-| `snugcode update` | Check for and install updates (tagged releases; `--channel main` for the latest commit) |
-| `snugcode update --rollback` | Go back to the version before the last update |
-| `snugcode autostart on\|off` | Run in the background + automatically at login |
-| `snugcode clean` | Scan & clean up orphaned worktrees / repos |
-| `snugcode pin` | Change the PIN and unlock pairing right away (then `snugcode restart`) |
-| `snugcode devices` | List paired phones |
-| `snugcode revoke <id\|all>` | Revoke a phone's access (then `snugcode restart`; from the phone it applies immediately) |
-| `snugcode status` | Configuration summary |
-| `snugcode keychain on\|off\|status` | Encrypt `secrets.json` with a key in the OS keychain (macOS Keychain, Secret Service, DPAPI) |
-| `snugcode cloud` | Cloud runner without a PC (Codespaces/Docker): configuration from env, other settings from the phone |
-| `snugcode help` | List of commands |
-
-Models & API keys, the PIN, and devices can also be managed from the phone: **PC settings → Models & access**.
-
-<details>
-<summary><b>Where data lives on the PC</b></summary>
-
-All data is stored in `~/.snugcode` (can be changed with the `SNUGCODE_HOME` env var). Older installs that already have `~/.pocketcode` keep using that folder:
-
-```
-~/.snugcode/
-├── config.json          # PC name, relay, default model, …
-├── secrets.json         # model connections (API keys), GitHub token, PIN (hash), phone device secrets (encrypted with `snugcode keychain on`)
-├── daemon.log           # background daemon log (daemon.pid, daemon.sock: process & terminal channel)
-├── workspaces/
-│   └── <owner>__<repo>/
-│       ├── _base/       # base clone (kept 3 days after its last session is deleted)
-│       └── s-<id>/      # one worktree per session
-├── sessions/            # index.json + per-session event history (JSONL)
-├── env/                 # .env templates per repo
-├── bin/                 # cloudflared (downloaded automatically), pnpm/yarn shims in bin/pm
-├── tools/               # corepack, Codex, Gemini CLI (each installed once, when first needed)
-├── claude/              # CLAUDE_CONFIG_DIR of the Claude engine, separate from your personal Claude Code (including plans/)
-├── codex/               # CODEX_HOME of the Codex engine: ChatGPT sign-in & thread history (Codex is installed in tools/codex)
-└── gemini/              # GEMINI_CLI_HOME of the Gemini CLI engine (repo/ & computer/): settings, instructions, session history
-```
-
-On Codespaces runners this folder is `/workspaces/.snugcode` (it survives the codespace stopping), plus
-`cloud.log`, `install.log`, and `runner-usage.json` (estimated core-hours). In a Docker container: the `/data` volume.
-</details>
-
----
-
-## Security
-
-```mermaid
-sequenceDiagram
-    participant HP as Phone
-    participant R as Relay (untrusted)
-    participant PC as PC
-
-    Note over HP,PC: Pairing (once per phone)
-    HP->>R: CPace msg (from PIN)
-    R->>PC: forwarded
-    PC->>R: CPace msg (from PIN hash)
-    R->>HP: forwarded
-    Note over HP,PC: both sides get a 256-bit deviceSecret<br/>the relay can't guess the PIN offline
-
-    Note over HP,PC: Every connection
-    HP->>PC: X25519 ephemeral
-    PC->>HP: X25519 ephemeral
-    Note over HP,PC: HKDF(deviceSecret, ECDH) → 2 XChaCha20-Poly1305 keys<br/>+ anti-replay sequence numbers
-```
-
-- **The relay can't read messages** — the PIN, conversations, code, API keys, ChatGPT sign-in, and GitHub tokens never pass through the relay in readable form. Model traffic goes straight from your machine to the provider. **Important limit:** the relay also serves the PWA code, so whoever controls the relay deployment could replace that code. Read [docs/security.md](docs/security.md) for the full threat model, how to verify the PWA build (`build.json`), and how to self-host the relay.
-- **Brute force is limited** — after 5 wrong PINs, pairing locks for 15 minutes (doubling with each subsequent lock, up to ±16 hours). `snugcode pin` on the PC or Change PIN from another phone unlocks it immediately.
-- **Relay sign-ins can be revoked** — Account → *Sign out of all devices* revokes the sign-in token on every phone & browser (e.g. a lost phone). Linking a PC via a link always asks for confirmation after the GitHub sign-in (the PC name, code, and account are shown; confirmation is a token-protected POST and can't be bypassed with URL parameters). Sign-ins in regular use are renewed automatically.
-- **PWA with a strict CSP** — no inline scripts or third-party scripts/fonts (fonts are self-hosted), and WebSockets only to its own relay, so tokens & device secrets on the phone are harder to steal through XSS. The sign-in token is sent through the WebSocket subprotocol, not the URL (so it isn't logged).
-- **Risk-graded permission cards** — every request is labeled low/medium/high risk with a reason; high risk (deleting data, scripts from the internet, push, leaving the session folder) is shown in red without an *Always* button, and can't be answered from notification buttons.
-- **Graded autonomy** — *Ask everything*, *Balanced* (default), *Routine auto* (tests/lint/builds without command chains pass on their own), *Full* (auto-approve). Push, PRs, and credential files always ask at every level.
-- **Downloaded binaries are verified** — Codex & Gemini CLI are version-pinned; `cloudflared` is pinned to a version + official SHA-256 ([`daemon/cloudflared-version.json`](daemon/cloudflared-version.json)).
-- **The GitHub token** is injected via env only into the daemon's own git commands. It isn't written to `.git/config` and isn't visible to the agent. `GITHUB_TOKEN`/`GH_TOKEN` already in the environment (e.g. from Codespaces) are dropped when the daemon starts, so they aren't inherited by the agent, Bash, dev servers, or `!commands`.
-- **Settings from the phone** — models & API keys, ChatGPT sign-in, the PIN, and the phone list can be managed from the app (PC settings). Keys are sent over the E2EE channel, validated against their endpoint first, and never returned to the client.
-- **API keys never enter the agent process.** The `claude` / Codex processes (and agent commands) only hold a random local token per connection; the loopback proxy (`127.0.0.1`) swaps it for the real key. Requests without that token are rejected, so other programs on the PC can't use your key.
-- **`~/.snugcode` is closed to the agent** — Read/Write/Edit/Glob/Grep on the data folder (keys, tokens, device secrets, `.env` templates) are always denied, including under auto-approve. The only exceptions are the session worktree and the agent's own Claude config folder. Bash commands that mention `secrets.json` always ask.
-- **OS sandbox for auto-approve (Claude engine)** — while ⚡ auto-approve is on, the agent's Bash runs in Claude Code's sandbox (bubblewrap + socat on Linux, Seatbelt on macOS), which refuses to read the snugcode data folder or write git hooks/config; the worktree, package caches, and the network still work. Commands that ask to leave the sandbox always ask. The PC's `localhost` isn't reachable from inside the sandbox (use `dev_*`/Preview for dev servers). Configure with `"sandbox": "auto" | "always" | "off"` in `config.json` (or `SNUGCODE_SANDBOX`). If bubblewrap/socat aren't installed (`sudo apt install bubblewrap socat`) or on Windows, the session tells you that auto-approve runs without a sandbox.
-- **Only safe things run without asking** — read tools pass automatically only inside the session worktree. Reading outside the worktree and `WebFetch` ask for permission (or auto-approve), so prompt injection from a README/issue can't quietly send files out.
-- **OS sandbox for the Codex engine** — Codex agent commands run in a sandbox (bubblewrap/Seatbelt) that refuses to read the snugcode data folder (`secrets.json`, ChatGPT sign-in, `.env` templates, history); the network is still allowed. Every command still goes through the same snugcode permission policy. If an OS sandbox isn't available (containers without user namespaces), the app tells you and permissions still apply.
-- **Remote actions** (`git push`, `gh pr create|merge`, `gh repo create|delete`, …) always ask for permission, even with auto-approve on.
-- **Computer mode** relaxes the worktree boundary: reading & editing anywhere on the PC passes without asking (non-read-only Bash still asks). The snugcode data folder and remote actions stay guarded as above.
-
-- **Tool configuration from the repo isn't trusted** — the repo's `.claude/settings.json` (hooks, permission rules, env, `apiKeyHelper`) is **not** loaded; only `CLAUDE.md` (and `.claude/CLAUDE.md`) are read as project instructions. Changing `.claude/`, `.codex/`, `.gemini/`, `.mcp.json`, or the contents of `.git/` always asks, even under auto-approve, so prompt injection can't quietly install hooks.
-- **Gemini CLI engine** — the working folder is never marked trusted, so the repo's `.gemini/settings.json` (MCP servers, hooks, `discoveryCommand`) isn't run; `GEMINI.md`/`AGENTS.md`/`CLAUDE.md` are injected by snugcode as instructions. Gemini CLI has no OS sandbox on Linux/Windows, so **shell commands still ask even with auto-approve on**; file edits go through snugcode (data folder denied, waits for the checkpoint).
-- **Encrypted `secrets.json` (optional)** — `snugcode keychain on` encrypts its contents (XChaCha20-Poly1305) with a key that only exists in the OS keychain. Backups, cloud sync, or a borrowed disk don't expose your API keys & tokens. This is protection at rest: processes of the same user that are allowed to open the keychain still can, so the agent's boundary remains the permission policy & sandbox.
-- **File explorer & terminal from the phone** — only inside the session folder (the snugcode data folder is denied, symlinks leading outside are hidden); saving a file that changed on the PC is rejected (hash conflict). The PTY terminal runs as the PC user without a sandbox — the same as opening a terminal on that PC, just over the E2EE channel.
-
-> [!WARNING]
-> Push command detection is based on text patterns: it is a safeguard against agent mistakes, not a sandbox. Outside auto-approve, Bash runs without a sandbox once you approve it — read the command before allowing it.
-
----
-
-## Repo structure
-
-```
-snugcode/
-├── daemon/      # CLI, daemon, Agent SDK sessions, proxy, git, TUI, run & preview, updater
-├── relay/       # Cloudflare Worker + Durable Objects (Hub, Pending) + public-address alias worker
-├── web/         # snugcode agent PWA (vanilla JS, no framework), served at /agent/
-├── landing/     # landing page served at / (static HTML/CSS/JS)
-├── shared/      # cryptography (CPace, X25519, XChaCha20), event model & model normalization
-├── scripts/     # build the site into the relay, icons, documentation images
-├── test/        # unit, hardening, worktree integration, phone/relay/UI e2e, cloud runner
-├── .devcontainer/  # Codespaces runner (`snugcode cloud` when the codespace starts)
-├── .github/workflows/  # CI (3 OSes + e2e), Deploy relay/site, Release (tag vX.Y.Z)
-├── Dockerfile   # runner in a container (VPS, Fly.io, …)
-└── docs/        # images, GIFs & documentation mockups, security model, cloud runner analysis
-```
-
-A deeper explanation of the architecture is in [`master.md`](master.md), and the change history in [`CHANGELOG.md`](CHANGELOG.md).
-
----
-
-## Local development
-
-```bash
-npm install && (cd relay && npm install)
-printf 'TOKEN_SECRET=dev\n' > relay/.dev.vars
-npm run dev:relay                         # relay + site at http://127.0.0.1:8787 (agent at /agent/), dev sign-in without GitHub
-
-SNUGCODE_HOME=/tmp/pc node daemon/cli.js setup --relay http://127.0.0.1:8787 \
-  --key <API key> --skip-github --pin 123456 --name DevPC     # router key: add --url <URL>
-SNUGCODE_HOME=/tmp/pc node daemon/cli.js start
-
-npm test                                   # unit tests
-npm run typecheck                          # tsc --checkJs: daemon, shared, PWA, relay
-node test/e2e-phone.mjs                    # phone simulation: pairing → session → agent → git
-npm run test:e2e                           # phone → dev relay → daemon → Agent SDK → mock router (no real key)
-npm run test:e2e:connections               # new connections from the phone: OpenAI-only endpoint (translator) & Codex (SNUGCODE_E2E_CODEX=<codex folder>)
-npm run test:e2e:gemini                    # real Gemini CLI engine vs a fake Gemini API (SNUGCODE_E2E_GEMINI=<bundle/gemini.js> or =install)
-npm run bench -- --models <connection:model>  # per-model engine benchmark (uses real keys, see Models & API keys)
-npm run test:e2e:cloud                     # cloud runner: provision → `snugcode cloud` → automatic pairing → settings from the phone
-npm run test:ui                            # built PWA in Chrome + TUI in a pseudo-terminal (after build:web)
-node test/worktree.it.mjs                  # branch/worktree scenarios (needs internet)
-npm run docs:images                        # regenerate README images & GIFs (needs the dev relay running)
-```
-
-<details>
-<summary><b>For the owner: deploying the relay</b></summary>
-
-The relay consists of two workers: `pocketcode-relay` (relay + Durable Objects; the old name is kept so account & PC data stay intact) and the `snugcode` alias that serves the landing page at `snugcode.dev` and the snugcode agent PWA at `snugcode.dev/agent/`, and forwards everything else through a service binding. The GitHub OAuth App is already set up. To redeploy after changing `relay/`, `web/`, or `landing/`:
-
-```bash
-npm install && (cd relay && npm install)
-CLOUDFLARE_API_TOKEN=<token> npm run deploy
-```
-
-Without a PC: the [`Deploy`](.github/workflows/deploy.yml) workflow runs the same command every time `main` changes in `relay/`, `web/`, `landing/`, or `shared/` (or manually: Actions tab → Deploy → Run workflow). It needs the repo secret `CLOUDFLARE_API_TOKEN` (*Edit Cloudflare Workers* template).
-
-Relay secrets on Cloudflare: `GITHUB_CLIENT_SECRET` and `TOKEN_SECRET`. If `TOKEN_SECRET` is changed, every phone and PC has to sign in again.
-
-The OAuth App's *Authorization callback URL* must be `https://snugcode.dev/auth/callback` (OAuth Apps only allow one host, which is why sign-ins on old hosts are redirected to this address). The repo that is forked for Codespaces runners is set with the `RUNNER_REPO` var in `relay/wrangler.jsonc`.
-</details>
-
----
-
-## Migrating from pocketcode
-
-snugcode is the new name of pocketcode. The protocol, data, and pairing are unchanged:
-
-- The **data folder** `~/.pocketcode` keeps being used if it already exists (phone pairing, sessions, worktrees, agent history). New installs use `~/.snugcode`.
-- The **app address** is now `https://snugcode.dev/agent/` (the landing page lives at `https://snugcode.dev`): the `snugcode` alias worker serves the site and forwards the API & WebSockets to the old relay worker through a service binding, so accounts, linked PCs, and data don't change. PCs still using the old URL stay connected. On the old address, the PWA offers **Move now** (sign-in, PC pairing, and theme come along, with no new sign-in/PIN) and the sign-in page redirects to the new address. Apps installed on the home screen before the move to `/agent/` are forwarded there automatically.
-- `POCKETCODE_*` env vars, `.pocketcode.json` files, and old autostart entries are still recognized; old autostart entries are migrated automatically.
-
-Remote updates from an old daemon version **can't** switch to the new package by themselves, so each PC needs to be migrated once. The phone app shows a **"Move this PC to snugcode"** banner that can run it through a session, or run it yourself in the PC terminal:
-
-```bash
-# macOS / Linux
-npm i -g github:arfakaisar/snugcode --include=optional && { pocketcode stop; npm rm -g pocketcode; snugcode autostart on; }
-```
-
-```powershell
-# Windows (PowerShell)
-npm i -g github:arfakaisar/snugcode --include=optional; if ($?) { pocketcode stop; npm rm -g pocketcode; snugcode autostart on }
-```
-
-> [!NOTE]
-> The GitHub repo is now named `arfakaisar/snugcode`. GitHub redirects the old `arfakaisar/pocketcode` URL, so `git push` and updates from PCs that haven't been migrated keep working.
+All commands and keyboard shortcuts are in the [user guide](docs/guide.md#terminal-snugcode).
 
 ---
 
@@ -740,78 +236,45 @@ npm i -g github:arfakaisar/snugcode --include=optional; if ($?) { pocketcode sto
 <details>
 <summary><b>Is my code sent to snugcode's servers?</b></summary>
 
-No. Your code stays on your PC. Only end-to-end encrypted messages that the relay can't read pass through it. Code is only sent to the AI model provider you connect, as context for the agent, just like using a coding agent in the terminal.
+No. Your code stays on your PC. Only end-to-end encrypted messages pass through the relay, and the relay can't read them. Code is sent only to the model provider you connect, the same as when you use any coding agent.
+</details>
+
+<details>
+<summary><b>Which models can I use?</b></summary>
+
+GPT models through ChatGPT sign-in (via the official Codex), plus anything you have a key for: Claude, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, or your own router or local endpoint. See [Models & API keys](docs/guide.md#models--api-keys).
+</details>
+
+<details>
+<summary><b>Can I use my Claude Pro/Max subscription?</b></summary>
+
+No. Anthropic doesn't allow third-party apps to use Claude subscriptions, so snugcode uses API keys for Claude. ChatGPT sign-in is allowed because it runs through OpenAI's official Codex.
+</details>
+
+<details>
+<summary><b>Does it interfere with my own Claude Code or Codex setup?</b></summary>
+
+No. snugcode keeps its own config folders inside `~/.snugcode`.
 </details>
 
 <details>
 <summary><b>The phone keeps saying "Waiting for PC".</b></summary>
 
-Make sure the daemon is running (`snugcode status`, or `snugcode autostart on`) and the PC isn't asleep. The log is at `~/.snugcode/daemon.log`. The page on the phone connects automatically as soon as the PC is online.
+Check that the daemon is running (`snugcode status`, or `snugcode autostart on`) and that the PC isn't asleep. The log is at `~/.snugcode/daemon.log`.
 </details>
 
-<details>
-<summary><b>My PIN is locked.</b></summary>
-
-Run `snugcode pin` on the PC to change the PIN and unlock it, then `snugcode restart`. If another phone is already paired, you can also do it from there: PC settings → Change PIN (takes effect immediately).
-</details>
-
-<details>
-<summary><b>Can I use several PCs or several phones?</b></summary>
-
-Yes. One GitHub account can link many PCs, and every PC can be paired with many phones. List or revoke phones with `snugcode devices` / `snugcode revoke`.
-</details>
-
-<details>
-<summary><b>Does it interfere with my personal Claude Code install?</b></summary>
-
-No. snugcode uses its own `CLAUDE_CONFIG_DIR` in `~/.snugcode/claude` and its own `CODEX_HOME` in `~/.snugcode/codex`.
-</details>
-
-<details>
-<summary><b>Can I use it without a PC at all?</b></summary>
-
-Yes — see [No PC: cloud runner](#no-pc-cloud-runner). The runner runs in your own GitHub Codespaces (or a Docker server) and is managed entirely from your phone. Runner log: `/workspaces/.snugcode/cloud.log` (runner menu → *Open codespace on GitHub*).
-</details>
-
-<details>
-<summary><b>Screenshots/preview don't work.</b></summary>
-
-Screenshots need Chrome, Edge, Chromium, or Brave on the PC (or set `browserExecutable` in `~/.snugcode/config.json`). Preview uses `cloudflared`, which is downloaded automatically to `~/.snugcode/bin`.
-</details>
+More answers are in the [user guide](docs/guide.md#faq).
 
 ---
 
-## Roadmap
+## Contributing
 
-- [x] E2EE relay (CPace + XChaCha20-Poly1305)
-- [x] Git worktree per session, commit/push/PR from the phone
-- [x] Terminal UI sharing sessions with the phone
-- [x] Run & Preview, screenshots, and an agent that verifies its own UI
-- [x] Web Push, image upload, plan mode, checkpoints & rewind
-- [x] 1-tap remote updates
-- [x] Dark & light themes
-- [x] Cloud runner without a PC (GitHub Codespaces / Docker), every setting from the phone
-- [x] Computer mode: an agent with access to the whole PC, from the phone or the terminal
-- [x] ChatGPT sign-in & any API key (auto-detected), best harness per model (Claude Agent SDK / Codex)
-- [x] Gemini CLI engine (ACP) for Gemini models & per-model harness benchmark
-- [x] OS sandbox for auto-approve, PWA CSP, revocable relay sign-ins, tagged releases + rollback
-- [x] Push notification when a cloud runner stops because it was idle
-- [x] Codespaces quota estimate & prebuilds for faster runner starts
-- [x] OS keychain integration for `secrets.json`
-- [x] Full interactive terminal (PTY) on the phone
-- [x] Lightweight file explorer & per-hunk diff review
-- [x] Risk-graded permission cards, autonomy presets, session cost limits, permissions from notification buttons
-- [x] One-line installer, connection heartbeat & RPC timeouts, verifiable PWA build, relay self-hosting guide
-- [x] Landing page at snugcode.dev, app moved to snugcode.dev/agent, English UI & docs
-- [ ] E2EE preview tunnel through our own relay — needs an origin separate from the PWA (same-origin preview code could read device secrets) and HMR WebSocket support
-- [ ] Amazon Bedrock & Google Vertex AI (needs SigV4 / OAuth signing in the proxy)
-
----
+Bug reports, ideas, and pull requests are welcome. The whole client runs locally against a small dev relay, with no accounts needed. See **[CONTRIBUTING.md](CONTRIBUTING.md)** to get set up. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE)
+The code in this repo is licensed under the **[GNU AGPL-3.0](LICENSE)**. You can use, study, change, and share it. If you run a modified version as a service for other people, you have to publish your changes under the same license.
 
-<br>
+"snugcode" and the snugcode logo are trademarks of the project. Forks are welcome, but they need their own name and logo. See [TRADEMARKS.md](TRADEMARKS.md).
 
-<div align="center"><img src="web/icon.svg" width="44" alt=""><br><sub>Made for coding from anywhere.</sub></div>
+<sub>Code published before October 24, 2026 was released under the MIT license, and those copies stay MIT.</sub>

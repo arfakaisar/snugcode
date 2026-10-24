@@ -1,9 +1,24 @@
 # Changelog
 
-Notable changes to snugcode (formerly pocketcode). Full architecture & features are in [`master.md`](master.md). Entries
-for releases up to v0.4.0 are kept in their original language (Indonesian).
+Notable changes to snugcode (formerly pocketcode). Features are described in the [user guide](docs/guide.md). Entries
+for releases up to v0.4.0 are kept in their original language (Indonesian). Older entries may mention the relay,
+landing page, or internal docs, which are no longer part of this repo.
 
 ## Unreleased
+
+### Changed
+- **New license: GNU AGPL-3.0** (from MIT) for all code in this repo from now on. Code published earlier stays MIT. The
+  snugcode name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), and contributions are accepted under the
+  [CLA](CLA.md).
+- **Open client, hosted relay.** This repo contains everything that runs on your devices: the daemon, the PWA, the
+  encryption & protocol, and the cloud runner image. The relay and website at snugcode.dev are now maintained
+  separately as a hosted service. The PWA it serves is still built from this repo and can be verified against
+  `build.json` ([docs/security.md](docs/security.md)), which now also lists what the relay can and can't see.
+- **`npm run build:web` builds into `dist/web`** (`SNUGCODE_WEB_OUT` to change it). Security headers moved to
+  `shared/headers.js`.
+- **`npm run dev:relay` starts a small local relay** (`test/dev-relay.mjs`: in memory, loopback only, dev sign-in) that
+  speaks the same protocol, so the e2e tests and local development need no Cloudflare account or wrangler.
+- **Shorter README**; the full reference moved to [docs/guide.md](docs/guide.md).
 
 ### New
 - **snugcode is now in English.** The whole product — the snugcode agent PWA, the CLI/TUI, relay pages, the landing
