@@ -63,13 +63,15 @@ export function showSession(s) {
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
   const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
   const thumbs = h('div', { id: 'thumbs', hidden: true });
+  // Prompts waiting while the agent works (daemon-side queue: sent one by one as each turn finishes).
+  const queueBar = h('div', { id: 'queue', hidden: true });
   const gitBadge = h('span', { class: 'badge', hidden: true });
   const gitBtn = h('button', { class: 'iconbtn', 'aria-label': 'Git', title: 'Git', onclick: () => (haptic(6), showGit()) }, ic('branch'), gitBadge);
   const runBtn = h('button', { class: 'iconbtn', 'aria-label': 'Run & preview', title: 'Run & Preview', onclick: () => (haptic(6), showRun()) }, ic('play'));
   const composer = h('div', { id: 'composer' },
     h('div', { class: 'inner' },
       dock,
-      h('div', { class: 'cbox' }, thumbs, modes, input, h('div', { class: 'crow' }, plusBtn, modelChip, h('span', { class: 'grow' }), send)),
+      h('div', { class: 'cbox' }, queueBar, thumbs, modes, input, h('div', { class: 'crow' }, plusBtn, modelChip, h('span', { class: 'grow' }), send)),
     ),
     fileIn, camIn,
   );
@@ -319,11 +321,6 @@ export function showSession(s) {
   const setRunning = (on) => {
     const was = app.current.running;
     app.current.running = on;
-    if (!!was !== on) {
-      send.replaceChildren(ic(on ? 'stop' : 'send'));
-      anim(send.firstChild, [{ transform: 'scale(.4) rotate(-90deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-    }
-    send.setAttribute('aria-label', on ? 'Stop' : 'Send');
     syncSend();
     ui.dot(on ? 'busy' : 'on');
     clearInterval(app.current.workTimer);
@@ -345,11 +342,35 @@ export function showSession(s) {
       app.current.refreshGit();
     }
   };
+  const canQueue = () => has('unqueue');
+  // While the agent works the button is Stop, unless there's text to queue (daemons with a prompt queue).
+  const stopMode = () => app.current.running && !(canQueue() && (input.value.trim() || images.length));
   const syncSend = () => {
     const has = input.value.trim().length > 0 || images.length > 0;
-    send.className = app.current.running ? 'stop' : has ? '' : 'idle';
+    const stop = stopMode();
+    send.className = stop ? 'stop' : has ? '' : 'idle';
+    const icon = stop ? 'stop' : 'send';
+    if (send.dataset.icon !== icon) {
+      const animate = !!send.dataset.icon;
+      send.dataset.icon = icon;
+      send.replaceChildren(ic(icon));
+      if (animate) anim(send.firstChild, [{ transform: 'scale(.4) rotate(-90deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+    }
+    send.setAttribute('aria-label', stop ? 'Stop' : app.current.running ? 'Queue' : 'Send');
+  };
+  const renderQueue = (items = []) => {
+    queueBar.hidden = !items.length;
+    queueBar.replaceChildren(
+      ...(items.length
+        ? [
+            h('div', { class: 'qhead' }, h('span', {}, `Queued · ${items.length}`), h('button', { class: 'qclear', onclick: () => app.conn.call('unqueue', { id: s.id }).catch((e) => toast(e.message, true)) }, 'Clear')),
+            ...items.map((q, i) => h('div', { class: 'qitem' }, h('span', { class: 'qtext' }, (q.img ? '🖼 ' : '') + (q.text || 'image')), h('button', { class: 'qx', 'aria-label': 'Remove from queue', onclick: () => app.conn.call('unqueue', { id: s.id, i }).catch((e) => toast(e.message, true)) }, ic('x')))),
+          ]
+        : []),
+    );
   };
   app.current.setRunning = setRunning;
+  app.current.renderQueue = renderQueue;
   app.current.onEvents = (msg) => {
     if (msg.sid !== s.id) return;
     for (const e of msg.es) {
@@ -360,6 +381,7 @@ export function showSession(s) {
       else if (e.k === 'procOut') app.current.procOut?.(e);
       else if (e.k === 'preview') (app.current.preview = e.url ? e : null), app.current.syncRun();
       else if (e.k === 'mode') app.current.setPlan(e.plan);
+      else if (e.k === 'queue') renderQueue(e.items);
       else r.add(e);
       if (e.k === 'done') (haptic(e.ok ? 15 : 50), e.ok || toast('The agent stopped: ' + (e.err || 'error'), true));
     }
@@ -376,7 +398,7 @@ export function showSession(s) {
     input.classList.toggle('shell', shellMode || input.value.startsWith('!'));
   };
   const submit = async () => {
-    if (app.current.running) {
+    if (stopMode()) {
       haptic(20);
       await app.conn.call('interrupt', { id: s.id }).catch((e) => toast(e.message, true));
       return;
@@ -395,7 +417,8 @@ export function showSession(s) {
     anim(send, [{ transform: 'translateY(0)' }, { transform: 'translateY(-5px) scale(.92)' }, { transform: 'none' }], 300);
     r.scroll(true);
     try {
-      await app.conn.call('send', { id: s.id, text, ...(imgs.length ? { images: imgs } : {}) });
+      const res = await app.conn.call('send', { id: s.id, text, ...(imgs.length ? { images: imgs } : {}) });
+      if (res?.queued) toast(`Queued · sent when the agent finishes (${res.queued} waiting)`);
     } catch (e) {
       toast(e.message, true);
       input.value = text;
@@ -443,6 +466,7 @@ export async function reattach(fresh) {
     });
     for (const p of res.perms) r.add({ k: 'perm', ...p });
     app.current.setRunning(res.session.status === 'running');
+    app.current.renderQueue?.(res.queue || []);
     app.current.setPlan(!!res.session.plan);
     app.current.procs = new Map((res.procs || []).map((p) => [p.name, p]));
     app.current.preview = res.preview || null;
@@ -494,7 +518,7 @@ export function sessionMenu() {
       has('files') ? menuItem({ icon: 'folder', t1: 'Files', t2: 'browse, view & edit files', onclick: () => ((app.current.filesDir = ''), showFiles()) }) : null,
       has('termOpen') ? menuItem({ icon: 'term', t1: 'Terminal', t2: 'interactive shell in the ' + (isComp ? 'machine' : 'worktree'), onclick: () => showTerminal() }) : null,
       menuItem({ icon: 'cpu', t1: 'Change model / effort', t2: M.modelLabel(s.model), onclick: () => app.current.changeModel?.() }),
-      has('budget') ? menuItem({ icon: 'clock', t1: 'Cost & limit', t2: `${usd(s.spent)} this session · ${s.budget ? 'limit ' + usd(s.budget) : 'no limit'}`, onclick: () => budgetSheet(s) }) : null,
+      has('budget') ? menuItem({ icon: 'clock', t1: 'Cost & limit', t2: `${s.spent || !s.tokens ? usd(s.spent) : tokens(s.tokens)} this session · ${s.budget ? 'limit ' + usd(s.budget) : 'no limit'}`, onclick: () => budgetSheet(s) }) : null,
       (s.local || isComp) ? null : menuItem({
         icon: 'save', t1: 'Save .env as a template', t2: 'restored automatically in new sessions for this repo',
         onclick: async () => {
@@ -515,6 +539,9 @@ export function sessionMenu() {
 }
 
 const usd = (v) => '$' + (+v || 0).toFixed(+v && v < 1 ? 3 : 2);
+const kTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n || 0));
+// Engines that report tokens but no cost (Codex, Gemini CLI).
+const tokens = (t) => `${kTok(t.in)} in / ${kTok(t.out)} out tokens`;
 
 // Session cost limit: a brake that makes users comfortable handing over big tasks. Checked after every turn
 // (cost from the Agent SDK; the Codex/Gemini engines don't report cost).
@@ -530,8 +557,8 @@ function budgetSheet(s) {
     }
   };
   ui.sheet(
-    ui.head('Cost & limit', { sub: `${usd(s.spent)} spent in this session (estimate)` }),
-    h('p', { class: 'muted small', style: 'margin:0 4px 12px' }, 'When the total cost hits the limit, the next prompt is held and you’re notified (with a warning at 80% too). Cost is only available for models running on the Claude Agent SDK.'),
+    ui.head('Cost & limit', { sub: `${usd(s.spent)} spent in this session (estimate)${s.tokens ? ' · ' + tokens(s.tokens) : ''}` }),
+    h('p', { class: 'muted small', style: 'margin:0 4px 12px' }, 'When the total cost hits the limit, the next prompt is held and you’re notified (with a warning at 80% too). Cost is only available for models running on the Claude Agent SDK; for Codex and Gemini CLI the token count is shown instead and the limit doesn’t apply.'),
     h('div', { class: 'chips', style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px' }, ...[1, 5, 20].map((v) => h('button', { class: 'btn', onclick: () => save(v) }, usd(v)))),
     field,
     h('div', { class: 'btnrow', style: 'margin-top:12px' },

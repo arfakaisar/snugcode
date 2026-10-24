@@ -60,6 +60,8 @@ function checkImages(images) {
 
 // History events kept in memory per session; older ones remain in the .jsonl file.
 const MEM_EVENTS = 3000;
+// Prompts that can wait while the agent works (see Session.send).
+const MAX_QUEUED = 10;
 
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
@@ -156,6 +158,7 @@ export class Session extends EventEmitter {
     this.logStream = null;
     this.procs = new ProcManager({ cwd: meta.cwd, onChange: (p) => this.onProc(p), onOut: (name, d) => this.live({ k: 'procOut', name, d }) });
     this.tunnel = null;
+    this.queue = []; // prompts sent while the agent works: { text, images }
   }
 
   // Transient events (process logs, screenshots, preview status): straight to clients, not into history,
@@ -307,7 +310,7 @@ export class Session extends EventEmitter {
     try {
       engine = resolveRoute(this.mgr.secrets, m.model).engine;
     } catch {}
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, autoLow: !!m.autoLow, autonomy: autonomyOf(m), spent: m.spentUsd || 0, budget: m.budgetUsd || 0, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, autoLow: !!m.autoLow, autonomy: autonomyOf(m), spent: m.spentUsd || 0, tokens: m.tokens || null, budget: m.budgetUsd || 0, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -325,9 +328,15 @@ export class Session extends EventEmitter {
 
   // Cost: the Agent SDK reports a running total per process (not per turn), and a process resuming a
   // transcript starts from the stored total. Turned into this turn's cost (`cost`) + the session total (`spent`),
-  // then compared with the session budget (meta.budgetUsd). Engines without costs (Codex/Gemini) are skipped.
+  // then compared with the session budget (meta.budgetUsd). Engines without costs (Codex/Gemini) only add tokens.
   account(e) {
-    if (typeof e.cost !== 'number' || !(e.cost >= 0)) return;
+    // Tokens are counted for every engine (Codex/Gemini report usage per turn but no cost), shown next to the cost.
+    if (e.usage) {
+      const t = (this.meta.tokens ??= { in: 0, out: 0 });
+      t.in += +e.usage.in || 0;
+      t.out += +e.usage.out || 0;
+    }
+    if (typeof e.cost !== 'number' || !(e.cost >= 0)) return this.meta.tokens && this.mgr.saveIndex();
     const m = this.meta;
     const agent = this.agent;
     const prev = agent && agent.lastCost != null ? agent.lastCost : m.costSeen ?? null;
@@ -393,6 +402,7 @@ export class Session extends EventEmitter {
     this.meta.updatedAt = Date.now();
     this.mgr.saveIndex();
     this.emitEvent({ k: 'status', s }, { persist: false });
+    if (s === 'idle') this.drainQueue();
   }
 
   since(seq) {
@@ -442,9 +452,18 @@ export class Session extends EventEmitter {
     });
   }
 
+  // While the agent works, prompts are queued (from any phone or terminal) and sent one by one as each turn finishes.
+  // Stop clears the queue. `!commands` aren't queued: they run now or not at all.
   async send(text, images) {
-    if (this.status === 'running') throw new Error('The agent is still running. Stop it first or wait for it to finish.');
     images = checkImages(images);
+    if (this.status === 'running') {
+      if (text.startsWith('!') && !images.length) throw new Error('The agent is still running. Stop it first or wait for it to finish.');
+      if (!text && !images.length) return;
+      if (this.queue.length >= MAX_QUEUED) throw new Error(`At most ${MAX_QUEUED} prompts can wait in the queue.`);
+      this.queue.push({ text, images });
+      this.emitQueue();
+      return { queued: this.queue.length };
+    }
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
     if (this.meta.budgetUsd > 0 && (this.meta.spentUsd || 0) >= this.meta.budgetUsd)
@@ -457,6 +476,41 @@ export class Session extends EventEmitter {
       this.emitEvent({ k: 'error', d: String(err?.message || err) });
       this.endTurn(true);
     });
+  }
+
+  queueInfo() {
+    return this.queue.map((q) => ({ text: q.text.slice(0, 200), ...(q.images.length ? { img: q.images.length } : {}) }));
+  }
+
+  emitQueue() {
+    this.live({ k: 'queue', items: this.queueInfo() });
+  }
+
+  // Remove one queued prompt (index), or all of them (no index).
+  unqueue(i) {
+    if (i == null) this.queue.length = 0;
+    else if (Number.isInteger(i) && i >= 0 && i < this.queue.length) this.queue.splice(i, 1);
+    else throw new Error('Queued prompt not found');
+    this.emitQueue();
+    return this.queueInfo();
+  }
+
+  // The turn finished: the next queued prompt starts (after the `done` event has gone out).
+  drainQueue() {
+    if (!this.queue.length || this.status === 'running' || this.draining) return;
+    this.draining = true;
+    setTimeout(() => {
+      this.draining = false;
+      if (this.status === 'running' || !this.queue.length) return;
+      const next = this.queue.shift();
+      this.emitQueue();
+      this.send(next.text, next.images).catch((err) => {
+        // e.g. the budget was reached: the rest of the queue waits for the user.
+        this.emitEvent({ k: 'error', d: 'Queued prompt not sent: ' + String(err?.message || err) });
+        this.queue.length = 0;
+        this.emitQueue();
+      });
+    }, 50).unref?.();
   }
 
   // The user changed files directly (editor / reverting a hunk on the phone): recorded in history, and the agent is
@@ -816,6 +870,8 @@ export class Session extends EventEmitter {
   }
 
   async interrupt() {
+    // Stop means stop: prompts waiting in the queue are dropped too.
+    if (this.queue.length) this.unqueue();
     if (this.shellProc) this.shellProc.kill();
     const agent = this.agent;
     const turn = this.turn;
