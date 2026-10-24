@@ -311,6 +311,7 @@ export class Renderer {
   // Answer from a notification button (sw.js → app.js). Only for a permission that's still pending, and
   // only low/medium risk (the daemon omits the pid for high risk).
   async answerFromPush() {
+    if (app.locked) return; // answered after unlocking (ui/lock.js)
     const want = app.permFromPush;
     app.permFromPush = null;
     const e = want && this.permQueue.find((p) => p.pid === want.pid);
