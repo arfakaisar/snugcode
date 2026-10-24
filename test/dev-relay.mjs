@@ -162,6 +162,12 @@ const server = http.createServer(async (req, res) => {
     machine.boot = { stage: String(b.stage || '').slice(0, 20), step: String(b.step || '').slice(0, 20), msg: String(b.msg || '').slice(0, 400), at: Date.now() };
     return json(res, { ok: true });
   }
+  // A daemon swaps its machine token for a freshly signed one (signing-key rotation, see the hosted relay).
+  if (p === '/api/machine/renew' && req.method === 'POST') {
+    const m = verify(bearer);
+    if (!(m?.kind === 'machine' && account(m.sub).machines.get(m.mid))) return json(res, { error: 'unauthorized' }, 401);
+    return json(res, { token: sign({ kind: 'machine', sub: m.sub, login: m.login, mid: m.mid, iat: Date.now() }) });
+  }
   if (p.startsWith('/api/')) {
     const u = userFrom(bearer);
     if (!u) return json(res, { error: 'unauthorized' }, 401);

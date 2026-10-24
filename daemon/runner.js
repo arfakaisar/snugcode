@@ -65,7 +65,10 @@ export async function bootstrapCloud(env, cfg, sec) {
 
   let relinked = false;
   const token = env1(env, 'MACHINE_TOKEN');
-  if (token && token !== sec.machineToken) {
+  // Applied only when the env value changed: the daemon renews its token (Daemon.renewMachineToken), and a runner
+  // restart must not swap the renewed token back for the original one from the Codespaces secret.
+  const freshToken = fromEnv(sec, 'machineToken', token);
+  if (token && freshToken && token !== sec.machineToken) {
     const p = decodeMachineToken(token);
     if (!p) throw new Error('SNUGCODE_MACHINE_TOKEN is invalid');
     if (p.mid !== cfg.machineId) {
