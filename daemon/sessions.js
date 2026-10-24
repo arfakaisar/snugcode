@@ -21,7 +21,7 @@ import { cleanupWorkspaces, safeRm } from './cleaner.js';
 import { ProcManager } from './procs.js';
 import { shellSpawn, toolchainEnv } from './toolchain.js';
 import { openTunnel } from './tunnel.js';
-import { snapshot, rewind } from './checkpoint.js';
+import { snapshot, rewind, keepCheckpoint, dropCheckpoints } from './checkpoint.js';
 import { restoreEnv, detectProject } from './project.js';
 import { SAFE_DEV_TOOLS, DEV_START, SCREENSHOT } from './devtools.js';
 import { closeBrowser } from './browser.js';
@@ -60,6 +60,8 @@ function checkImages(images) {
 
 // History events kept in memory per session; older ones remain in the .jsonl file.
 const MEM_EVENTS = 3000;
+// Prompts that can wait while the agent works (see Session.send).
+const MAX_QUEUED = 10;
 
 function cut(s, n = OUT_LIMIT) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
@@ -156,6 +158,7 @@ export class Session extends EventEmitter {
     this.logStream = null;
     this.procs = new ProcManager({ cwd: meta.cwd, onChange: (p) => this.onProc(p), onOut: (name, d) => this.live({ k: 'procOut', name, d }) });
     this.tunnel = null;
+    this.queue = []; // prompts sent while the agent works: { text, images }
   }
 
   // Transient events (process logs, screenshots, preview status): straight to clients, not into history,
@@ -307,7 +310,7 @@ export class Session extends EventEmitter {
     try {
       engine = resolveRoute(this.mgr.secrets, m.model).engine;
     } catch {}
-    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, autoLow: !!m.autoLow, autonomy: autonomyOf(m), spent: m.spentUsd || 0, budget: m.budgetUsd || 0, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
+    return { id: m.id, repo: m.repo, branch, base: m.base, title: m.title, model: m.model, engine, status: this.status, updatedAt: m.updatedAt, auto: !!m.auto, autoLow: !!m.autoLow, autonomy: autonomyOf(m), spent: m.spentUsd || 0, tokens: m.tokens || null, budget: m.budgetUsd || 0, plan: !!m.plan, askEdits: !!m.askEdits, local: !!m.local, computer: !!m.computer, cwd: m.cwd };
   }
 
   emitEvent(e, { persist = true } = {}) {
@@ -325,9 +328,15 @@ export class Session extends EventEmitter {
 
   // Cost: the Agent SDK reports a running total per process (not per turn), and a process resuming a
   // transcript starts from the stored total. Turned into this turn's cost (`cost`) + the session total (`spent`),
-  // then compared with the session budget (meta.budgetUsd). Engines without costs (Codex/Gemini) are skipped.
+  // then compared with the session budget (meta.budgetUsd). Engines without costs (Codex/Gemini) only add tokens.
   account(e) {
-    if (typeof e.cost !== 'number' || !(e.cost >= 0)) return;
+    // Tokens are counted for every engine (Codex/Gemini report usage per turn but no cost), shown next to the cost.
+    if (e.usage) {
+      const t = (this.meta.tokens ??= { in: 0, out: 0 });
+      t.in += +e.usage.in || 0;
+      t.out += +e.usage.out || 0;
+    }
+    if (typeof e.cost !== 'number' || !(e.cost >= 0)) return this.meta.tokens && this.mgr.saveIndex();
     const m = this.meta;
     const agent = this.agent;
     const prev = agent && agent.lastCost != null ? agent.lastCost : m.costSeen ?? null;
@@ -393,6 +402,7 @@ export class Session extends EventEmitter {
     this.meta.updatedAt = Date.now();
     this.mgr.saveIndex();
     this.emitEvent({ k: 'status', s }, { persist: false });
+    if (s === 'idle') this.drainQueue();
   }
 
   since(seq) {
@@ -442,9 +452,18 @@ export class Session extends EventEmitter {
     });
   }
 
+  // While the agent works, prompts are queued (from any phone or terminal) and sent one by one as each turn finishes.
+  // Stop clears the queue. `!commands` aren't queued: they run now or not at all.
   async send(text, images) {
-    if (this.status === 'running') throw new Error('The agent is still running. Stop it first or wait for it to finish.');
     images = checkImages(images);
+    if (this.status === 'running') {
+      if (text.startsWith('!') && !images.length) throw new Error('The agent is still running. Stop it first or wait for it to finish.');
+      if (!text && !images.length) return;
+      if (this.queue.length >= MAX_QUEUED) throw new Error(`At most ${MAX_QUEUED} prompts can wait in the queue.`);
+      this.queue.push({ text, images });
+      this.emitQueue();
+      return { queued: this.queue.length };
+    }
     if (text.startsWith('!') && !images.length) return this.shell(text.slice(1).trim());
     if (!text && !images.length) return;
     if (this.meta.budgetUsd > 0 && (this.meta.spentUsd || 0) >= this.meta.budgetUsd)
@@ -457,6 +476,41 @@ export class Session extends EventEmitter {
       this.emitEvent({ k: 'error', d: String(err?.message || err) });
       this.endTurn(true);
     });
+  }
+
+  queueInfo() {
+    return this.queue.map((q) => ({ text: q.text.slice(0, 200), ...(q.images.length ? { img: q.images.length } : {}) }));
+  }
+
+  emitQueue() {
+    this.live({ k: 'queue', items: this.queueInfo() });
+  }
+
+  // Remove one queued prompt (index), or all of them (no index).
+  unqueue(i) {
+    if (i == null) this.queue.length = 0;
+    else if (Number.isInteger(i) && i >= 0 && i < this.queue.length) this.queue.splice(i, 1);
+    else throw new Error('Queued prompt not found');
+    this.emitQueue();
+    return this.queueInfo();
+  }
+
+  // The turn finished: the next queued prompt starts (after the `done` event has gone out).
+  drainQueue() {
+    if (!this.queue.length || this.status === 'running' || this.draining) return;
+    this.draining = true;
+    setTimeout(() => {
+      this.draining = false;
+      if (this.status === 'running' || !this.queue.length) return;
+      const next = this.queue.shift();
+      this.emitQueue();
+      this.send(next.text, next.images).catch((err) => {
+        // e.g. the budget was reached: the rest of the queue waits for the user.
+        this.emitEvent({ k: 'error', d: 'Queued prompt not sent: ' + String(err?.message || err) });
+        this.queue.length = 0;
+        this.emitQueue();
+      });
+    }, 50).unref?.();
   }
 
   // The user changed files directly (editor / reverting a hunk on the phone): recorded in history, and the agent is
@@ -702,7 +756,13 @@ export class Session extends EventEmitter {
     // this checkpoint to finish (askPermission), so rewind still gets the state before the prompt.
     if (userSeq && !this.meta.computer)
       this.cpReady = snapshot(this.meta.cwd).then(
-        (tree) => tree && this.emitEvent({ k: 'cp', of: userSeq, tree }),
+        (tree) => {
+          if (!tree) return;
+          this.emitEvent({ k: 'cp', of: userSeq, tree });
+          // snugcode's own worktrees: keep the checkpoint reachable so `git gc` doesn't delete it (see checkpoint.js).
+          // Local sessions are the user's own repo: no extra refs there.
+          if (!this.meta.local) keepCheckpoint(this.meta.cwd, this.id, userSeq, tree).catch((e) => this.mgr.log('! checkpoint ref failed: ' + e.message));
+        },
         (e) => this.mgr.log('! checkpoint failed: ' + e.message),
       );
     if (this.meta.note) {
@@ -742,11 +802,13 @@ export class Session extends EventEmitter {
     const editInside = EDIT_TOOLS.has(tool) && paths.length > 0 && (this.meta.computer || paths.every((p) => isInside(p, cwd))) && !this.meta.askEdits && !this.meta.plan;
     // File-changing tools only run once this prompt's checkpoint is saved.
     if (!safe && this.cpReady) await this.cpReady;
-    // Auto-approve for Bash only if this agent process really runs with a sandbox (or sandboxing isn't supported).
-    const auto = this.meta.auto && !(tool === 'Bash' && this.agent?.unsandboxedAuto);
+    // Auto-approve for Bash only if this agent process really runs in an OS sandbox (or the user turned the sandbox off);
+    // without one (e.g. Windows), auto-approve falls back to the routine-commands rule below.
+    const unsandboxed = tool === 'Bash' && this.agent?.unsandboxedAuto;
+    const auto = this.meta.auto && !unsandboxed;
     if (!needsUser && (planFile || safe || editInside || auto || this.alwaysAllow.has(tool))) return allow;
     // The "Routine commands automatic" preset: test/lint/build without command chains pass without asking.
-    if (!needsUser && this.meta.autoLow && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
+    if (!needsUser && (this.meta.autoLow || this.meta.auto) && !this.meta.plan && (tool === 'Bash' || tool === DEV_START) && permRisk(tool, input, this.permCtx(tool, input))?.level === 'low') return allow;
     return this.requestUser(tool, input, opts);
   }
 
@@ -808,6 +870,8 @@ export class Session extends EventEmitter {
   }
 
   async interrupt() {
+    // Stop means stop: prompts waiting in the queue are dropped too.
+    if (this.queue.length) this.unqueue();
     if (this.shellProc) this.shellProc.kill();
     const agent = this.agent;
     const turn = this.turn;
@@ -935,7 +999,7 @@ export class SessionManager {
       console.error(`! sessions/index.json is corrupted (kept as index.json.broken-*); ${index.length} session(s) recovered from worktrees.`);
     }
     for (const meta of index) if (meta?.id && meta.cwd && fs.existsSync(meta.cwd)) this.sessions.set(meta.id, new Session(meta, this));
-    if (!idx.ok) this.saveIndex();
+    if (!idx.ok) this.saveIndex({ now: true });
     // Scan and clean up orphaned folders automatically in the background
     setTimeout(() => this.cleanupOrphans().catch(() => {}), 1500).unref?.();
     this.cleanupTimer = setInterval(() => {
@@ -950,6 +1014,7 @@ export class SessionManager {
   close() {
     this.proxy?.close();
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.saveTimer) this.saveIndex({ now: true });
     return Promise.all([...this.sessions.values()].map((s) => s.close()).concat(closeBrowser()));
   }
 
@@ -1034,7 +1099,16 @@ export class SessionManager {
   }
 
   // Atomic: a failed write (e.g. full disk) leaves the old index intact and doesn't break the agent flow.
-  saveIndex() {
+  // Status, cost, and setting changes happen many times per prompt: they're coalesced into one write (~200 ms later).
+  // Structural changes (session created/removed) and daemon shutdown write right away (`now`).
+  saveIndex({ now = false } = {}) {
+    if (!now) {
+      this.saveTimer ??= setTimeout(() => this.saveIndex({ now: true }), 200);
+      this.saveTimer.unref?.();
+      return;
+    }
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     try {
       writeJson(SESSION_INDEX, [...this.sessions.values()].map((s) => s.meta), 0o644);
     } catch (e) {
@@ -1071,7 +1145,7 @@ export class SessionManager {
       };
       const s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
       return s;
     }
     if (local) {
@@ -1083,7 +1157,7 @@ export class SessionManager {
       const meta = { id, repo: info.repo, cwd: info.cwd, branch: info.branch, base: info.base, local: true, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
       const s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
       return s;
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '')) throw new Error('The repo must be in owner/name format');
@@ -1098,7 +1172,7 @@ export class SessionManager {
       const meta = { id, repo, ...wt, model: model || this.config.model, title: '', createdAt: Date.now(), updatedAt: Date.now(), auto: false };
       s = new Session(meta, this);
       this.sessions.set(id, s);
-      this.saveIndex();
+      this.saveIndex({ now: true });
     } finally {
       const n = this.busyRepos.get(busyKey) - 1;
       if (n > 0) this.busyRepos.set(busyKey, n);
@@ -1116,12 +1190,13 @@ export class SessionManager {
     for (const [t, x] of this.bridges) if (x === s) this.bridges.delete(t);
     await new Promise((r) => setTimeout(r, 150)); // claude.exe releases the worktree files
     this.sessions.delete(id);
-    this.saveIndex();
+    this.saveIndex({ now: true });
     try {
       safeRm(s.logFile);
     } catch {}
     // The user's own local folders are never deleted; only their session history.
     if (!s.meta.local && !s.meta.computer) {
+      await dropCheckpoints(s.meta.cwd, s.id).catch(() => {});
       await removeWorktree(s.meta.cwd).catch(() => {});
     }
     // Clean up orphan worktrees / logs (repo base clones are kept for a few days for the next session)

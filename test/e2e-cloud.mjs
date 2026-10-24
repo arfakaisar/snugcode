@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { RELAY, ok, sleep, startMockRouter, routerLog } from './e2e-harness.mjs';
 import { findBrowser } from '../daemon/browser.js';
@@ -64,7 +65,7 @@ const runnerEnv = {
   GITHUB_TOKEN: 'ghs_LEAKED_FROM_CODESPACES',
   GH_TOKEN: 'gho_LEAKED_TOO',
 };
-const runner = spawn(process.execPath, [new URL('../daemon/cli.js', import.meta.url).pathname, 'cloud'], { env: runnerEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+const runner = spawn(process.execPath, [fileURLToPath(new URL('../daemon/cli.js', import.meta.url)), 'cloud'], { env: runnerEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 let rlog = '';
 runner.stdout.on('data', (d) => (rlog += d));
 runner.stderr.on('data', (d) => (rlog += d));

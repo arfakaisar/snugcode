@@ -7,6 +7,7 @@ import { renewToken, showLogin, showMachines } from './ui/auth.js';
 import { applyTheme, toast, ui } from './ui/dom.js';
 import { showSession } from './ui/session.js';
 import { acceptGhToken } from './ui/cloud.js';
+import { ensureUnlocked } from './ui/lock.js';
 
 // ---------- address move ----------
 // The old address (pocketcode-relay…) still serves PCs & the API, but its PWA offers to move to the main
@@ -40,7 +41,7 @@ async function offerMove() {
 }
 
 // ---------- start ----------
-function boot() {
+async function boot() {
   importMoved(); // before theme & token are read: the data may come from the old address
   applyTheme();
   const m = location.hash.match(/login=([^&]+)/);
@@ -55,6 +56,8 @@ function boot() {
   if (o && pm) app.permFromPush = { pid: pm[1], decision: pm[2] === 'allow' ? 'allow' : 'deny' };
   if (m || o || g) history.replaceState(null, '', location.pathname);
   if (!token()) return showLogin();
+  // Optional app lock: nothing is shown and no PC is contacted before the phone's screen lock confirms the user.
+  await ensureUnlocked();
   renewToken();
   showMachines({ resume: true }).catch((e) => toast(e.message, true));
 }

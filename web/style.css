@@ -927,6 +927,13 @@ html.kb #composer, html.kb .starter { padding-bottom: 8px; }
 .mode.shell { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .mode.auto { color: var(--bad); background: color-mix(in srgb, var(--bad) 15%, transparent); }
 #thumbs { display: flex; gap: 8px; padding: 4px 4px 6px; overflow-x: auto; }
+#queue { display: flex; flex-direction: column; gap: 4px; padding: 4px 4px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); max-height: 30vh; overflow-y: auto; }
+#queue .qhead { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--dim); font-weight: 500; }
+#queue .qclear { font: inherit; color: var(--accent); background: none; border: 0; padding: 2px 4px; cursor: pointer; }
+#queue .qitem { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 12px; background: var(--bg-3, var(--line)); animation: popIn .35s var(--bounce) both; }
+#queue .qtext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+#queue .qx { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: var(--dim); cursor: pointer; }
+#queue .qx svg { width: 14px; height: 14px; }
 .thumb { position: relative; flex: none; width: 60px; height: 60px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-2); animation: popIn .45s var(--bounce) both; animation-delay: calc(var(--i, 0) * 50ms); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .thumb svg { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; padding: 3px; border-radius: 50%; background: rgba(0, 0, 0, .65); color: #fff; }
@@ -1283,3 +1290,9 @@ html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); pad
 .nextsteps { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
 .nextsteps .chip { min-height: 36px; padding: 6px 14px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: var(--fg-2); font-size: 13px; transition: background .15s, transform .2s var(--spring); }
 .nextsteps .chip:active { transform: scale(.96); background: var(--surface-2); }
+
+/* ---------- app lock (ui/lock.js) ---------- */
+#lockscreen { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px 16px calc(24px + var(--safe-b, 0px)); background: var(--bg); animation: fadeIn .25s both; }
+#lockscreen .inner { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; max-width: 360px; }
+#lockscreen h2 { margin: 4px 0 0; font-size: 24px; }
+#lockscreen p { margin: 0; }

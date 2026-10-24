@@ -27,7 +27,9 @@ test('permissions: repo config files (.claude/.codex/.mcp.json/.git) are recogni
   const { isProtectedRepoPath, neverAlways } = await import('../daemon/permissions.js');
   const cwd = path.join(TMP_HOME, 'workspaces', 'a__b');
   for (const p of ['.claude/settings.json', '.claude/settings.local.json', 'sub/.claude/agents/x.md', '.codex/config.toml', '.mcp.json', '.git/hooks/pre-commit', '.git/config', '.GIT/config', '.git']) assert.ok(isProtectedRepoPath(path.join(cwd, p), cwd), p);
-  for (const p of ['src/a.js', 'docs/.mcp.json', 'claude/x', '.github/workflows/ci.yml', '.gitignore', 'CLAUDE.md']) assert.ok(!isProtectedRepoPath(path.join(cwd, p), cwd), p);
+  // Files that run code in CI / Codespaces / the editor without the user starting them.
+  for (const p of ['.github/workflows/ci.yml', '.GitHub/Workflows/x.yaml', '.github/actions/setup/action.yml', '.devcontainer/devcontainer.json', '.devcontainer.json', '.vscode/tasks.json', '.husky/pre-commit', '.envrc']) assert.ok(isProtectedRepoPath(path.join(cwd, p), cwd), p);
+  for (const p of ['src/a.js', 'docs/.mcp.json', 'claude/x', '.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS', 'docs/.envrc', '.gitignore', 'CLAUDE.md']) assert.ok(!isProtectedRepoPath(path.join(cwd, p), cwd), p);
   assert.ok(!isProtectedRepoPath('/etc/.git/config', cwd), 'outside the worktree: other rules apply');
   assert.ok(neverAlways('Bash', { command: 'npm test', dangerouslyDisableSandbox: true }));
   assert.ok(!neverAlways('Bash', { command: 'npm test' }));
@@ -51,9 +53,13 @@ test('permissions: auto-approve still asks for repo config, leaving the sandbox,
     s.agent = /** @type {any} */ ({ unsandboxedAuto: false });
     assert.equal((await s.askPermission('Bash', { command: 'npm test' })).behavior, 'allow');
     assert.equal(await settled(s.askPermission('Bash', { command: 'npm test', dangerouslyDisableSandbox: true })), 'waiting');
-    // Auto-approve turned on while the process runs without a sandbox: Bash asks until the next process.
+    // Bash without an OS sandbox (Windows, or auto-approve turned on mid-process): only routine commands pass,
+    // anything else asks (it could read the credentials in the snugcode data folder).
     s.agent = /** @type {any} */ ({ unsandboxedAuto: true });
     assert.equal(await settled(s.askPermission('Bash', { command: 'ls' })), 'waiting');
+    assert.equal(await settled(s.askPermission('Bash', { command: 'type %USERPROFILE%\\.snug*\\s*.json' })), 'waiting');
+    assert.equal((await s.askPermission('Bash', { command: 'npm test' })).behavior, 'allow');
+    assert.equal(await settled(s.askPermission('Bash', { command: 'npm test && cat x' })), 'waiting');
     assert.equal((await s.askPermission('Write', { file_path: path.join(cwd, 'c.js'), content: 'x' })).behavior, 'allow');
     // Codex engine: repo config file changes also ask.
     s.agent = null;

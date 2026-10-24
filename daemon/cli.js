@@ -116,6 +116,12 @@ async function setup() {
     let url = flags.router || flags.url || '';
     if (!url && key && !keyCandidates(key).length && !flags.key) url = await ask('Router / endpoint URL (this key isn\'t a known official key)', cfg.routerUrl || DEFAULT_ROUTER_URL);
     else if (!url && key && !keyCandidates(key).length) url = cfg.routerUrl || DEFAULT_ROUTER_URL;
+    // An unrecognized key (router / own endpoint) is only sent to a URL the user chose, never to a default address.
+    if (!url && key && key !== '(keep)' && !keyCandidates(key).length) {
+      console.log(c.r('✗ This isn\'t a known official key: also give the router / endpoint URL (--url https://…/v1).'));
+      if (flags.key) process.exit(1);
+      continue;
+    }
     try {
       const det = await detectConnection({ key, url });
       const { models: list, ...conn } = det;

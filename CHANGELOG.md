@@ -6,6 +6,34 @@ landing page, or internal docs, which are no longer part of this repo.
 
 ## Unreleased
 
+### Security
+- **Installers only install from the official GitHub repo** (latest release tag). They used to install whatever
+  package was called `snugcode` on npm, a name nobody had claimed yet. `SNUGCODE_PACKAGE` overrides the source.
+- **Pinned dependencies for users** (`npm-shrinkwrap.json`): global and git installs ignored `package-lock.json`.
+- **The hosted PWA is deployed from release tags only**, and `build.json` records the source `commit`.
+- **No OS sandbox → auto-approve only runs routine commands** (Claude engine, e.g. on Windows): other Bash commands
+  ask, so the agent can't quietly read `~/.snugcode/secrets.json`. `"sandbox": "off"` is the explicit opt-out.
+- **Codex sandbox checked for real**: the start-up probe runs snugcode's profile and must fail to read a file in the
+  data folder. On Windows Codex can't apply that profile, which broke every sandboxed command; it now asks instead.
+- **CI, dev container, editor-task and hook files always ask** before the agent changes them (`.github/workflows`,
+  `.github/actions`, `.devcontainer`, `.vscode`, `.husky`, `.envrc`).
+- **Unrecognized API keys are never sent to a default router**: give the router URL.
+- **Machine tokens are renewed by the relay** (weekly), so its signing key can be rotated without re-linking PCs.
+- **App lock** (Account & appearance): the phone's fingerprint, face, or PIN (WebAuthn) before the app opens.
+
+### New
+- **Prompt queue**: prompts sent while the agent works wait in the session (max 10, from any phone or terminal) and
+  run one by one; remove them above the composer, Stop clears them.
+- **Token usage for every engine** in Cost & limit (Codex and Gemini CLI report tokens, not cost).
+
+### Fixed
+- **Checkpoints older than ~2 weeks can be rewound again**: `git gc` used to delete them (they're now kept under
+  `refs/snugcode/cp/` in snugcode's worktrees and dropped with the session).
+- **The diff view no longer leaves intent-to-add entries in your index** (local sessions).
+- **Fewer writes and relay messages**: session-list writes are coalesced; terminal output floods are batched every
+  50 ms over the relay (typing echo stays at 16 ms).
+- **The service worker only caches the app**, not the website's pages.
+
 ### Changed
 - **New license: GNU AGPL-3.0** (from MIT) for all code in this repo from now on. Code published earlier stays MIT. The
   snugcode name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), and contributions are accepted under the
