@@ -89,6 +89,8 @@ jobs:
           SHOTS: ${{ runner.temp }}/shots
       # The phone returns from the background on a network that stalls connections: never stuck on "Contacting the relay".
       - run: npm run test:e2e:resume
+      # App lock: WebAuthn platform authenticator (virtual, through CDP) before the PWA shows any PC.
+      - run: npm run test:e2e:lock
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

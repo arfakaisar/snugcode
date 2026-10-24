@@ -2,7 +2,8 @@
 import { store } from '../conn.js';
 import { app } from './state.js';
 import { api, showLogin } from './auth.js';
-import { TEXT_SCALES, applyTextScale, applyTheme, h, haptic, ic, menuItem, toast, ui } from './dom.js';
+import { TEXT_SCALES, applyTextScale, applyTheme, h, haptic, ic, menuItem, toast, toggleItem, ui } from './dom.js';
+import { disableLock, enableLock, lockEnabled } from './lock.js';
 
 // ---------- Notifications & Web Push ----------
 // The VAPID key is made on the phone and shared with each PC over the E2EE channel: one push subscription
@@ -123,6 +124,7 @@ export function accountMenu() {
     h('div', { class: 'group' },
       menuItem({ icon: 'bell', t1: 'Allow notifications', t2: 'Updates when the agent finishes / needs permission', onclick: enableNotifications }),
       pushLevelPicker(),
+      toggleItem({ icon: 'lock', t1: 'App lock', t2: 'Ask for this phone’s fingerprint, face, or PIN to open snugcode', on: lockEnabled(), onchange: (on) => (on ? enableLock() : disableLock()) }),
       menuItem({ icon: 'logout', t1: 'Sign out', danger: true, chev: false, onclick: () => (store.set('token', null), (app.me = null), ui.closeSheet(), showLogin()) }),
       // Logins on other phones/browsers (e.g. a lost phone) are revoked at the relay. PC pairing is unchanged.
       menuItem({ icon: 'logout', t1: 'Sign out everywhere', t2: 'Revoke the login on every phone & browser', danger: true, chev: false, onclick: logoutAll }),

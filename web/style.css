@@ -1290,3 +1290,9 @@ html.kb .termview { top: var(--app-top); bottom: auto; height: var(--app-h); pad
 .nextsteps { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
 .nextsteps .chip { min-height: 36px; padding: 6px 14px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: var(--fg-2); font-size: 13px; transition: background .15s, transform .2s var(--spring); }
 .nextsteps .chip:active { transform: scale(.96); background: var(--surface-2); }
+
+/* ---------- app lock (ui/lock.js) ---------- */
+#lockscreen { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px 16px calc(24px + var(--safe-b, 0px)); background: var(--bg); animation: fadeIn .25s both; }
+#lockscreen .inner { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; max-width: 360px; }
+#lockscreen h2 { margin: 4px 0 0; font-size: 24px; }
+#lockscreen p { margin: 0; }
