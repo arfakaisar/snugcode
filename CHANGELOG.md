@@ -66,6 +66,14 @@ for releases up to v0.4.0 are kept in their original language (Indonesian).
   `/private/var`).
 
 ### Improvements
+- **Landing page is much lighter, same look.** Measured idle (headless Chromium, 4× CPU throttle, phone viewport), the
+  main thread went from ~100% busy to 0–40% depending on the section. Decorative CSS loops pause in sections that are
+  off screen; animated `box-shadow`/`background-position`/`z-index` (status dots, glows, badge shine, model deck) became
+  transform/opacity animations the compositor runs alone; the hero's `blur(90px)` blobs became equivalent gradients;
+  the scroll handler no longer forces a layout per frame. The hero plays its entrance from the first paint instead of
+  waiting for `landing.js`. Transfer 304 → 214 KB: the landing serif is cut to the weights it uses
+  (`scripts/landing-fonts.py`, optical sizes kept), and CSS/JS are minified into content-hashed `/assets/` cached for
+  a year.
 - **PWA zoom is locked like a native app**: viewport meta `maximum-scale=1, user-scalable=no`, `touch-action:
   pan-x pan-y` on every element (pinch & double-tap don't zoom, scrolling still works), and Safari iOS pinch gestures
   (which ignore `user-scalable`) are cancelled in `web/ui/dom.js`.
