@@ -1,58 +1,45 @@
 <div align="center">
 
-<img src="docs/images/hero.jpg" alt="snugcode: a coding agent on your PC, controlled from your phone" width="100%">
+<a href="https://snugcode.dev/agent/"><img src="docs/images/hero.svg" alt="snugcode: your coding agent, in your pocket. A real coding agent runs on your PC or a free cloud runner, and you steer it from your phone." width="100%"></a>
 
 <br>
 
-### Your coding agent, in your pocket.
-
-snugcode runs a real coding agent on **your own PC** (or a free cloud runner) and lets you drive it from **your phone**.<br>
-Ask for a change, approve it with one tap, then commit, push, and open a PR. You don't have to be at your desk.
+**snugcode runs a real coding agent on your own PC (or a free cloud runner) and lets you drive it from your phone.**<br>
+Ask for a change, approve the diff with one tap, run the app, then commit and open a PR. You don't need to be at your desk.
 
 <br>
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-d97757?style=flat-square)](LICENSE)
-[![Free](https://img.shields.io/badge/price-free-3a3936?style=flat-square)](#is-it-really-free)
+[![CI](https://img.shields.io/github/actions/workflow/status/arfakaisar/snugcode/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/arfakaisar/snugcode/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/arfakaisar/snugcode?style=flat-square&color=d97757)](CHANGELOG.md)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-3a3936?style=flat-square)](LICENSE)
 [![E2EE](https://img.shields.io/badge/end--to--end-encrypted-3a3936?style=flat-square)](docs/security.md)
-[![Platform](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3936?style=flat-square)](#get-started-in-2-minutes)
-[![PWA](https://img.shields.io/badge/phone-Android%20%C2%B7%20iOS-3a3936?style=flat-square)](#get-started-in-2-minutes)
+[![PC](https://img.shields.io/badge/PC-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3a3936?style=flat-square)](#-get-started-in-2-minutes)
+[![Phone](https://img.shields.io/badge/phone-Android%20%C2%B7%20iOS-3a3936?style=flat-square)](#-get-started-in-2-minutes)
 
-**[Get started](#get-started-in-2-minutes)** · **[Open the app](https://snugcode.dev/agent/)** · [How it works](#how-it-works) · [Security](#private-by-design) · [User guide](docs/guide.md) · [FAQ](#faq)
+**[Get started](#-get-started-in-2-minutes)** · **[Open the app](https://snugcode.dev/agent/)** · [Features](#-what-you-can-do) · [How it works](#-how-it-works) · [Security](#-private-by-design) · [User guide](docs/guide.md) · [FAQ](#-faq)
 
 </div>
 
 <br>
 
-<table>
-<tr>
-<td width="58%" valign="top">
+<p align="center">
+  <img src="docs/images/demo-agent.gif" alt="Demo: a prompt typed on the phone, the agent plans, asks to approve each edit with a diff, runs the tests on the PC, and shows a summary" width="100%">
+</p>
 
-<img src="docs/images/demo-agent.gif" alt="Demo: from a prompt on the phone to passing tests" width="100%">
+## ✨ Why snugcode
 
-</td>
-<td width="42%" valign="top">
-
-### From prompt to passing tests
-
-1. Type a request on your phone.
-2. The agent on your PC reads the code and plans the change.
-3. Before it edits a file, it shows you the diff and waits for your OK.
-4. Tests run on **your** machine, with your toolchain.
-5. Then you get a summary: steps, time, tokens, and cost.
-
-<sub>A real screen recording: the app in Chromium, the snugcode daemon, and a mock model.</sub>
-
-</td>
-</tr>
-</table>
+- **It's your machine.** The agent works in your repo, with your toolchain, your dev server and your tests. Nothing is re-created in someone else's cloud.
+- **You stay in control.** Every edit comes with a diff and a one-tap *Allow*. Each session gets its own git worktree and can be rewound, so your main branch stays untouched.
+- **Bring any model.** Sign in with ChatGPT or paste a key from Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek and more. snugcode runs each model in the harness built for it.
+- **Private by design.** Phone and PC talk end to end encrypted. Your code and keys never pass through our servers in readable form.
 
 ---
 
-## Get started in 2 minutes
+## 🚀 Get started in 2 minutes
 
 **You need:** [Node.js 22+](https://nodejs.org), [git](https://git-scm.com), a GitHub account, and a ChatGPT account **or** any model API key.
 
-**1. Install on your PC**
+**1 · Install on your PC**
 
 ```bash
 curl -fsSL https://snugcode.dev/install.sh | sh        # macOS / Linux
@@ -61,41 +48,42 @@ curl -fsSL https://snugcode.dev/install.sh | sh        # macOS / Linux
 irm https://snugcode.dev/install.ps1 | iex             # Windows (PowerShell)
 ```
 
-Setup asks for a model key, a PC name, and a short PIN, then shows you one link that connects the PC to your GitHub account.
+The installer gets snugcode from this repo's latest release, then setup asks for a model key, a PC name and a short PIN, and shows one link that connects the PC to your GitHub account.
 
-**2. Open the app on your phone**
+**2 · Open the app on your phone**
 
 Go to **[snugcode.dev/agent](https://snugcode.dev/agent/)**, sign in with GitHub, pick your PC, and enter the PIN (only the first time).
-Tip: choose *Add to Home screen* so it opens like a normal app and can send notifications.
+Choose *Add to Home screen* so it opens like a normal app and can send you notifications.
 
-**3. Start a session**
+**3 · Start a session**
 
 Pick a repo and a branch, then type what you want done. That's it.
 
-> **No PC that stays on?** The app can create a **cloud runner** in your own GitHub Codespaces, which is free within GitHub's monthly quota. Nothing has to be installed on a computer. See [No PC: cloud runner](docs/guide.md#no-pc-cloud-runner).
+> [!TIP]
+> **No PC that stays on?** The app can create a **cloud runner** in your own GitHub Codespaces, free within GitHub's monthly quota. Nothing needs to be installed. See [No PC: cloud runner](docs/guide.md#no-pc-cloud-runner).
 
 ---
 
-## What you can do
+## 🧰 What you can do
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
 **🧠 Use any model**<br>
-<sub>Sign in with ChatGPT, or paste a key from Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, or a router. snugcode detects the key type and runs each model in the harness built for it.</sub>
+<sub>ChatGPT sign-in, or a key from Anthropic, OpenAI, Gemini, OpenRouter, DeepSeek, Kimi, GLM, xAI, Groq, or your own router. Claude runs on the Claude Agent SDK, GPT on Codex, Gemini on Gemini CLI.</sub>
 
 </td>
 <td width="33%" valign="top">
 
 **👆 Approve with one tap**<br>
-<sub>Every edit comes with a colored diff, and risky commands are flagged. Choose *Allow*, *Always*, or *Deny*. You can even answer from the notification.</sub>
+<sub>Edits come with a colored diff and a risk label. Choose *Allow*, *Always* or *Deny*, even straight from the notification. `git push` and new PRs always ask.</sub>
 
 </td>
 <td width="33%" valign="top">
 
 **🌿 Safe for your repo**<br>
-<sub>Each session works in its own git worktree and branch, and you can rewind to the state before any prompt. Your main branch stays untouched.</sub>
+<sub>One git worktree and branch per session, plus checkpoints to rewind to the state before any prompt.</sub>
 
 </td>
 </tr>
@@ -103,19 +91,19 @@ Pick a repo and a branch, then type what you want done. That's it.
 <td valign="top">
 
 **▶️ Run & preview**<br>
-<sub>Start your dev server from the phone, open a private preview link, and take screenshots. Console errors can go straight back to the agent.</sub>
+<sub>Start your dev server from the phone, open a private preview link, take screenshots, and send console errors back to the agent.</sub>
 
 </td>
 <td valign="top">
 
 **🔀 Git from anywhere**<br>
-<sub>See status and per-file diffs, comment on lines, then commit, push, and open a Pull Request.</sub>
+<sub>Status and per-file diffs, comments on lines, then commit, push and open a pull request.</sub>
 
 </td>
 <td valign="top">
 
-**💻 Same session in the terminal**<br>
-<sub>Run `snugcode` at your desk and keep going on your phone later. It's the same session on both screens.</sub>
+**💻 Phone + terminal**<br>
+<sub>Run `snugcode` at your desk and pick the same session up on your phone later. There's also a full terminal, file explorer and prompt queue on the phone.</sub>
 
 </td>
 </tr>
@@ -124,18 +112,16 @@ Pick a repo and a branch, then type what you want done. That's it.
 <table>
 <tr>
 <td width="50%" align="center" valign="top">
-<img src="docs/images/demo-run.gif" alt="Run & Preview demo" width="100%"><br>
-<b>Run & Preview</b>
+<img src="docs/images/demo-git.gif" alt="Git demo: see what changed, review the diff, commit" width="100%">
 </td>
 <td width="50%" align="center" valign="top">
-<img src="docs/images/demo-git.gif" alt="Git demo: diff and commit" width="100%"><br>
-<b>Git from your phone</b>
+<img src="docs/images/demo-run.gif" alt="Run & preview demo: start the dev server, screenshot the page, send errors to the agent" width="100%">
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>More screenshots</b></summary>
+<summary><b>📱 More screenshots</b> (they follow your GitHub theme)</summary>
 <br>
 <table>
 <tr>
@@ -144,8 +130,8 @@ Pick a repo and a branch, then type what you want done. That's it.
 <b>Home</b>
 </td>
 <td align="center" width="33%" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/session-light.jpg"><img src="docs/images/session.jpg" alt="Edit permission with diff"></picture><br>
-<b>Permissions with diffs</b>
+<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/session-light.jpg"><img src="docs/images/session.jpg" alt="Edit permission with a diff and a risk label"></picture><br>
+<b>Permission with a diff</b>
 </td>
 <td align="center" width="33%" valign="top">
 <picture><source media="(prefers-color-scheme: light)" srcset="docs/images/summary-light.jpg"><img src="docs/images/summary.jpg" alt="Agent result summary"></picture><br>
@@ -158,50 +144,62 @@ Pick a repo and a branch, then type what you want done. That's it.
 <b>Diff</b>
 </td>
 <td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/model-light.jpg"><img src="docs/images/model.jpg" alt="Model picker"></picture><br>
+<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/model-light.jpg"><img src="docs/images/model.jpg" alt="Model picker with effort"></picture><br>
 <b>Model & effort</b>
 </td>
 <td align="center" valign="top">
-<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/preview-light.jpg"><img src="docs/images/preview.jpg" alt="Page screenshot from the PC"></picture><br>
+<picture><source media="(prefers-color-scheme: light)" srcset="docs/images/preview-light.jpg"><img src="docs/images/preview.jpg" alt="Page screenshot taken on the PC"></picture><br>
 <b>Screenshot</b>
 </td>
 </tr>
 </table>
-<p align="center"><img src="docs/images/demo-tui.gif" alt="snugcode terminal UI" width="88%"><br><b>Terminal UI</b> · <code>snugcode</code></p>
 </details>
 
 The full feature list is in the **[user guide](docs/guide.md#features)**.
 
 ---
 
-## How it works
+## ⌨️ Terminal
 
-```mermaid
-flowchart LR
-    P["📱 Phone<br/>snugcode app"] <-- "encrypted" --> R["☁️ snugcode relay<br/><i>passes sealed messages</i>"]
-    R <-- "encrypted" --> D["🖥️ Your PC<br/>snugcode daemon + agent"]
-    D -- "your API key" --> M["🤖 Model provider"]
-    D -- "git" --> G["GitHub"]
+The same sessions live in your terminal. Start at your desk, continue on your phone (or the other way round).
+
+<p align="center"><img src="docs/images/demo-tui.gif" alt="snugcode terminal UI: the agent runs the tests, asks to approve an edit, and fixes the failing test" width="88%"></p>
+
+```bash
+cd your-project
+snugcode                       # open the terminal UI (or just: snug)
+snugcode "explain this repo"   # start with a prompt
+snugcode connect <api-key>     # add a model (the key type is detected)
+snugcode autostart on          # keep the daemon running in the background
 ```
 
-- The **daemon** on your PC connects *out* to the relay, so you don't need port forwarding, a VPN, or a public IP.
-- The **phone** pairs with your PC once using a PIN. After that, every message is end-to-end encrypted.
-- The **agent** works on your PC, and model traffic goes straight from your PC to the provider you chose.
-
-## Private by design
-
-- **Your code stays on your PC.** It never goes through snugcode's servers in readable form.
-- **Your keys stay on your PC.** API keys, ChatGPT sign-in, and GitHub tokens are stored only in `~/.snugcode`. They are never sent back to the phone, and the agent itself can't read them.
-- **The relay only sees sealed boxes.** Pairing uses a PAKE (CPace), and messages use XChaCha20-Poly1305.
-- **You can check it.** The app the relay serves is a byte-for-byte build of this repo. [Here's how to verify it](docs/security.md#verifying-the-pwa-you-use).
-
-Read the full, honest threat model in **[docs/security.md](docs/security.md)**, including what the relay *can* see.
+All commands and keyboard shortcuts are in the [user guide](docs/guide.md#terminal-snugcode).
 
 ---
 
-## Open source, hosted service
+## 🔌 How it works
 
-snugcode is built in the open. The parts that touch your code, keys, and devices are all here for anyone to read and audit. The hosted service at snugcode.dev, which connects your phone to your PC, is run by us.
+<p align="center"><img src="docs/images/how-it-works.svg" alt="Diagram: your phone and your PC exchange end-to-end encrypted messages through the snugcode relay, which can't read them. The PC talks to your model provider and GitHub directly." width="100%"></p>
+
+1. A small **daemon** on your PC connects *out* to the relay, so there's no port forwarding, VPN or public IP to set up.
+2. Your **phone** pairs with the PC once using a PIN. From then on, every message is end-to-end encrypted.
+3. The **agent** works on your PC. Model traffic goes straight from your PC to the provider you chose.
+
+## 🔒 Private by design
+
+- **Your code stays on your PC.** It never passes through snugcode's servers in readable form.
+- **Your keys stay on your PC.** API keys, ChatGPT sign-in and GitHub tokens live only in `~/.snugcode`. They're never sent to the phone, and the agent itself can't read them.
+- **The relay only sees sealed boxes.** Pairing uses a PAKE (CPace), and messages use XChaCha20-Poly1305.
+- **Optional app lock** with your phone's fingerprint, face or PIN.
+- **You can check it.** The app the relay serves is a byte-for-byte build of this repo. [Here's how to verify it](docs/security.md#verifying-the-pwa-you-use).
+
+The full, honest threat model is in **[docs/security.md](docs/security.md)**, including exactly what the relay *can* see.
+
+---
+
+## 🧩 Open source, hosted service
+
+Everything that touches your code, keys and devices is in this repo, for anyone to read and audit. The hosted service at snugcode.dev, which connects your phone to your PC, is run by us.
 
 | In this repo (AGPL-3.0) | Run by snugcode.dev |
 |---|---|
@@ -213,30 +211,16 @@ snugcode is built in the open. The parts that touch your code, keys, and devices
 
 ### Is it really free?
 
-Yes. The app, the daemon, and the relay are free to use. You bring your own model (ChatGPT sign-in or an API key), and model usage is billed by your provider, not by us. Cloud runners use your own GitHub Codespaces quota. We're planning an optional paid tier, **snugcode Cloud**, with managed runners. Everything listed above stays free.
+Yes. The app, the daemon and the relay are free to use. You bring your own model (ChatGPT sign-in or an API key), and model usage is billed by your provider, not by us. Cloud runners use your own GitHub Codespaces quota. We're planning an optional paid tier, **snugcode Cloud**, with managed runners. Everything listed above stays free.
 
 ---
 
-## Terminal
-
-```bash
-cd your-project
-snugcode                       # open the terminal UI (or just: snug)
-snugcode "explain this repo"   # start with a prompt
-snugcode connect <api-key>     # add a model (type detected automatically)
-snugcode autostart on          # keep the daemon running in the background
-```
-
-All commands and keyboard shortcuts are in the [user guide](docs/guide.md#terminal-snugcode).
-
----
-
-## FAQ
+## ❓ FAQ
 
 <details>
 <summary><b>Is my code sent to snugcode's servers?</b></summary>
 
-No. Your code stays on your PC. Only end-to-end encrypted messages pass through the relay, and the relay can't read them. Code is sent only to the model provider you connect, the same as when you use any coding agent.
+No. Your code stays on your PC. Only end-to-end encrypted messages pass through the relay, and it can't read them. Code is sent only to the model provider you connect, the same as with any coding agent.
 </details>
 
 <details>
@@ -267,13 +251,13 @@ More answers are in the [user guide](docs/guide.md#faq).
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-Bug reports, ideas, and pull requests are welcome. The whole client runs locally against a small dev relay, with no accounts needed. See **[CONTRIBUTING.md](CONTRIBUTING.md)** to get set up. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Bug reports, ideas and pull requests are welcome. The whole client runs locally against a small dev relay, with no accounts needed. See **[CONTRIBUTING.md](CONTRIBUTING.md)** to get set up, and [CHANGELOG.md](CHANGELOG.md) for what's new. The images and GIFs in this README are recorded from the real app with `npm run docs:images`.
 
-## License
+## 📄 License
 
-The code in this repo is licensed under the **[GNU AGPL-3.0](LICENSE)**. You can use, study, change, and share it. If you run a modified version as a service for other people, you have to publish your changes under the same license.
+The code in this repo is licensed under the **[GNU AGPL-3.0](LICENSE)**. You can use, study, change and share it. If you run a modified version as a service for other people, you have to publish your changes under the same license.
 
 "snugcode" and the snugcode logo are trademarks of the project. Forks are welcome, but they need their own name and logo. See [TRADEMARKS.md](TRADEMARKS.md).
 

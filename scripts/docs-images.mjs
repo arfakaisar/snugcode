@@ -1,9 +1,10 @@
 // README images & GIFs (docs/images) from the real UI: the built PWA in Chromium against the real daemon +
 // a mock 9router (test/e2e-harness.mjs) that plays the agent scenarios below. Every screenshot is made
-// in the dark & light themes; GIFs are recorded from the same screens and encoded with gifenc.
-// The hero & terminal are rendered from docs/mockups/*.html.
+// in the dark & light themes; GIFs are recorded from the same screens, put into the scene of
+// docs/mockups/frame.html (phone + step captions) and encoded with gifenc.
+// The terminal GIF and the animated hero are rendered from docs/mockups/tui.html & hero.svg.
 //   Terminal 1: npm run build:web && npm run dev:relay
-//   Terminal 2: npm run docs:images            (ONLY=hero,tui for the mockups only)
+//   Terminal 2: npm run docs:images            (ONLY=pwa,tui,hero for some of them; RELAY=… for another port)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -175,12 +176,14 @@ process.exit(fail ? 1 : 0);
 };
 
 // ---------- GIF recorder ----------
-// Successive PNG screenshots of the page; time spent on still captures isn't recorded.
+// Successive PNG screenshots of the page, each tagged with the current caption step (rec.step(i));
+// time spent on still captures isn't recorded.
 function recorder(page) {
-  let frames = [], on = false, loop = null, paused = false, skew = 0;
+  let frames = [], on = false, loop = null, paused = false, skew = 0, cur = 0;
   return {
     start() {
       frames = [];
+      cur = 0;
       on = true;
       loop = (async () => {
         while (on) {
@@ -189,9 +192,12 @@ function recorder(page) {
             continue;
           }
           const t = Date.now() - skew;
-          frames.push({ t, buf: await page.screenshot({ type: 'png' }) });
+          frames.push({ t, step: cur, buf: await page.screenshot({ type: 'png' }) });
         }
       })();
+    },
+    step(i) {
+      cur = i;
     },
     async still(fn) {
       paused = true;
@@ -201,24 +207,75 @@ function recorder(page) {
       skew += Date.now() - t0;
       paused = false;
     },
-    async stop(hold = 2600) {
+    async stop() {
       await sleep(400);
       on = false;
       await loop;
-      // Identical frames are merged; the last frame is held before the GIF loops.
-      const out = [];
-      for (let i = 0; i < frames.length; i++) {
-        const next = frames[i + 1]?.t ?? frames[i].t + hold;
-        const last = out.at(-1);
-        if (last && last.buf.equals(frames[i].buf)) last.delay += next - frames[i].t;
-        else out.push({ buf: frames[i].buf, delay: next - frames[i].t });
-      }
-      for (const f of out) f.delay = Math.min(f.delay, 1800);
-      out.at(-1).delay = hold;
-      return out;
+      return frames;
     },
   };
 }
+
+// Puts every recorded frame into the scene of docs/mockups/frame.html (phone + captions), then merges
+// identical frames; the last frame is held before the GIF loops.
+async function film(browser, raw, scene, file, hold = 2600) {
+  const size = scene.layout === 'wide' ? { width: 1200, height: 720 } : { width: 640, height: 980 };
+  const p = await browser.newPage({ viewport: size });
+  await p.goto(pathToFileURL(path.join(ROOT, 'docs', 'mockups', 'frame.html')).href);
+  await p.evaluate(async (s) => (window.setup(s), document.fonts.ready), scene);
+  const start = {};
+  for (const f of raw) start[f.step] ??= f.t;
+  const out = [];
+  let prev = null;
+  for (let i = 0; i < raw.length; i++) {
+    const f = raw[i];
+    const k = Math.min(1, (f.t - start[f.step]) / 450);
+    const delay = (raw[i + 1]?.t ?? f.t + hold) - f.t;
+    // Same screen, caption already settled: the previous composite is reused.
+    let buf = prev && k === 1 && prev.k === 1 && prev.step === f.step && prev.raw.equals(f.buf) ? prev.buf : null;
+    if (!buf) {
+      await p.evaluate(([src, step, k]) => window.draw(src, step, k), ['data:image/png;base64,' + f.buf.toString('base64'), f.step, k]);
+      buf = await p.screenshot({ type: 'png' });
+    }
+    prev = { raw: f.buf, buf, step: f.step, k };
+    const last = out.at(-1);
+    if (last && last.buf.equals(buf)) last.delay += delay;
+    else out.push({ buf, delay });
+  }
+  await p.close();
+  for (const f of out) f.delay = Math.min(f.delay, 1800);
+  out.at(-1).delay = hold;
+  await encodeGif(browser, out, size.width, file);
+}
+
+const FOOT = 'Real recording · snugcode app + daemon on a PC · mock model';
+const AGENT_SCENE = {
+  layout: 'wide',
+  eyebrow: 'Live demo',
+  title: 'From a prompt<br>to <b>passing tests</b>.',
+  steps: [
+    { t: 'Ask', d: 'Type what you want done, from anywhere.' },
+    { t: 'Plan', d: 'The agent on your PC reads the code and makes a plan.' },
+    { t: 'Approve', d: 'Every edit comes with a diff. One tap to allow.' },
+    { t: 'Test', d: 'Commands run on your PC, with your own toolchain.' },
+    { t: 'Done', d: 'A summary with steps, time, tokens and cost.' },
+  ],
+  footer: FOOT,
+};
+const GIT_SCENE = {
+  layout: 'card',
+  eyebrow: 'Git',
+  title: 'Review &amp; commit <b>from your phone</b>',
+  steps: [{ t: 'See what changed' }, { t: 'Review the diff, file by file' }, { t: 'Commit, push, open a PR' }],
+  footer: FOOT,
+};
+const RUN_SCENE = {
+  layout: 'card',
+  eyebrow: 'Run & preview',
+  title: 'Your dev server, <b>in your pocket</b>',
+  steps: [{ t: 'Start the dev server on your PC' }, { t: 'Screenshot the page from the PC' }, { t: 'Send errors back to the agent' }],
+  footer: FOOT,
+};
 
 // Encode in a separate Chromium page: PNG → canvas (downscaled) → global palette → changed pixels only
 // (pixels equal to the previous frame are made transparent to keep the GIF small).
@@ -291,19 +348,25 @@ async function capturePwa(browser) {
   const sess = await conn.call('create', { local: TOKO_DIR });
   await conn.call('edits', { id: sess.id, on: true }); // edit permissions show as a diff on the phone
 
+  // [regex source, replacement]: the dev account is called tester + 6 random characters.
   const swaps = [
     ['claude-mock-1', 'claude-opus-5-5'],
     ['claude-mock-2', 'claude-sonnet-5-5'],
-    ['tester', 'arfakaisar'],
+    ['tester[a-z0-9]{0,6}', 'arfakaisar'],
     ['GitHub not signed in', '@arfakaisar'],
   ];
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, colorScheme: 'dark' });
   // Sample data & a tap indicator are installed on every page: text is swapped as the DOM changes.
-  await ctx.addInitScript((swaps) => {
+  await ctx.addInitScript((list) => {
+    const swaps = list.map(([a, b]) => [new RegExp(a, 'g'), b]);
     const fix = (root) => {
       if (!root) return;
       const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let n; (n = w.nextNode()); ) for (const [a, b] of swaps) if (n.nodeValue.includes(a)) n.nodeValue = n.nodeValue.split(a).join(b);
+      for (let n; (n = w.nextNode()); )
+        for (const [a, b] of swaps) {
+          const v = n.nodeValue.replace(a, b);
+          if (v !== n.nodeValue) n.nodeValue = v;
+        }
       for (const el of document.querySelectorAll('.metachip.warn')) el.classList.remove('warn');
     };
     addEventListener('DOMContentLoaded', () => {
@@ -373,7 +436,9 @@ async function capturePwa(browser) {
     await page.locator('#input').pressSequentially('Add dark mode to the settings page', { delay: 38 });
     await sleep(350);
     await tap(page.locator('#send'));
+    rec.step(1);
     await page.waitForSelector('#dock .perm', { timeout: 60000 });
+    rec.step(2);
     await sleep(1600);
     await rec.still(() => shot('session', 200));
     // Every permission (Edit, Write, npm test) is approved with one tap until the agent is done.
@@ -383,13 +448,15 @@ async function capturePwa(browser) {
         await sleep(120);
         continue;
       }
+      if ((await perm.innerText()).includes('npm test')) rec.step(3);
       await sleep(1300);
       await tap(page.locator('#dock button', { hasText: 'Allow' }));
       await perm.waitForElementState('hidden').catch(() => {});
     }
     await page.waitForFunction(() => document.querySelectorAll('.donel').length >= 1, null, { timeout: 60000 });
-    await sleep(800);
-    await encodeGif(browser, await rec.stop(3200), 540, 'demo-agent.gif');
+    rec.step(4);
+    await sleep(1400);
+    await film(browser, await rec.stop(), AGENT_SCENE, 'demo-agent.gif', 3600);
     await shot('summary', 300);
 
     // GIF 2: git — status, diff, commit.
@@ -400,6 +467,7 @@ async function capturePwa(browser) {
     await sleep(1300);
     await rec.still(() => shot('git', 200));
     await tap(page.locator(sheet + ' button', { hasText: 'View diff' }));
+    rec.step(1);
     await page.waitForSelector(sheet + ' .difffile', { timeout: 15000 });
     await sleep(2200);
     await rec.still(() => shot('diff', 200));
@@ -408,6 +476,7 @@ async function capturePwa(browser) {
     await sleep(1400);
     await tap(page.locator(sheet + ' [aria-label="Back"]'));
     await page.waitForSelector(sheet + ' input[placeholder="Commit message…"]');
+    rec.step(2);
     await sleep(500);
     await tap(page.locator(sheet + ' input[placeholder="Commit message…"]'));
     await page.locator(sheet + ' input[placeholder="Commit message…"]').pressSequentially('Add dark mode to settings', { delay: 36 });
@@ -415,7 +484,7 @@ async function capturePwa(browser) {
     await tap(page.locator(sheet + ' button', { hasText: 'Commit' }).last());
     await page.waitForSelector(sheet + ' >> text=Add dark mode to settings', { timeout: 15000 });
     await sleep(1200);
-    await encodeGif(browser, await rec.stop(2800), 540, 'demo-git.gif');
+    await film(browser, await rec.stop(), GIT_SCENE, 'demo-git.gif', 2800);
     await closeSheet();
 
     await tap(page.locator('[aria-label="Change model"]'));
@@ -433,13 +502,15 @@ async function capturePwa(browser) {
     await sleep(1500);
     await rec.still(() => shot('run', 2600));
     await tap(page.locator(sheet + ' button', { hasText: 'Screenshot' }));
+    rec.step(1);
     await page.waitForSelector(sheet + ' img.shot', { timeout: 60000 });
     await sleep(1800);
     await rec.still(() => shot('preview', 300));
     await page.mouse.move(195, 600);
     await page.mouse.wheel(0, 1400);
-    await sleep(2000);
-    await encodeGif(browser, await rec.stop(3000), 540, 'demo-run.gif');
+    rec.step(2);
+    await sleep(2400);
+    await film(browser, await rec.stop(), RUN_SCENE, 'demo-run.gif', 3000);
     await closeSheet();
 
     // Home: one session still working.
@@ -465,8 +536,8 @@ async function capturePwa(browser) {
   return errors;
 }
 
-// ---------- mockup: terminal & hero ----------
-async function renderMockups(browser) {
+// ---------- mockups: terminal & hero ----------
+async function renderTui(browser) {
   // The terminal is animated by tui.html itself (window.at(ms)); one frame every 90 ms.
   const p = await browser.newPage({ viewport: { width: 880, height: 700 }, deviceScaleFactor: 2 });
   await p.goto(pathToFileURL(path.join(ROOT, 'docs', 'mockups', 'tui.html')).href);
@@ -480,21 +551,54 @@ async function renderMockups(browser) {
     else frames.push({ buf, delay: 90 });
   }
   frames.at(-1).delay = 3500;
-  await p.screenshot({ path: path.join(OUT, 'tui.jpg'), type: 'jpeg', quality: 90 });
   await p.close();
   await encodeGif(browser, frames, 880, 'demo-tui.gif');
-  // The hero uses the latest captures (including tui.jpg above).
-  const hero = await browser.newPage({ viewport: { width: 1280, height: 640 }, deviceScaleFactor: 2 });
-  await hero.goto(pathToFileURL(path.join(ROOT, 'docs', 'mockups', 'hero.html')).href);
-  await hero.waitForTimeout(1500);
-  await hero.screenshot({ path: path.join(OUT, 'hero.jpg'), type: 'jpeg', quality: 90 });
-  await hero.close();
-  console.log('✔ hero');
+}
+
+// The animated hero: docs/mockups/hero.svg with the fonts, the icon and the latest phone screenshots inlined
+// (an SVG shown with <img> on GitHub can't load anything else), plus a still hero.jpg for social previews.
+async function renderHero(browser) {
+  const b64 = (f) => fs.readFileSync(path.join(ROOT, f)).toString('base64');
+  const p = await browser.newPage({ viewport: { width: 1280, height: 640 }, deviceScaleFactor: 2 });
+  // Screenshots are scaled down to twice their size in the hero.
+  const jpeg = (file, width) =>
+    p.evaluate(async ([src, width]) => {
+      const img = await createImageBitmap(await (await fetch(src)).blob());
+      const cv = new OffscreenCanvas(width, Math.round((img.height * width) / img.width));
+      const cx = cv.getContext('2d');
+      cx.imageSmoothingQuality = 'high';
+      cx.drawImage(img, 0, 0, cv.width, cv.height);
+      const blob = await cv.convertToBlob({ type: 'image/jpeg', quality: 0.84 });
+      return new Promise((r) => Object.assign(new FileReader(), { onload: (e) => r(e.target.result) }).readAsDataURL(blob));
+    }, ['data:image/jpeg;base64,' + b64('docs/images/' + file), width]);
+  const fields = {
+    SERIF: b64('node_modules/@fontsource-variable/source-serif-4/files/source-serif-4-latin-wght-normal.woff2'),
+    MONO: b64('node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2'),
+    ICON: 'data:image/svg+xml;base64,' + b64('web/icon.svg'),
+    HOME: await jpeg('sessions.jpg', 420),
+    SESSION: await jpeg('session.jpg', 472),
+  };
+  const svg = fs
+    .readFileSync(path.join(ROOT, 'docs', 'mockups', 'hero.svg'), 'utf8')
+    .replace(/<!--[\s\S]*?-->\n/, '')
+    .replace(/\{\{(\w+)\}\}/g, (_, k) => fields[k]);
+  fs.writeFileSync(path.join(OUT, 'hero.svg'), svg);
+  await p.goto(pathToFileURL(path.join(OUT, 'hero.svg')).href);
+  await p.evaluate(async () => {
+    await document.fonts.ready;
+    document.documentElement.style.background = '#1a1918';
+    for (const a of document.getAnimations()) (a.pause(), (a.currentTime = 2600));
+  });
+  await sleep(300);
+  await p.screenshot({ path: path.join(OUT, 'hero.jpg'), type: 'jpeg', quality: 90 });
+  await p.close();
+  console.log(`✔ hero.svg (${(svg.length / 1024).toFixed(0)} KB)`);
 }
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME || findBrowser() });
 let errors = [];
 if (!ONLY || ONLY.includes('pwa')) errors = await capturePwa(browser);
-if (!ONLY || ONLY.includes('hero') || ONLY.includes('tui')) await renderMockups(browser);
+if (!ONLY || ONLY.includes('tui')) await renderTui(browser);
+if (!ONLY || ONLY.includes('hero')) await renderHero(browser);
 await browser.close();
 process.exit(errors.length ? 1 : 0);

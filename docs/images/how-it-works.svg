@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 460" width="1280" height="460">
+<!-- README "How it works" diagram, animated with CSS: sealed messages travel phone ⇄ relay ⇄ PC. -->
+<style>
+  .sans { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', Arial, sans-serif; }
+  .mono { font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace; }
+  .card { fill: #24231f; stroke: #3d3b37; }
+  .t { font-size: 20px; font-weight: 700; fill: #f5f4ef; }
+  .s { font-size: 14.5px; fill: #a5a39b; }
+  .k { font-size: 12px; fill: #8a887f; letter-spacing: .04em; }
+  .lane { stroke: #3d3b37; stroke-width: 2; stroke-dasharray: 2 7; stroke-linecap: round; fill: none; }
+  .out { animation: out 4.4s linear infinite; }
+  .back { animation: back 4.4s linear infinite; }
+  .d2 { animation-delay: -2.2s; }
+  .flow { stroke-dasharray: 6 8; animation: flow 1.2s linear infinite; }
+  .ping { animation: ping 2.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes out { 0% { transform: translateX(0); opacity: 0; } 6%, 94% { opacity: 1; } 100% { transform: translateX(636px); opacity: 0; } }
+  @keyframes back { 0% { transform: translateX(636px); opacity: 0; } 6%, 94% { opacity: 1; } 100% { transform: translateX(0); opacity: 0; } }
+  @keyframes flow { to { stroke-dashoffset: -28; } }
+  @keyframes ping { 0% { opacity: .5; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<defs>
+  <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#fff" fill-opacity=".06"/></pattern>
+  <g id="lock"><rect x="-5" y="-1" width="10" height="8" rx="1.6"/><path d="M-3-1v-2.4a3 3 0 0 1 6 0V-1" fill="none" stroke-width="1.8"/></g>
+</defs>
+
+<rect width="1280" height="460" rx="24" fill="#1a1918"/>
+<rect width="1280" height="460" rx="24" fill="url(#dots)"/>
+
+<!-- lanes between phone and PC (they pass behind the relay) -->
+<path class="lane" d="M310 138H970"/>
+<path class="lane" d="M310 166H970"/>
+<g class="mono k"><text x="412" y="122" text-anchor="middle">prompts · approvals</text><text x="868" y="196" text-anchor="middle">diffs · output · results</text></g>
+
+<!-- sealed messages -->
+<g>
+  <g class="out"><rect x="312" y="127" width="22" height="22" rx="11" fill="#d97757"/><use href="#lock" x="323" y="139" fill="#1f1e1d" stroke="#1f1e1d"/></g>
+  <g class="out d2"><rect x="312" y="127" width="22" height="22" rx="11" fill="#d97757"/><use href="#lock" x="323" y="139" fill="#1f1e1d" stroke="#1f1e1d"/></g>
+  <g class="back"><rect x="312" y="155" width="22" height="22" rx="11" fill="#5ee6a0"/><use href="#lock" x="323" y="167" fill="#1f1e1d" stroke="#1f1e1d"/></g>
+  <g class="back d2"><rect x="312" y="155" width="22" height="22" rx="11" fill="#5ee6a0"/><use href="#lock" x="323" y="167" fill="#1f1e1d" stroke="#1f1e1d"/></g>
+</g>
+
+<!-- phone -->
+<rect class="card" x="60" y="80" width="250" height="144" rx="20"/>
+<rect x="84" y="104" width="30" height="50" rx="7" fill="none" stroke="#d97757" stroke-width="2.4"/><path d="M95 147h8" stroke="#d97757" stroke-width="2.4" stroke-linecap="round"/>
+<text x="130" y="122" class="sans t">Your phone</text>
+<text x="130" y="145" class="sans s">snugcode app (PWA)</text>
+<text x="84" y="196" class="mono k">PAIRS ONCE WITH A PIN</text>
+
+<!-- relay -->
+<rect class="card" x="515" y="80" width="250" height="144" rx="20" fill-opacity="1"/>
+<path d="M548 146a14 14 0 0 1 2-27.8 19 19 0 0 1 36.5 4.8A11.5 11.5 0 0 1 585 146Z" fill="none" stroke="#8a887f" stroke-width="2.4" stroke-linejoin="round"/>
+<text x="606" y="122" class="sans t">snugcode relay</text>
+<text x="606" y="145" class="sans s">routes sealed boxes</text>
+<text x="539" y="196" class="mono k">CAN'T READ YOUR CODE OR KEYS</text>
+
+<!-- PC -->
+<rect class="card" x="970" y="80" width="250" height="144" rx="20" stroke="#d9775766"/>
+<rect x="994" y="106" width="40" height="28" rx="4" fill="none" stroke="#d97757" stroke-width="2.4"/><path d="M1006 146h16M1014 134v12" stroke="#d97757" stroke-width="2.4" stroke-linecap="round"/>
+<text x="1050" y="122" class="sans t">Your PC</text>
+<text x="1050" y="145" class="sans s">or a cloud runner</text>
+<text x="994" y="196" class="mono k">DAEMON + AGENT + GIT</text>
+<circle class="ping" cx="1196" cy="102" r="5" fill="#5ee6a0"/><circle cx="1196" cy="102" r="4.5" fill="#5ee6a0"/>
+
+<!-- PC → model provider & GitHub -->
+<path class="flow" d="M1030 224V312" stroke="#d97757" stroke-width="2" fill="none"/>
+<path class="flow" d="M1160 224V312" stroke="#8a887f" stroke-width="2" fill="none"/>
+<rect class="card" x="955" y="312" width="150" height="78" rx="16"/>
+<text x="1030" y="345" class="sans" font-size="16" font-weight="700" fill="#f5f4ef" text-anchor="middle">Model provider</text>
+<text x="1030" y="368" class="mono k" text-anchor="middle">YOUR KEY, DIRECT</text>
+<rect class="card" x="1115" y="312" width="105" height="78" rx="16"/>
+<text x="1167.5" y="345" class="sans" font-size="16" font-weight="700" fill="#f5f4ef" text-anchor="middle">GitHub</text>
+<text x="1167.5" y="368" class="mono k" text-anchor="middle">PUSH · PRS</text>
+
+<!-- notes -->
+<g class="sans" font-size="15.5" fill="#c3c1b8">
+  <g transform="translate(60 300)"><circle cx="9" cy="9" r="9" fill="#d97757" fill-opacity=".18"/><use href="#lock" x="9" y="9" fill="#d97757" stroke="#d97757"/><text x="30" y="14">End-to-end encrypted: a PIN pairing (CPace), then XChaCha20-Poly1305.</text></g>
+  <g transform="translate(60 334)"><circle cx="9" cy="9" r="9" fill="#d97757" fill-opacity=".18"/><path d="M5 13l8-8M7 5h6v6" fill="none" stroke="#d97757" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="30" y="14">Your PC connects out: no port forwarding, VPN or public IP.</text></g>
+  <g transform="translate(60 368)"><circle cx="9" cy="9" r="9" fill="#d97757" fill-opacity=".18"/><path d="M4.5 9.5l3 3 6-6.5" fill="none" stroke="#d97757" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="30" y="14">Code and keys stay on your PC. Model traffic goes straight to your provider.</text></g>
+</g>
+</svg>

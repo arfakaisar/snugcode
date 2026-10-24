@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<!-- Scene around the recorded phone screens of the README GIFs. scripts/docs-images.mjs calls
+     setup({ layout, eyebrow, title, steps, footer }) once, then draw(png, step, k) for every frame:
+     k (0 → 1) is how far the switch to `step` has animated, so the captions move between frames. -->
+<style>
+  @font-face { font-family: 'Source Serif 4'; font-weight: 200 900; src: url(../../node_modules/@fontsource-variable/source-serif-4/files/source-serif-4-latin-wght-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 500; src: url(../../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2) format('woff2'); }
+  :root { --accent: #d97757; --fg: #f5f4ef; --dim: #8a887f; --line: #3d3b37; --ok: #5ee6a0; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { position: relative; color: var(--fg); font-family: 'Segoe UI', -apple-system, system-ui, Roboto, sans-serif; background: #1a1918; }
+  body::before { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(#ffffff0c 1px, transparent 1px); background-size: 24px 24px; }
+  /* no soft glows: smooth gradients band in a 256-color GIF */
+  .phone { position: absolute; padding: 9px; border-radius: 47px; background: linear-gradient(160deg, #3a3835, #24231f 60%); border: 1px solid #4d4a45;
+    box-shadow: 0 60px 90px -36px #000, 0 0 0 1px #000c, inset 0 1px 0 #ffffff1a; }
+  .phone img { display: block; border-radius: 38px; }
+  .eyebrow { font: 500 13px 'JetBrains Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 10px; }
+  .eyebrow i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px #d977572e; }
+  h1 { font: 500 44px/1.1 'Source Serif 4', Georgia, serif; letter-spacing: -.02em; margin: 16px 0 30px; }
+  h1 b { color: var(--accent); font-weight: 600; }
+  .foot { position: absolute; font: 500 11.5px 'JetBrains Mono', monospace; color: #6f6d66; letter-spacing: .02em; }
+
+  /* wide: phone on the left, the step list on the right */
+  .wide .phone { left: 104px; top: 50%; transform: translateY(-50%); }
+  .wide .phone img { width: 301px; height: 652px; }
+  .wide .panel { position: absolute; left: 520px; right: 70px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; }
+  .steps { position: relative; }
+  .rail, .fill { position: absolute; left: 34px; width: 2px; border-radius: 2px; }
+  .rail { background: var(--line); }
+  .fill { background: var(--accent); }
+  .st { position: relative; display: grid; grid-template-columns: 38px 1fr; column-gap: 16px; align-items: center; padding: 11px 18px; border-radius: 16px; border: 1px solid transparent; }
+  .st .n { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 500 14px 'JetBrains Mono', monospace; background: #1a1918; border: 1.5px solid var(--line); color: var(--dim); position: relative; z-index: 1; }
+  .st .t { font-size: 21px; font-weight: 600; color: var(--dim); }
+  .st .d { grid-column: 2; font-size: 15.5px; color: #66645e; margin-top: 2px; }
+  .st.done .n { border-color: #5ee6a088; color: var(--ok); }
+  .st.done .t { color: #b9b7ae; }
+
+  /* card: title on top, the phone, and one caption that changes per step */
+  .card { text-align: center; }
+  .card .head { position: absolute; left: 0; right: 0; top: 40px; display: flex; flex-direction: column; align-items: center; }
+  .card h1 { font-size: 34px; margin: 12px 0 0; }
+  .card .phone { left: 50%; top: 162px; transform: translateX(-50%); }
+  .card .phone img { width: 300px; height: 649px; }
+  .cap { position: absolute; left: 0; right: 0; top: 862px; height: 46px; }
+  .cap > div { position: absolute; left: 0; right: 0; display: flex; justify-content: center; }
+  .cap span { display: inline-flex; align-items: center; gap: 12px; padding: 10px 20px 10px 10px; border-radius: 99px; background: #2a2926; border: 1px solid #45433f; font-size: 18px; font-weight: 600; white-space: nowrap; }
+  .cap em { font: 500 13px 'JetBrains Mono', monospace; font-style: normal; color: #1f1e1d; background: var(--accent); border-radius: 99px; padding: 4px 9px; }
+  .dots { position: absolute; left: 0; right: 0; top: 924px; display: flex; justify-content: center; gap: 8px; }
+  .dots i { height: 6px; border-radius: 6px; background: #45433f; }
+  .card .foot { left: 0; right: 0; bottom: 14px; }
+</style></head>
+<body>
+<script>
+const $ = (h) => Object.assign(document.createElement('template'), { innerHTML: h.trim() }).content.firstChild;
+const mix = (a, b, k) => a + (b - a) * k;
+const ease = (k) => 1 - Math.pow(1 - k, 3);
+let S, img;
+
+window.setup = (s) => {
+  S = s;
+  document.body.className = s.layout;
+  const phone = $('<div class="phone"><img alt=""></div>');
+  img = phone.firstChild;
+  document.body.append(phone);
+  if (s.layout === 'wide') {
+    const panel = $(`<div class="panel"><div class="eyebrow"><i></i>${s.eyebrow}</div><h1>${s.title}</h1><div class="steps"><div class="rail"></div><div class="fill"></div></div></div>`);
+    const list = panel.querySelector('.steps');
+    s.steps.forEach((st, i) => list.append($(`<div class="st"><div class="n">${i + 1}</div><div class="t">${st.t}</div><div class="d">${st.d}</div></div>`)));
+    document.body.append(panel, $(`<div class="foot" style="left:520px;bottom:26px">${s.footer}</div>`));
+  } else {
+    document.body.append($(`<div class="head"><div class="eyebrow"><i></i>${s.eyebrow}</div><h1>${s.title}</h1></div>`), $('<div class="cap"></div>'), $('<div class="dots"></div>'), $(`<div class="foot">${s.footer}</div>`));
+    s.steps.forEach(() => document.querySelector('.dots').append(document.createElement('i')));
+  }
+};
+
+window.draw = async (src, step, k) => {
+  img.src = src;
+  await img.decode();
+  k = ease(Math.max(0, Math.min(1, k)));
+  const prev = Math.max(0, step - 1);
+  if (S.layout === 'wide') {
+    const rows = [...document.querySelectorAll('.st')];
+    rows.forEach((r, i) => {
+      const a = i === step ? k : i === prev && step !== prev ? 1 - k : 0;
+      r.classList.toggle('done', i < step);
+      r.style.background = `rgba(217,119,87,${0.13 * a})`;
+      r.style.borderColor = `rgba(217,119,87,${0.4 * a})`;
+      r.style.transform = `translateX(${8 * a}px)`;
+      const n = r.querySelector('.n');
+      n.textContent = i < step ? '✓' : String(i + 1);
+      n.style.background = i === step ? `rgba(217,119,87,${k})` : '';
+      n.style.borderColor = i === step ? 'var(--accent)' : '';
+      n.style.color = i === step ? (k > 0.5 ? '#1f1e1d' : 'var(--accent)') : '';
+      r.querySelector('.t').style.color = i === step ? `rgb(${mix(138, 255, a)},${mix(136, 255, a)},${mix(127, 255, a)})` : '';
+      r.querySelector('.d').style.color = i === step ? `rgb(${mix(102, 200, a)},${mix(100, 198, a)},${mix(94, 190, a)})` : '';
+    });
+    const y = (i) => rows[i].offsetTop + rows[i].offsetHeight / 2;
+    const rail = document.querySelector('.rail'), fill = document.querySelector('.fill');
+    rail.style.top = fill.style.top = y(0) + 'px';
+    rail.style.height = y(rows.length - 1) - y(0) + 'px';
+    fill.style.height = mix(y(prev), y(step), step === prev ? 1 : k) - y(0) + 'px';
+  } else {
+    const cap = document.querySelector('.cap');
+    const pill = (i) => `<span><em>${i + 1}/${S.steps.length}</em>${S.steps[i].t}</span>`;
+    cap.innerHTML = '';
+    if (step !== prev && k < 1) {
+      const out = $(`<div>${pill(prev)}</div>`);
+      out.style.cssText = `opacity:${1 - k};transform:translateY(${-14 * k}px)`;
+      cap.append(out);
+    }
+    const inn = $(`<div>${pill(step)}</div>`);
+    inn.style.cssText = step === prev ? '' : `opacity:${k};transform:translateY(${14 * (1 - k)}px)`;
+    cap.append(inn);
+    [...document.querySelectorAll('.dots i')].forEach((d, i) => {
+      const w = i === step ? mix(6, 26, step === prev ? 1 : k) : i === prev && step !== prev ? mix(26, 6, k) : 6;
+      d.style.width = w + 'px';
+      d.style.background = i <= step ? 'var(--accent)' : '';
+    });
+  }
+};
+</script>
+</body></html>
