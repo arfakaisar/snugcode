@@ -231,14 +231,16 @@ export class Daemon {
     });
   }
 
-  // Newer relays accept the token via subprotocol (not recorded in URL logs); old relays only `?token=`.
+  // Relays accept the token via subprotocol (not recorded in URL logs). Only a relay that answers its health check
+  // without `wsProto` (a very old self-hosted one) gets `?token=`: an unreachable health check must never downgrade
+  // to putting the machine token in the URL.
   async relaySupportsProto() {
     if (this.wsProto !== undefined) return this.wsProto;
     try {
       const r = await fetch(this.config.relayUrl.replace(/\/+$/, '') + '/api/health', { signal: AbortSignal.timeout(5000) });
       this.wsProto = !!(await r.json()).wsProto;
     } catch {
-      return false; // retried on the next reconnect
+      return true; // checked again on the next reconnect
     }
     return this.wsProto;
   }

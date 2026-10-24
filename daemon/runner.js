@@ -60,7 +60,8 @@ export async function bootstrapCloud(env, cfg, sec) {
   const warnings = [];
   cfg.runtime = 'cloud';
   cfg.relayUrl = (env1(env, 'RELAY') || cfg.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, '');
-  cfg.routerUrl = (env1(env, 'ROUTER') || cfg.routerUrl || DEFAULT_ROUTER_URL).replace(/\/+$/, '');
+  const routerUrl = (env1(env, 'ROUTER') || cfg.routerUrl || DEFAULT_ROUTER_URL).replace(/\/+$/, '');
+  if (routerUrl) cfg.routerUrl = routerUrl;
 
   let relinked = false;
   const token = env1(env, 'MACHINE_TOKEN');
@@ -93,6 +94,8 @@ export async function bootstrapCloud(env, cfg, sec) {
 
   const key = env1(env, 'ROUTER_KEY');
   if (fromEnv(sec, 'routerKey', key)) sec.routerKey = key;
+  // A router key is only used with the router URL it belongs to (there is no default address).
+  if (key && !cfg.routerUrl) warnings.push('SNUGCODE_ROUTER_KEY ignored: set SNUGCODE_ROUTER to its router URL too.');
   const gh = env1(env, 'GITHUB_TOKEN');
   if (fromEnv(sec, 'githubToken', gh)) sec.githubToken = gh;
   const model = env1(env, 'MODEL');
